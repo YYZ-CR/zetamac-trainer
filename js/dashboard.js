@@ -1,12 +1,15 @@
 document.addEventListener('DOMContentLoaded', async () => {
   createAuthModal();
 
-  const user = await initAuth({
-    onAuthChange: (u, event) => {
-      if (event === 'SIGNED_IN')  window.location.reload();
-      if (event === 'SIGNED_OUT') window.location.reload();
-    },
-  });
+  let user = null;
+  try {
+    user = await initAuth({
+      onAuthChange: (u, event) => {
+        if (event === 'SIGNED_IN')  window.location.reload();
+        if (event === 'SIGNED_OUT') window.location.reload();
+      },
+    });
+  } catch (e) { console.warn('initAuth failed:', e); }
 
   // Build the top bar manually (Play instead of Dashboard)
   const topBar = document.getElementById('top-bar');

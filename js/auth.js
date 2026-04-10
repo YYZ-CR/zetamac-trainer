@@ -3,13 +3,23 @@ let currentUser = null;
 // ── Init ─────────────────────────────────────────────────────
 
 async function initAuth(callbacks = {}) {
-  const { data: { session } } = await supabaseClient.auth.getSession();
-  currentUser = session?.user ?? null;
-
-  supabaseClient.auth.onAuthStateChange((event, session) => {
+  try {
+    const { data: { session }, error } = await supabaseClient.auth.getSession();
+    if (error) console.warn('getSession error:', error.message);
     currentUser = session?.user ?? null;
-    if (callbacks.onAuthChange) callbacks.onAuthChange(currentUser, event);
-  });
+  } catch (e) {
+    console.warn('initAuth: getSession threw', e);
+    currentUser = null;
+  }
+
+  try {
+    supabaseClient.auth.onAuthStateChange((event, session) => {
+      currentUser = session?.user ?? null;
+      if (callbacks.onAuthChange) callbacks.onAuthChange(currentUser, event);
+    });
+  } catch (e) {
+    console.warn('initAuth: onAuthStateChange threw', e);
+  }
 
   return currentUser;
 }

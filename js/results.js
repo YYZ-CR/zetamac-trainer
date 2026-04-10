@@ -1,14 +1,17 @@
 document.addEventListener('DOMContentLoaded', async () => {
   createAuthModal();
 
-  const user = await initAuth({
-    onAuthChange: (u, event) => {
-      renderAuthBar(u, document.getElementById('top-bar'));
-      if (event === 'SIGNED_IN') {
-        document.getElementById('save-banner').style.display = 'none';
-      }
-    },
-  });
+  let user = null;
+  try {
+    user = await initAuth({
+      onAuthChange: (u, event) => {
+        renderAuthBar(u, document.getElementById('top-bar'));
+        if (event === 'SIGNED_IN') {
+          document.getElementById('save-banner').style.display = 'none';
+        }
+      },
+    });
+  } catch (e) { console.warn('initAuth failed:', e); }
   renderAuthBar(user, document.getElementById('top-bar'));
 
   const params = new URLSearchParams(window.location.search);
