@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Arithmetic Game</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="game-page">
+
+  <div class="game-hud">
+    <span id="timer-display">Seconds left: —</span>
+    <span id="score-display">Score: 0</span>
+  </div>
+
+  <div class="game-area" id="game-area" style="display:none">
+    <span class="question-text" id="question-text"></span>
+    <input
+      type="text"
+      class="answer-input"
+      id="answer-input"
+      inputmode="numeric"
+      autocomplete="off"
+      autocorrect="off"
+      autocapitalize="off"
+      spellcheck="false"
+      aria-label="Answer"
+    >
+  </div>
+
+  <div class="game-loading" id="game-loading">Loading…</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/config.js"></script>
+  <script src="js/db.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>

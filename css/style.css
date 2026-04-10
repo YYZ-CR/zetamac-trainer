@@ -1,0 +1,704 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 14px;
+  color: #111;
+}
+
+a {
+  color: #00c;
+}
+
+/* ============ TOP BAR ============ */
+.top-bar {
+  position: fixed;
+  top: 10px;
+  right: 15px;
+  font-size: 13px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  z-index: 100;
+}
+
+.top-bar a {
+  color: #00c;
+  text-decoration: none;
+}
+
+.top-bar a:hover {
+  text-decoration: underline;
+}
+
+.top-bar .sep {
+  color: #999;
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  color: #00c;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: inherit;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.link-btn:hover {
+  text-decoration: none;
+}
+
+/* ============ CONFIG PAGE ============ */
+body.config-page {
+  background: #d4d4d4;
+}
+
+.config-wrap {
+  max-width: 490px;
+  margin: 0 auto;
+  padding: 30px 20px 80px;
+}
+
+.config-wrap h1 {
+  font-size: 30px;
+  font-weight: bold;
+  margin-bottom: 14px;
+}
+
+.config-intro {
+  margin-bottom: 22px;
+  line-height: 1.5;
+  font-size: 14px;
+}
+
+.op-list {
+  margin-bottom: 4px;
+}
+
+.op-row {
+  margin-bottom: 14px;
+}
+
+.op-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: bold;
+  font-size: 14px;
+}
+
+.op-header input[type="checkbox"] {
+  cursor: pointer;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.op-header label {
+  cursor: pointer;
+}
+
+.op-sub {
+  margin-left: 22px;
+  color: #444;
+  margin-top: 3px;
+  font-size: 13px;
+}
+
+.op-range {
+  margin-left: 22px;
+  margin-top: 4px;
+  font-size: 13px;
+  color: #333;
+  line-height: 1.8;
+}
+
+.range-input {
+  width: 46px;
+  padding: 1px 4px;
+  border: 1px solid #aaa;
+  font-size: 13px;
+  text-align: center;
+  font-family: inherit;
+  background: #fff;
+  -moz-appearance: textfield;
+}
+
+.range-input::-webkit-outer-spin-button,
+.range-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+}
+
+.duration-row {
+  margin-top: 20px;
+  margin-bottom: 20px;
+  font-size: 14px;
+}
+
+.duration-row label {
+  font-weight: bold;
+  margin-right: 6px;
+}
+
+.duration-row select {
+  padding: 2px 5px;
+  border: 1px solid #aaa;
+  font-size: 13px;
+  font-family: inherit;
+  background: white;
+}
+
+.start-row {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.btn-start {
+  padding: 4px 18px;
+  background: #fff;
+  border: 1px solid #888;
+  cursor: pointer;
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.btn-start:hover {
+  background: #eee;
+}
+
+.btn-start:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ============ GAME PAGE ============ */
+body.game-page {
+  background: #fff;
+}
+
+.game-hud {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 12px 16px;
+  display: flex;
+  justify-content: space-between;
+  font-size: 14px;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.game-area {
+  position: fixed;
+  top: 50%;
+  left: 0;
+  right: 0;
+  transform: translateY(-50%);
+  background: #d4d4d4;
+  padding: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+}
+
+.question-text {
+  font-size: 38px;
+  font-weight: normal;
+  user-select: none;
+}
+
+.answer-input {
+  font-size: 32px;
+  width: 160px;
+  padding: 4px 10px;
+  border: 2px solid #999;
+  outline: none;
+  font-family: inherit;
+  background: #fff;
+}
+
+.answer-input:focus {
+  border-color: #555;
+}
+
+.game-loading {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 16px;
+  color: #666;
+}
+
+/* Game over overlay */
+.gameover-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.92);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  z-index: 50;
+}
+
+.gameover-overlay h2 {
+  font-size: 28px;
+  font-weight: normal;
+}
+
+.gameover-score {
+  font-size: 56px;
+  font-weight: bold;
+  line-height: 1;
+}
+
+.gameover-label {
+  color: #666;
+  font-size: 14px;
+  margin-top: 4px;
+}
+
+/* ============ RESULTS PAGE ============ */
+body.results-page {
+  background: #d4d4d4;
+}
+
+.results-wrap {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 30px 20px 60px;
+}
+
+.results-wrap h1 {
+  font-size: 26px;
+  font-weight: bold;
+  margin-bottom: 18px;
+}
+
+.save-banner {
+  background: #fffde7;
+  border: 1px solid #c8b400;
+  padding: 10px 14px;
+  margin-bottom: 18px;
+  font-size: 13px;
+}
+
+.save-banner .link-btn {
+  font-size: 13px;
+}
+
+.summary-cards {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+
+.summary-card {
+  background: #fff;
+  border: 1px solid #bbb;
+  padding: 14px 20px;
+  min-width: 110px;
+  text-align: center;
+}
+
+.card-value {
+  font-size: 34px;
+  font-weight: bold;
+  line-height: 1;
+}
+
+.card-label {
+  font-size: 11px;
+  color: #666;
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Tabs */
+.tabs {
+  display: flex;
+  border-bottom: 2px solid #aaa;
+}
+
+.tab-btn {
+  padding: 6px 18px;
+  background: #bbb;
+  border: 1px solid #aaa;
+  border-bottom: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: inherit;
+  color: #333;
+  margin-right: 2px;
+  position: relative;
+  bottom: -2px;
+}
+
+.tab-btn.active {
+  background: #d4d4d4;
+  font-weight: bold;
+  color: #000;
+  border-bottom: 2px solid #d4d4d4;
+}
+
+.tab-pane {
+  display: none;
+  padding: 18px 0;
+}
+
+.tab-pane.active {
+  display: block;
+}
+
+/* Breakdown table */
+.breakdown-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  background: #fff;
+}
+
+.breakdown-table th {
+  text-align: left;
+  padding: 7px 10px;
+  border-bottom: 2px solid #aaa;
+  font-weight: bold;
+  background: #eee;
+}
+
+.breakdown-table td {
+  padding: 5px 10px;
+  border-bottom: 1px solid #ddd;
+}
+
+.breakdown-table tr.had-mistake td {
+  background: #fff5f5;
+}
+
+.mistake-yes {
+  color: #c00;
+}
+
+.mistake-no {
+  color: #aaa;
+}
+
+/* Feedback */
+.feedback-section {
+  margin-bottom: 24px;
+}
+
+.feedback-section h3 {
+  font-size: 14px;
+  font-weight: bold;
+  margin-bottom: 8px;
+}
+
+.feedback-list {
+  list-style: none;
+  font-size: 13px;
+}
+
+.feedback-list li {
+  padding: 4px 0;
+  border-bottom: 1px solid #bbb;
+}
+
+.op-stat-grid {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.op-stat-card {
+  background: #fff;
+  border: 1px solid #bbb;
+  padding: 10px 14px;
+  font-size: 13px;
+  min-width: 130px;
+}
+
+.op-stat-name {
+  font-weight: bold;
+  text-transform: capitalize;
+  margin-bottom: 4px;
+}
+
+.op-stat-detail {
+  color: #555;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.feedback-insight {
+  margin-top: 10px;
+  font-size: 13px;
+  font-style: italic;
+  color: #444;
+}
+
+/* Results actions */
+.results-actions {
+  margin-top: 26px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.btn {
+  padding: 5px 16px;
+  border: 1px solid #888;
+  cursor: pointer;
+  font-size: 14px;
+  font-family: inherit;
+  background: #fff;
+  text-decoration: none;
+  color: #111;
+  display: inline-block;
+}
+
+.btn:hover {
+  background: #eee;
+}
+
+.btn-primary {
+  background: #333;
+  color: #fff;
+  border-color: #333;
+}
+
+.btn-primary:hover {
+  background: #555;
+}
+
+/* ============ DASHBOARD PAGE ============ */
+body.dashboard-page {
+  background: #d4d4d4;
+}
+
+.dashboard-wrap {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 30px 20px 60px;
+}
+
+.dashboard-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 22px;
+}
+
+.dashboard-head h1 {
+  font-size: 26px;
+  font-weight: bold;
+  margin-bottom: 4px;
+}
+
+.dashboard-subtitle {
+  font-size: 13px;
+  color: #555;
+}
+
+.stats-row {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 22px;
+}
+
+.stat-card {
+  background: #fff;
+  border: 1px solid #bbb;
+  padding: 14px 20px;
+  min-width: 120px;
+}
+
+.stat-value {
+  font-size: 30px;
+  font-weight: bold;
+  line-height: 1;
+}
+
+.stat-label {
+  font-size: 11px;
+  color: #666;
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.panel {
+  background: #fff;
+  border: 1px solid #bbb;
+  padding: 18px;
+  margin-bottom: 20px;
+}
+
+.panel h2 {
+  font-size: 15px;
+  font-weight: bold;
+  margin-bottom: 14px;
+}
+
+.chart-container {
+  position: relative;
+  height: 200px;
+}
+
+.games-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.games-table th {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 2px solid #aaa;
+  font-weight: bold;
+}
+
+.games-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid #eee;
+}
+
+.games-table a {
+  color: #00c;
+  text-decoration: none;
+}
+
+.games-table a:hover {
+  text-decoration: underline;
+}
+
+.no-data {
+  color: #777;
+  font-style: italic;
+  font-size: 13px;
+  padding: 8px 0;
+}
+
+.auth-prompt {
+  padding: 20px 0;
+  font-size: 14px;
+}
+
+.auth-prompt p {
+  margin-bottom: 14px;
+}
+
+/* ============ AUTH MODAL ============ */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+}
+
+.modal {
+  background: #d4d4d4;
+  border: 1px solid #999;
+  padding: 26px 28px 22px;
+  width: 300px;
+  position: relative;
+}
+
+.modal h2 {
+  font-size: 18px;
+  margin-bottom: 16px;
+}
+
+.auth-field {
+  display: block;
+  width: 100%;
+  padding: 5px 8px;
+  margin-bottom: 10px;
+  border: 1px solid #aaa;
+  font-size: 14px;
+  font-family: inherit;
+  background: #fff;
+}
+
+.auth-field:focus {
+  outline: 1px solid #555;
+}
+
+.auth-error {
+  color: #c00;
+  font-size: 12px;
+  margin-bottom: 10px;
+  min-height: 16px;
+}
+
+.auth-submit {
+  width: 100%;
+  padding: 7px;
+  background: #333;
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  font-family: inherit;
+  margin-bottom: 10px;
+}
+
+.auth-submit:hover:not(:disabled) {
+  background: #555;
+}
+
+.auth-submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.auth-switch {
+  width: 100%;
+  background: none;
+  border: none;
+  color: #00c;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.auth-switch:hover {
+  text-decoration: none;
+}
+
+.modal-close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  background: none;
+  border: none;
+  font-size: 22px;
+  cursor: pointer;
+  color: #666;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.modal-close:hover {
+  color: #000;
+}

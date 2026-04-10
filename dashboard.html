@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard — Arithmetic Trainer</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="dashboard-page">
+
+  <div class="top-bar" id="top-bar"></div>
+
+  <div class="dashboard-wrap">
+
+    <div class="dashboard-head">
+      <div>
+        <h1>Dashboard</h1>
+        <div class="dashboard-subtitle" id="username-display"></div>
+      </div>
+      <a href="index.html" class="btn" style="margin-top:6px">Play</a>
+    </div>
+
+    <!-- Shown when not logged in -->
+    <div class="auth-prompt" id="auth-prompt" style="display:none">
+      <p>Log in to track your scores and view your progress over time.</p>
+      <button class="btn btn-primary" id="prompt-login-btn">Log In</button>
+      <button class="btn" id="prompt-register-btn" style="margin-left:8px">Register</button>
+    </div>
+
+    <!-- Shown when logged in -->
+    <div class="stats-row" id="stats-row" style="display:none">
+      <div class="stat-card">
+        <div class="stat-value" id="stat-best">—</div>
+        <div class="stat-label">Personal Best</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="stat-avg">—</div>
+        <div class="stat-label">Avg (Last 10)</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="stat-games">—</div>
+        <div class="stat-label">Total Games</div>
+      </div>
+    </div>
+
+    <div class="panel" id="chart-panel" style="display:none">
+      <h2>Score Over Time</h2>
+      <div class="chart-container">
+        <canvas id="score-chart"></canvas>
+      </div>
+    </div>
+
+    <div class="panel" id="games-panel" style="display:none">
+      <h2>Recent Games</h2>
+      <table class="games-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Score</th>
+            <th>Duration</th>
+            <th>Accuracy</th>
+            <th>Review</th>
+          </tr>
+        </thead>
+        <tbody id="games-tbody"></tbody>
+      </table>
+    </div>
+
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <script src="js/config.js"></script>
+  <script src="js/db.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/dashboard.js"></script>
+</body>
+</html>

@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Results — Arithmetic Trainer</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="results-page">
+
+  <div class="top-bar" id="top-bar"></div>
+
+  <div class="results-wrap" id="results-wrap">
+
+    <div class="save-banner" id="save-banner" style="display:none">
+      <strong>Your score isn't saved yet.</strong>
+      <button class="link-btn" id="save-login-btn">Log in</button> or
+      <button class="link-btn" id="save-register-btn">create an account</button>
+      to track your progress over time.
+    </div>
+
+    <h1>Results</h1>
+
+    <div class="summary-cards">
+      <div class="summary-card">
+        <div class="card-value" id="summary-score">—</div>
+        <div class="card-label">Score</div>
+      </div>
+      <div class="summary-card">
+        <div class="card-value" id="summary-accuracy">—</div>
+        <div class="card-label">Accuracy</div>
+      </div>
+      <div class="summary-card">
+        <div class="card-value" id="summary-avg-time">—</div>
+        <div class="card-label">Avg / Question</div>
+      </div>
+      <div class="summary-card">
+        <div class="card-value" id="summary-mistakes">—</div>
+        <div class="card-label">With Mistakes</div>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="tab-breakdown">Breakdown</button>
+      <button class="tab-btn" data-tab="tab-feedback">Feedback</button>
+    </div>
+
+    <div class="tab-pane active" id="tab-breakdown">
+      <table class="breakdown-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Question</th>
+            <th>Time</th>
+            <th>Mistake?</th>
+          </tr>
+        </thead>
+        <tbody id="breakdown-tbody"></tbody>
+      </table>
+    </div>
+
+    <div class="tab-pane" id="tab-feedback">
+      <div id="feedback-content"></div>
+    </div>
+
+    <div class="results-actions">
+      <button class="btn btn-primary" id="play-again-btn">Play Again</button>
+      <button class="btn" id="share-btn">Copy Results Link</button>
+      <a href="dashboard.html" class="btn">Dashboard</a>
+    </div>
+
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/config.js"></script>
+  <script src="js/db.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/results.js"></script>
+</body>
+</html>

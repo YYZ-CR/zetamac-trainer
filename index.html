@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Arithmetic Trainer</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="config-page">
+
+  <div class="top-bar" id="top-bar"></div>
+
+  <div class="config-wrap">
+    <h1>Arithmetic Game</h1>
+    <p class="config-intro">
+      The Arithmetic Game is a fast-paced speed drill where you are given time
+      to solve as many arithmetic problems as you can.
+    </p>
+
+    <div class="op-list">
+      <div class="op-row">
+        <div class="op-header">
+          <input type="checkbox" id="op-addition" checked>
+          <label for="op-addition">Addition</label>
+        </div>
+        <div class="op-range">
+          Range:
+          (<input type="number" class="range-input" id="add-min1" value="2" min="1">
+          to
+          <input type="number" class="range-input" id="add-max1" value="100" min="1">)
+          +
+          (<input type="number" class="range-input" id="add-min2" value="2" min="1">
+          to
+          <input type="number" class="range-input" id="add-max2" value="100" min="1">)
+        </div>
+      </div>
+
+      <div class="op-row">
+        <div class="op-header">
+          <input type="checkbox" id="op-subtraction" checked>
+          <label for="op-subtraction">Subtraction</label>
+        </div>
+        <div class="op-sub">Addition problems in reverse.</div>
+      </div>
+
+      <div class="op-row">
+        <div class="op-header">
+          <input type="checkbox" id="op-multiplication" checked>
+          <label for="op-multiplication">Multiplication</label>
+        </div>
+        <div class="op-range">
+          Range:
+          (<input type="number" class="range-input" id="mul-min1" value="2" min="1">
+          to
+          <input type="number" class="range-input" id="mul-max1" value="12" min="1">)
+          &times;
+          (<input type="number" class="range-input" id="mul-min2" value="2" min="1">
+          to
+          <input type="number" class="range-input" id="mul-max2" value="100" min="1">)
+        </div>
+      </div>
+
+      <div class="op-row">
+        <div class="op-header">
+          <input type="checkbox" id="op-division" checked>
+          <label for="op-division">Division</label>
+        </div>
+        <div class="op-sub">Multiplication problems in reverse.</div>
+      </div>
+    </div>
+
+    <div class="duration-row">
+      <label for="duration">Duration:</label>
+      <select id="duration">
+        <option value="60">60 seconds</option>
+        <option value="120" selected>120 seconds</option>
+        <option value="180">180 seconds</option>
+        <option value="300">300 seconds</option>
+      </select>
+    </div>
+
+    <div class="start-row">
+      <button class="btn-start" id="start-btn">Start</button>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/config.js"></script>
+  <script src="js/db.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/index.js"></script>
+</body>
+</html>
