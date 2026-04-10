@@ -11,9 +11,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   renderAuthBar(user, document.getElementById('top-bar'));
 
-  const params     = new URLSearchParams(window.location.search);
-  // Fallback for servers that strip query params (e.g. npx serve)
-  const sessionKey = params.get('session') || localStorage.getItem('zt_last_session');
+  const params = new URLSearchParams(window.location.search);
+  // Fallback for servers that strip query params (e.g. npx serve):
+  //   zt_pending_session = set by dashboard View links (specific session)
+  //   zt_last_session    = set by game end (most recent game)
+  const sessionKey = params.get('session')
+    || localStorage.getItem('zt_pending_session')
+    || localStorage.getItem('zt_last_session');
+  localStorage.removeItem('zt_pending_session');
   if (!sessionKey) { window.location.href = 'index.html'; return; }
 
   // ── Load session ─────────────────────────────────────────

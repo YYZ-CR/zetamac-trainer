@@ -141,8 +141,14 @@ function renderRecentGames(sessions) {
       <td><strong>${s.score}</strong></td>
       <td>${s.duration_seconds}s</td>
       <td>${acc}</td>
-      <td><a href="results.html?session=${s.session_key}">View</a></td>
+      <td><a href="results.html?session=${s.session_key}" class="view-session-link" data-session="${s.session_key}">View</a></td>
     `;
+    // Store session key in localStorage before navigating so query-stripping servers still work
+    tr.querySelector('.view-session-link').addEventListener('click', function (e) {
+      e.preventDefault();
+      localStorage.setItem('zt_pending_session', this.dataset.session);
+      window.location.href = this.href;
+    });
     tbody.appendChild(tr);
   }
 }
