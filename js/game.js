@@ -108,6 +108,9 @@ function endGame() {
   // Best-effort async save to Supabase (don't block the redirect)
   saveSession(sessionData).catch(console.error);
 
+  // Fallback for servers that strip query params
+  localStorage.setItem('zt_last_session', sessionKey);
+
   // Show score overlay, then redirect
   const overlay = document.createElement('div');
   overlay.className = 'gameover-overlay';
@@ -129,20 +132,32 @@ async function initGame() {
   const params = new URLSearchParams(window.location.search);
   configKey = params.get('key');
 
+  // Fallback: if query param was stripped by the dev server, read from localStorage
   if (!configKey) {
-    window.location.href = 'index.html';
-    return;
+    const pending = JSON.parse(localStorage.getItem('zt_pending_game') || 'null');
+    if (pending) {
+      configKey = pending.key;
+      config    = pending.config;
+      localStorage.removeItem('zt_pending_game');
+    } else {
+      window.location.href = 'index.html';
+      return;
+    }
   }
 
-  // Try sessionStorage first (fast path when navigating from index.html)
-  const cached = sessionStorage.getItem('config_' + configKey);
-  if (cached) {
-    config = JSON.parse(cached);
-  } else {
-    try {
-      config = await getConfig(configKey);
-    } catch (_) {
-      config = null;
+  if (!config) {
+    // Try localStorage keyed by configKey, then Supabase
+    localStorage.removeItem('zt_pending_game');
+    const cached = localStorage.getItem('config_' + configKey);
+    if (cached) {
+      config = JSON.parse(cached);
+    } else {
+      try {
+        config = await getConfig(configKey);
+      } catch (e) {
+        console.error('getConfig failed:', e);
+        config = null;
+      }
     }
   }
 

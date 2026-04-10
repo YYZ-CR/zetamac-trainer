@@ -10,7 +10,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const params = new URLSearchParams(window.location.search);
   const keyParam = params.get('key');
   if (keyParam) {
-    const cached = sessionStorage.getItem('config_' + keyParam);
+    const cached = localStorage.getItem('config_' + keyParam);
     if (cached) {
       loadConfigIntoForm(JSON.parse(cached));
     } else {
@@ -41,7 +41,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       key = await hashToKey(JSON.stringify(config));
     }
 
-    sessionStorage.setItem('config_' + key, JSON.stringify(config));
+    localStorage.setItem('config_' + key, JSON.stringify(config));
+    // Also store under a fixed key as fallback for servers that strip query params
+    localStorage.setItem('zt_pending_game', JSON.stringify({ key, config }));
     window.location.href = 'game.html?key=' + key;
   });
 });

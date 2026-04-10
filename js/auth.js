@@ -87,7 +87,7 @@ function createAuthModal() {
         }
 
         // Check username availability
-        const { data: existing } = await supabase
+        const { data: existing } = await supabaseClient
           .from('profiles')
           .select('username')
           .eq('username', username)
