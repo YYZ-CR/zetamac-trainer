@@ -1,9 +1,12 @@
 document.addEventListener('DOMContentLoaded', async () => {
   createAuthModal();
 
-  const user = await initAuth({
-    onAuthChange: (u) => renderAuthBar(u, document.getElementById('top-bar')),
-  });
+  let user = null;
+  try {
+    user = await initAuth({
+      onAuthChange: (u) => renderAuthBar(u, document.getElementById('top-bar')),
+    });
+  } catch (e) { console.warn('initAuth failed:', e); }
   renderAuthBar(user, document.getElementById('top-bar'));
 
   // Pre-fill form if a config key is in the URL
