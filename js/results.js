@@ -230,30 +230,44 @@ function parseTwo(display, sep) {
 function getMultiplicationTip(q) {
   const [a, b] = parseTwo(q.display, '\u00d7');
   const lo = Math.min(a, b), hi = Math.max(a, b);
+  const ans = q.answer;
 
-  if (lo === 2)  return `\u00d72: just double \u2192 ${hi} + ${hi} = ${q.answer}`;
-  if (lo === 3)  return `\u00d73: double then add once more \u2192 ${hi * 2} + ${hi} = ${q.answer}`;
-  if (lo === 4)  return `\u00d74: double twice \u2192 ${hi} \u2192 ${hi * 2} \u2192 ${hi * 4}`;
-  if (lo === 5)  return `\u00d75: multiply by 10 then halve \u2192 ${hi * 10} \u00f7 2 = ${q.answer}`;
-  if (lo === 6)  return `\u00d76: think 5\u00d7${hi} + ${hi} = ${hi * 5} + ${hi} = ${q.answer}`;
-  if (lo === 8)  return `\u00d78: double three times \u2192 ${hi} \u2192 ${hi * 2} \u2192 ${hi * 4} \u2192 ${hi * 8}`;
-  if (lo === 9)  return `\u00d79: think ${hi}\u00d710 \u2212 ${hi} = ${hi * 10} \u2212 ${hi} = ${q.answer}`;
-  if (lo === 11) return `\u00d711: think ${hi}\u00d710 + ${hi} = ${hi * 10} + ${hi} = ${q.answer}`;
-  if (lo === 12) return `\u00d712: think ${hi}\u00d710 + ${hi}\u00d72 = ${hi * 10} + ${hi * 2} = ${q.answer}`;
+  // Tricks for each small multiplier (default config mulMin1=2, mulMax1=12)
+  if (lo === 2)  return `Double: ${hi} + ${hi} = ${ans}`;
+  if (lo === 3)  return `Double then add once more: ${hi}\u00d72 = ${hi * 2}, + ${hi} = ${ans}`;
+  if (lo === 4)  return `Double twice: ${hi} \u2192 ${hi * 2} \u2192 ${ans}`;
+  if (lo === 5)  return `\u00d75: multiply by 10 then halve: ${hi}\u00d710 = ${hi * 10}, \u00f72 = ${ans}`;
+  if (lo === 6)  return `\u00d76: 5\u00d7${hi} + ${hi}: ${hi * 5} + ${hi} = ${ans}`;
+  if (lo === 7)  return `\u00d77: ${hi}\u00d710 \u2212 ${hi}\u00d73: ${hi * 10} \u2212 ${hi * 3} = ${ans}`;
+  if (lo === 8)  return `\u00d78: double three times: ${hi} \u2192 ${hi * 2} \u2192 ${hi * 4} \u2192 ${ans}`;
+  if (lo === 9)  return `\u00d79: ${hi}\u00d710 \u2212 ${hi}: ${hi * 10} \u2212 ${hi} = ${ans}`;
+  if (lo === 10) return `Append a zero: ${hi}\u00d710 = ${ans}`;
 
-  // Round the larger factor to nearest 10
-  const roundB = Math.round(b / 10) * 10;
-  const diffB  = b - roundB;
-  if (roundB !== 0 && Math.abs(diffB) <= 2 && diffB !== 0) {
-    const sign = diffB > 0 ? '+' : '\u2212';
-    return `${a}\u00d7${b}: round \u2192 ${a}\u00d7${roundB} = ${a * roundB}, ${sign} ${a}\u00d7${Math.abs(diffB)} = ${Math.abs(a * diffB)} \u2192 ${q.answer}`;
+  if (lo === 11) {
+    // Digit-sandwich trick for 2-digit numbers: 11 \u00d7 AB = A(A+B)B
+    if (hi >= 10 && hi <= 99) {
+      const d1 = Math.floor(hi / 10), d2 = hi % 10, s = d1 + d2;
+      if (s < 10)
+        return `\u00d711 trick: put digit-sum (${d1}+${d2}=${s}) between the digits: ${d1}|${s}|${d2} = ${ans}`;
+      else
+        return `\u00d711 trick: digit-sum ${d1}+${d2}=${s} (carry 1): ${d1 + 1}|${s - 10}|${d2} = ${ans}`;
+    }
+    return `\u00d711: ${hi}\u00d710 + ${hi}: ${hi * 10} + ${hi} = ${ans}`;
   }
 
-  // Split larger factor into tens + ones
+  if (lo === 12) return `\u00d712: ${hi}\u00d710 + ${hi}\u00d72: ${hi * 10} + ${hi * 2} = ${ans}`;
+
+  // Fallback: round nearest factor to multiple of 10 and compensate
+  const roundHi = Math.round(hi / 10) * 10, diff = hi - roundHi;
+  if (roundHi !== 0 && Math.abs(diff) <= 2 && diff !== 0) {
+    const sign = diff > 0 ? '+' : '\u2212';
+    return `Round: ${lo}\u00d7${roundHi} = ${lo * roundHi}, ${sign} ${lo}\u00d7${Math.abs(diff)} = ${Math.abs(lo * diff)} \u2192 ${ans}`;
+  }
+
+  // Split larger factor: lo\u00d7hi = lo\u00d7(tens+ones)
   const tens = Math.floor(hi / 10) * 10, ones = hi % 10;
-  if (tens > 0 && ones > 0) {
-    return `${lo}\u00d7${hi}: split \u2192 ${lo}\u00d7${tens} + ${lo}\u00d7${ones} = ${lo * tens} + ${lo * ones} = ${q.answer}`;
-  }
+  if (tens > 0 && ones > 0)
+    return `Split: ${lo}\u00d7${tens} + ${lo}\u00d7${ones} = ${lo * tens} + ${lo * ones} = ${ans}`;
 
   return '';
 }
@@ -262,50 +276,108 @@ function getDivisionTip(q) {
   const [a, b] = parseTwo(q.display, '\u00f7');
   const ans = q.answer;
 
-  if (b === 2)  return `\u00f72: just halve \u2192 ${a} \u00f7 2 = ${ans}`;
-  if (b === 4)  return `\u00f74: halve twice \u2192 ${a} \u2192 ${a / 2} \u2192 ${ans}`;
-  if (b === 5)  return `\u00f75: multiply by 2 then \u00f710 \u2192 ${a}\u00d72 = ${a * 2}, \u00f710 = ${ans}`;
-  if (b === 8)  return `\u00f78: halve three times \u2192 ${a} \u2192 ${a / 2} \u2192 ${a / 4} \u2192 ${ans}`;
-  if (b === 9)  return `\u00f79: think what \u00d79 = ${a}? \u2192 ${ans}\u00d710 \u2212 ${ans} = ${a}`;
-  if (b === 11) return `\u00f711: think what \u00d711 = ${a}? \u2192 ${ans}\u00d710 + ${ans} = ${a}`;
+  // Small divisor tricks (b = 2\u201312)
+  if (b === 2)  return `Halve: ${a} \u00f7 2 = ${ans}`;
+  if (b === 3)  return `Recall \u00d73 = double+add: ${ans}\u00d72 = ${ans * 2}, + ${ans} = ${a}`;
+  if (b === 4)  return `Halve twice: ${a} \u2192 ${a / 2} \u2192 ${ans}`;
+  if (b === 5)  return `\u00f75: double then \u00f710: ${a}\u00d72 = ${a * 2}, \u00f710 = ${ans}`;
+  if (b === 6)  return `\u00f76: halve then \u00f73: ${a} \u00f7 2 = ${a / 2}, \u00f7 3 = ${ans}`;
+  if (b === 7)  return `Recall \u00d77 = \u00d710\u2212\u00d73: ${ans}\u00d710 \u2212 ${ans}\u00d73 = ${ans * 10} \u2212 ${ans * 3} = ${a}`;
+  if (b === 8)  return `Halve three times: ${a} \u2192 ${a / 2} \u2192 ${a / 4} \u2192 ${ans}`;
+  if (b === 9)  return `Recall \u00d79 = \u00d710\u2212n: ${ans}\u00d710 \u2212 ${ans} = ${ans * 10} \u2212 ${ans} = ${a}`;
+  if (b === 10) return `Drop the last zero: ${a} \u00f7 10 = ${ans}`;
+  if (b === 11) return `Recall \u00d711 = \u00d710+n: ${ans}\u00d710 + ${ans} = ${ans * 10} + ${ans} = ${a}`;
+  if (b === 12) return `Recall \u00d712 = \u00d710+\u00d72: ${ans}\u00d710 + ${ans}\u00d72 = ${ans * 10} + ${ans * 2} = ${a}`;
 
-  return `\u00f7${b}: ask \u201cwhat \u00d7 ${b} = ${a}?\u201d \u2192 ${ans} \u00d7 ${b} = ${a}`;
+  // Large divisor (b > 12): ans is the small factor; tip based on ans's multiplication trick
+  if (b > 12) {
+    if (ans === 2)  return `${b}\u00d72 = ${a} \u2192 just double ${b}: ${b} + ${b} = ${a}`;
+    if (ans === 3)  return `${b}\u00d73 = ${a} \u2192 double+add: ${b * 2} + ${b} = ${a}`;
+    if (ans === 4)  return `${b}\u00d74 = ${a} \u2192 double twice: ${b} \u2192 ${b * 2} \u2192 ${a}`;
+    if (ans === 5)  return `${b}\u00d75 = ${a} \u2192 ${b}\u00d710\u00f72: ${b * 10}\u00f72 = ${a}`;
+    if (ans === 6)  return `${b}\u00d76 = ${a} \u2192 5\u00d7${b} + ${b}: ${b * 5} + ${b} = ${a}`;
+    if (ans === 7)  return `${b}\u00d77 = ${a} \u2192 ${b}\u00d710\u2212${b}\u00d73: ${b * 10}\u2212${b * 3} = ${a}`;
+    if (ans === 8)  return `${b}\u00d78 = ${a} \u2192 double 3\u00d7: ${b}\u2192${b * 2}\u2192${b * 4}\u2192${a}`;
+    if (ans === 9)  return `${b}\u00d79 = ${a} \u2192 ${b}\u00d710\u2212${b}: ${b * 10}\u2212${b} = ${a}`;
+    if (ans === 11) return `${b}\u00d711 = ${a} \u2192 ${b}\u00d710+${b}: ${b * 10}+${b} = ${a}`;
+    if (ans === 12) return `${b}\u00d712 = ${a} \u2192 ${b}\u00d710+${b}\u00d72: ${b * 10}+${b * 2} = ${a}`;
+  }
+
+  return `What \u00d7 ${b} = ${a}? \u2192 ${ans} \u00d7 ${b} = ${a}`;
 }
 
 function getAdditionTip(q) {
   const [a, b] = parseTwo(q.display, '+');
+  const ans = q.answer;
 
-  // Round one addend up to nearest 10, compensate from the other
+  // Near-doubles: when both numbers are equal or differ by 1\u20132
+  const diff = Math.abs(a - b);
+  if (diff <= 2) {
+    const smaller = Math.min(a, b);
+    if (diff === 0) return `Doubles: ${a} + ${a} = ${ans}`;
+    return `Near-doubles: ${smaller} + ${smaller} = ${smaller * 2}, + ${diff} = ${ans}`;
+  }
+
+  // Bridge through nearest multiple of 10: take from one addend to round the other
   const ceilA = Math.ceil(a / 10) * 10, toA = ceilA - a;
-  if (toA > 0 && toA <= 4) {
-    return `${a} + ${b}: round up \u2192 ${ceilA} + ${b - toA} = ${q.answer}`;
-  }
-  const ceilB = Math.ceil(b / 10) * 10, toB = ceilB - b;
-  if (toB > 0 && toB <= 4) {
-    return `${a} + ${b}: round up \u2192 ${a - toB} + ${ceilB} = ${q.answer}`;
-  }
+  if (toA > 0 && toA <= 4 && b >= toA)
+    return `Bridge through ${ceilA}: ${a} + ${toA} = ${ceilA}, + ${b - toA} = ${ans}`;
 
-  // Add tens then ones
+  const ceilB = Math.ceil(b / 10) * 10, toB = ceilB - b;
+  if (toB > 0 && toB <= 4 && a >= toB)
+    return `Bridge through ${ceilB}: ${b} + ${toB} = ${ceilB}, + ${a - toB} = ${ans}`;
+
+  // Round and compensate: round the near-10 addend, adjust the other
+  const roundA = Math.round(a / 10) * 10, gapA = roundA - a; // positive = rounded up
+  if (gapA >= 1 && gapA <= 4 && b >= gapA)
+    return `Round ${a}\u2192${roundA}: ${roundA} + ${b - gapA} = ${ans}`;
+
+  const roundB = Math.round(b / 10) * 10, gapB = roundB - b;
+  if (gapB >= 1 && gapB <= 4 && a >= gapB)
+    return `Round ${b}\u2192${roundB}: ${a - gapB} + ${roundB} = ${ans}`;
+
+  // Left-to-right: add tens then ones
   const tensA = Math.floor(a / 10) * 10, onesA = a % 10;
   const tensB = Math.floor(b / 10) * 10, onesB = b % 10;
   if (tensA > 0 && tensB > 0) {
-    return `${a} + ${b}: tens first \u2192 ${tensA} + ${tensB} = ${tensA + tensB}, then + ${onesA + onesB} = ${q.answer}`;
+    const onesSum = onesA + onesB;
+    if (onesSum >= 10)
+      return `Left-to-right: ${tensA}+${tensB}=${tensA + tensB}, then ${onesA}+${onesB}=${onesSum} (carry 1) \u2192 ${ans}`;
+    return `Left-to-right: ${tensA}+${tensB}=${tensA + tensB}, then +${onesSum} = ${ans}`;
   }
 
   return '';
 }
 
 function getSubtractionTip(q) {
-  // Display: "sum \u2212 part", answer is the other part. Separator is U+2212.
+  // Display uses U+2212 (\u2212) as minus sign
   const [a, b] = parseTwo(q.display, '\u2212');
+  const ans = q.answer;
+
+  // Count up when the answer is small (numbers are close)
+  if (ans <= 15)
+    return `Count up: ${b} + ${ans} = ${a}`;
 
   // Round subtrahend to nearest 10 and adjust
+  // diffB = b \u2212 roundB: negative means b was rounded UP (over-subtracted \u2192 add back)
+  //                          positive means b was rounded DOWN (under-subtracted \u2192 subtract more)
   const roundB = Math.round(b / 10) * 10, diffB = b - roundB;
-  if (Math.abs(diffB) <= 3 && diffB !== 0) {
-    const adj = diffB > 0 ? `add back ${diffB}` : `subtract ${Math.abs(diffB)}`;
-    return `${a} \u2212 ${b}: round \u2192 ${a} \u2212 ${roundB} = ${a - roundB}, then ${adj} \u2192 ${q.answer}`;
+  if (Math.abs(diffB) <= 4 && diffB !== 0) {
+    if (diffB < 0) {
+      // e.g. b=29, roundB=30: over-subtracted by 1, add back Math.abs(diffB)
+      return `Round up: ${a} \u2212 ${roundB} = ${a - roundB}, add back ${Math.abs(diffB)} \u2192 ${ans}`;
+    } else {
+      // e.g. b=31, roundB=30: under-subtracted by 1, subtract diffB more
+      return `Round down: ${a} \u2212 ${roundB} = ${a - roundB}, \u2212 ${diffB} more \u2192 ${ans}`;
+    }
   }
 
-  // Count up from subtrahend to minuend
-  return `${a} \u2212 ${b}: count up \u2192 ${b} + ${q.answer} = ${a}`;
+  // Left-to-right: subtract tens then ones
+  const tensA = Math.floor(a / 10) * 10, onesA = a % 10;
+  const tensB = Math.floor(b / 10) * 10, onesB = b % 10;
+  if (onesA >= onesB)
+    return `Left-to-right: ${tensA}\u2212${tensB}=${tensA - tensB}, then \u2212${onesB}+${onesA} \u2192 ${ans}`;
+
+  // Need to borrow: subtract rounded tens, then handle ones
+  return `Left-to-right: ${a}\u2212${tensB}=${a - tensB}, then \u2212${onesB} \u2192 ${ans}`;
 }
