@@ -1,5 +1,20 @@
 // Initialize Supabase client
-const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+let supabaseClient = null;
+try {
+  if (window.supabase && window.supabase.createClient) {
+    supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  } else {
+    console.error('Supabase library not found on window.supabase');
+  }
+} catch (e) {
+  console.error('Supabase createClient failed:', e);
+}
+
+// Guard: returns true if client is ready, logs otherwise
+function dbReady() {
+  if (!supabaseClient) { console.warn('Supabase client unavailable'); return false; }
+  return true;
+}
 
 // ── Key helpers ───────────────────────────────────────────────
 
@@ -23,18 +38,20 @@ function randomKey() {
 // ── Game configs ─────────────────────────────────────────────
 
 async function saveConfig(config) {
-  // Sort keys so the same logical config always produces the same hash
   const canonical = JSON.stringify(
     Object.keys(config).sort().reduce((acc, k) => { acc[k] = config[k]; return acc; }, {})
   );
   const key = await hashToKey(canonical);
-  await supabaseClient
-    .from('game_configs')
-    .upsert({ key, config }, { onConflict: 'key', ignoreDuplicates: true });
+  if (dbReady()) {
+    await supabaseClient
+      .from('game_configs')
+      .upsert({ key, config }, { onConflict: 'key', ignoreDuplicates: true });
+  }
   return key;
 }
 
 async function getConfig(key) {
+  if (!dbReady()) return null;
   const { data, error } = await supabaseClient
     .from('game_configs')
     .select('config')
@@ -46,6 +63,7 @@ async function getConfig(key) {
 // ── Game sessions ────────────────────────────────────────────
 
 async function saveSession(sessionData) {
+  if (!dbReady()) return false;
   const { data: { user } } = await supabaseClient.auth.getUser();
   const { error } = await supabaseClient.from('game_sessions').insert({
     session_key: sessionData.sessionKey,
@@ -60,6 +78,7 @@ async function saveSession(sessionData) {
 }
 
 async function getSession(sessionKey) {
+  if (!dbReady()) return null;
   const { data, error } = await supabaseClient
     .from('game_sessions')
     .select('*')
@@ -69,6 +88,7 @@ async function getSession(sessionKey) {
 }
 
 async function getUserSessions(userId, limit = 30) {
+  if (!dbReady()) return [];
   const { data, error } = await supabaseClient
     .from('game_sessions')
     .select('*')
@@ -81,6 +101,7 @@ async function getUserSessions(userId, limit = 30) {
 // ── Profiles ─────────────────────────────────────────────────
 
 async function getProfile(userId) {
+  if (!dbReady()) return null;
   const { data, error } = await supabaseClient
     .from('profiles')
     .select('*')
@@ -90,6 +111,7 @@ async function getProfile(userId) {
 }
 
 async function createProfile(userId, username) {
+  if (!dbReady()) return false;
   const { error } = await supabaseClient
     .from('profiles')
     .insert({ id: userId, username });

@@ -3,6 +3,11 @@ let currentUser = null;
 // ── Init ─────────────────────────────────────────────────────
 
 async function initAuth(callbacks = {}) {
+  if (!supabaseClient) {
+    console.warn('initAuth: supabaseClient not available');
+    return null;
+  }
+
   try {
     const { data: { session }, error } = await supabaseClient.auth.getSession();
     if (error) console.warn('getSession error:', error.message);
@@ -83,6 +88,11 @@ function createAuthModal() {
       return;
     }
 
+    if (!supabaseClient) {
+      errorEl.textContent = 'Authentication is unavailable. Please check your connection.';
+      return;
+    }
+
     submitBtn.disabled = true;
     submitBtn.textContent = isRegister ? 'Creating…' : 'Logging in…';
 
@@ -158,7 +168,7 @@ function hideAuthModal() {
 // ── Auth bar ─────────────────────────────────────────────────
 
 async function logout() {
-  await supabaseClient.auth.signOut();
+  if (supabaseClient) await supabaseClient.auth.signOut();
   currentUser = null;
 }
 
