@@ -3,10 +3,10 @@ let currentUser = null;
 // ── Init ─────────────────────────────────────────────────────
 
 async function initAuth(callbacks = {}) {
-  const { data: { session } } = await supabase.auth.getSession();
+  const { data: { session } } = await supabaseClient.auth.getSession();
   currentUser = session?.user ?? null;
 
-  supabase.auth.onAuthStateChange((event, session) => {
+  supabaseClient.auth.onAuthStateChange((event, session) => {
     currentUser = session?.user ?? null;
     if (callbacks.onAuthChange) callbacks.onAuthChange(currentUser, event);
   });
@@ -100,7 +100,7 @@ function createAuthModal() {
           return;
         }
 
-        const { data, error } = await supabase.auth.signUp({ email, password });
+        const { data, error } = await supabaseClient.auth.signUp({ email, password });
         if (error) throw error;
 
         if (data.user) {
@@ -108,7 +108,7 @@ function createAuthModal() {
           await claimSessions(data.user.id);
         }
       } else {
-        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
         if (error) throw error;
         if (data.user) await claimSessions(data.user.id);
       }
@@ -148,7 +148,7 @@ function hideAuthModal() {
 // ── Auth bar ─────────────────────────────────────────────────
 
 async function logout() {
-  await supabase.auth.signOut();
+  await supabaseClient.auth.signOut();
   currentUser = null;
 }
 

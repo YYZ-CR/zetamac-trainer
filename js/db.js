@@ -1,5 +1,5 @@
 // Initialize Supabase client
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // ── Key helpers ───────────────────────────────────────────────
 
@@ -28,14 +28,14 @@ async function saveConfig(config) {
     Object.keys(config).sort().reduce((acc, k) => { acc[k] = config[k]; return acc; }, {})
   );
   const key = await hashToKey(canonical);
-  await supabase
+  await supabaseClient
     .from('game_configs')
     .upsert({ key, config }, { onConflict: 'key', ignoreDuplicates: true });
   return key;
 }
 
 async function getConfig(key) {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseClient
     .from('game_configs')
     .select('config')
     .eq('key', key)
@@ -46,8 +46,8 @@ async function getConfig(key) {
 // ── Game sessions ────────────────────────────────────────────
 
 async function saveSession(sessionData) {
-  const { data: { user } } = await supabase.auth.getUser();
-  const { error } = await supabase.from('game_sessions').insert({
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  const { error } = await supabaseClient.from('game_sessions').insert({
     session_key: sessionData.sessionKey,
     user_id: user?.id ?? null,
     config_key: sessionData.configKey ?? null,
@@ -60,7 +60,7 @@ async function saveSession(sessionData) {
 }
 
 async function getSession(sessionKey) {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseClient
     .from('game_sessions')
     .select('*')
     .eq('session_key', sessionKey)
@@ -69,7 +69,7 @@ async function getSession(sessionKey) {
 }
 
 async function getUserSessions(userId, limit = 30) {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseClient
     .from('game_sessions')
     .select('*')
     .eq('user_id', userId)
@@ -81,7 +81,7 @@ async function getUserSessions(userId, limit = 30) {
 // ── Profiles ─────────────────────────────────────────────────
 
 async function getProfile(userId) {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseClient
     .from('profiles')
     .select('*')
     .eq('id', userId)
@@ -90,7 +90,7 @@ async function getProfile(userId) {
 }
 
 async function createProfile(userId, username) {
-  const { error } = await supabase
+  const { error } = await supabaseClient
     .from('profiles')
     .insert({ id: userId, username });
   return !error;
@@ -103,7 +103,7 @@ async function claimSessions(userId) {
   const pending = JSON.parse(localStorage.getItem('pending_sessions') || '[]');
   if (!pending.length) return;
   for (const { sessionKey } of pending) {
-    await supabase
+    await supabaseClient
       .from('game_sessions')
       .update({ user_id: userId })
       .eq('session_key', sessionKey)
