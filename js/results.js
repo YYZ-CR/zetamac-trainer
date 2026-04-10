@@ -12,7 +12,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderAuthBar(user, document.getElementById('top-bar'));
 
   const params     = new URLSearchParams(window.location.search);
-  const sessionKey = params.get('session');
+  // Fallback for servers that strip query params (e.g. npx serve)
+  const sessionKey = params.get('session') || localStorage.getItem('zt_last_session');
   if (!sessionKey) { window.location.href = 'index.html'; return; }
 
   // ── Load session ─────────────────────────────────────────
