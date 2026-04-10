@@ -1,2 +1,1 @@
-# Supabase credentials — copy config.example.js to config.js and fill in your keys
-js/config.js
+# config.js is intentionally committed — Supabase anon key is safe to expose in frontend code
