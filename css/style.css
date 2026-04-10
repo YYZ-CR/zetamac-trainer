@@ -702,3 +702,13 @@ body.dashboard-page {
 .modal-close:hover {
   color: #000;
 }
+
+/* ── Feedback tips ── */
+.tip {
+  display: block;
+  margin-top: 4px;
+  padding-left: 4px;
+  font-size: 12px;
+  font-style: italic;
+  color: #555;
+}
