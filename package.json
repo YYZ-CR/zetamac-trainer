@@ -1,0 +1,7 @@
+{
+  "name": "zetamac-trainer",
+  "private": true,
+  "scripts": {
+    "dev": "npx serve ."
+  }
+}
