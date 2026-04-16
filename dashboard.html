@@ -44,14 +44,33 @@
     </div>
 
     <div class="panel" id="chart-panel" style="display:none">
-      <h2>Score Over Time</h2>
+      <div class="panel-head">
+        <h2>Score Over Time</h2>
+        <div class="chart-range-controls">
+          <button class="chart-range-btn active" data-range="20">Last 20</button>
+          <button class="chart-range-btn" data-range="100">Last 100</button>
+          <button class="chart-range-btn" data-range="all">All Time</button>
+        </div>
+      </div>
       <div class="chart-container">
         <canvas id="score-chart"></canvas>
       </div>
     </div>
 
     <div class="panel" id="games-panel" style="display:none">
-      <h2>Recent Games</h2>
+      <div class="panel-head">
+        <h2>Recent Games</h2>
+        <div class="games-controls">
+          Show
+          <select id="page-size-select" class="page-size-select">
+            <option value="10">10</option>
+            <option value="20" selected>20</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
+          per page
+        </div>
+      </div>
       <table class="games-table">
         <thead>
           <tr>
@@ -64,6 +83,11 @@
         </thead>
         <tbody id="games-tbody"></tbody>
       </table>
+      <div class="pagination-row">
+        <button class="btn" id="prev-btn" disabled>&larr; Prev</button>
+        <span class="page-info" id="page-info"></span>
+        <button class="btn" id="next-btn">Next &rarr;</button>
+      </div>
     </div>
 
   </div>

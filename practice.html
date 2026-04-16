@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Practice Mode &mdash; Arithmetic Trainer</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="practice-page">
+
+  <div class="top-bar" id="top-bar"></div>
+
+  <!-- ── View 1: Category Picker ─────────────────────────────── -->
+  <div id="view-picker" class="practice-wrap">
+    <h1>Practice Mode</h1>
+    <p class="practice-intro">
+      Your past game history is broken down by question type. Pick the types you want to drill
+      and practice at your own pace &mdash; no timer, just you and the math.
+    </p>
+
+    <div id="picker-loading" class="practice-loading">Loading history&hellip;</div>
+    <div id="picker-content"></div>
+
+    <div class="practice-start-row">
+      <button class="btn btn-primary" id="start-practice-btn" disabled>Start Practice</button>
+      <a href="index.html" class="btn">Back to Game</a>
+    </div>
+  </div>
+
+  <!-- ── View 2: Practice Session ────────────────────────────── -->
+  <div id="view-session" style="display:none">
+    <div class="practice-hud">
+      <span>Answered: <strong id="session-answered">0</strong></span>
+      <span>Streak: <strong id="session-streak">0</strong></span>
+      <span>Avg: <strong id="session-avg">&mdash;</strong></span>
+      <button class="btn" id="finish-btn">Finish</button>
+    </div>
+
+    <div class="practice-session-area">
+      <div class="question-text" id="session-question"></div>
+      <input
+        type="text"
+        inputmode="numeric"
+        autocomplete="off"
+        class="answer-input"
+        id="session-input"
+        placeholder=""
+      >
+    </div>
+
+    <div class="session-feedback hidden" id="session-feedback"></div>
+  </div>
+
+  <!-- ── View 3: Summary ─────────────────────────────────────── -->
+  <div id="view-summary" style="display:none" class="practice-wrap">
+    <h1>Practice Summary</h1>
+    <div id="summary-content"></div>
+    <div class="practice-start-row" style="margin-top:24px">
+      <button class="btn btn-primary" id="practice-again-btn">Practice Again</button>
+      <button class="btn" id="back-to-picker-btn">Change Categories</button>
+      <a href="index.html" class="btn">Play a Game</a>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/config.js"></script>
+  <script src="js/db.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/practice.js"></script>
+</body>
+</html>
