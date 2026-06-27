@@ -156,19 +156,93 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 // ── Chart ─────────────────────────────────────────────────────
 
+// Solve a linear system A·x = b (A is n×n, b is length n) via Gaussian
+// elimination with partial pivoting. Returns null if singular.
+function solveLinearSystem(A, b) {
+  const n = A.length;
+  // Work on copies so callers' arrays stay intact.
+  const M = A.map((row, i) => [...row, b[i]]);
+  for (let col = 0; col < n; col++) {
+    // Partial pivot: move the row with the largest |value| into place.
+    let pivot = col;
+    for (let r = col + 1; r < n; r++) {
+      if (Math.abs(M[r][col]) > Math.abs(M[pivot][col])) pivot = r;
+    }
+    if (Math.abs(M[pivot][col]) < 1e-12) return null; // singular
+    [M[col], M[pivot]] = [M[pivot], M[col]];
+    for (let r = 0; r < n; r++) {
+      if (r === col) continue;
+      const factor = M[r][col] / M[col][col];
+      for (let c = col; c <= n; c++) M[r][c] -= factor * M[col][c];
+    }
+  }
+  return M.map((row, i) => row[n] / row[i]);
+}
+
+// Least-squares fit of y = c0·b0(x) + c1·b1(x) + ... for the given basis
+// functions. Returns { predict, rss } or null if it can't be solved.
+function fitLinearModel(xs, ys, basis) {
+  const n = xs.length;
+  const k = basis.length;
+  // Design matrix rows: B[i] = [b0(xi), b1(xi), ...]
+  const B = xs.map(x => basis.map(fn => fn(x)));
+  // Normal equations: (BᵀB) c = Bᵀy
+  const BtB = Array.from({ length: k }, () => new Array(k).fill(0));
+  const Bty = new Array(k).fill(0);
+  for (let i = 0; i < n; i++) {
+    for (let a = 0; a < k; a++) {
+      Bty[a] += B[i][a] * ys[i];
+      for (let bIdx = 0; bIdx < k; bIdx++) BtB[a][bIdx] += B[i][a] * B[i][bIdx];
+    }
+  }
+  const coeffs = solveLinearSystem(BtB, Bty);
+  if (!coeffs || coeffs.some(c => !isFinite(c))) return null;
+
+  const predict = x => basis.reduce((sum, fn, idx) => sum + coeffs[idx] * fn(x), 0);
+  let rss = 0;
+  for (let i = 0; i < n; i++) {
+    const e = ys[i] - predict(xs[i]);
+    rss += e * e;
+  }
+  return { predict, rss, k };
+}
+
+// Fit several candidate curve shapes and return the predicted values from the
+// model with the best adjusted R² (penalises models for using more params, so
+// the quadratic doesn't win just by having an extra degree of freedom).
 function calcTrendline(scores) {
   const n = scores.length;
   if (n < 2) return scores.map(() => scores[0]);
-  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
-  for (let i = 0; i < n; i++) {
-    sumX  += i;
-    sumY  += scores[i];
-    sumXY += i * scores[i];
-    sumX2 += i * i;
+
+  // x starts at 1 so log/sqrt are well defined and meaningful.
+  const xs = scores.map((_, i) => i + 1);
+  const ys = scores;
+  const meanY = ys.reduce((a, b) => a + b, 0) / n;
+  let tss = 0;
+  for (const y of ys) tss += (y - meanY) ** 2;
+
+  const candidates = [
+    { name: 'linear',      basis: [() => 1, x => x] },
+    { name: 'logarithmic', basis: [() => 1, x => Math.log(x)] },
+    { name: 'sqrt',        basis: [() => 1, x => Math.sqrt(x)] },
+    { name: 'quadratic',   basis: [() => 1, x => x, x => x * x] },
+  ];
+
+  let best = null;
+  for (const cand of candidates) {
+    const fit = fitLinearModel(xs, ys, cand.basis);
+    if (!fit) continue;
+    // Adjusted R² = 1 - (RSS/(n-k)) / (TSS/(n-1)); needs n > k for a valid value.
+    const adjR2 = tss === 0 || n <= fit.k
+      ? -Infinity
+      : 1 - (fit.rss / (n - fit.k)) / (tss / (n - 1));
+    if (!best || adjR2 > best.adjR2) best = { ...cand, fit, adjR2 };
   }
-  const slope     = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
-  const intercept = (sumY - slope * sumX) / n;
-  return scores.map((_, i) => Math.round((intercept + slope * i) * 10) / 10);
+
+  if (!best) { // fallback: flat line at the mean
+    return ys.map(() => Math.round(meanY * 10) / 10);
+  }
+  return xs.map(x => Math.round(best.fit.predict(x) * 10) / 10);
 }
 
 function renderChart(labels, scores, n) {
@@ -191,17 +265,19 @@ function renderChart(labels, scores, n) {
           pointBackgroundColor: '#333',
           pointHoverRadius: pointRadius > 0 ? pointRadius + 2 : 3,
           fill: true,
+          order: 1, // draw beneath the trend line
         },
         {
           label: 'Trend',
           data: calcTrendline(scores),
           borderColor: '#c44',
           borderDash: [6, 4],
-          borderWidth: 1.5,
+          borderWidth: 2,
           pointRadius: 0,
           pointHoverRadius: 0,
           fill: false,
           tension: 0,
+          order: 0, // draw on top of the score line
         },
       ],
     },
