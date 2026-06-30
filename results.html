@@ -40,6 +40,13 @@
       </div>
     </div>
 
+    <div class="run-graph-panel" id="run-graph-panel" style="display:none">
+      <h2 class="run-graph-title">Run Graph</h2>
+      <div class="run-graph-canvas-wrap">
+        <canvas id="run-chart"></canvas>
+      </div>
+    </div>
+
     <div class="tabs">
       <button class="tab-btn active" data-tab="tab-breakdown">Breakdown</button>
       <button class="tab-btn" data-tab="tab-feedback">Feedback</button>
@@ -72,6 +79,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <script src="js/config.js"></script>
   <script src="js/db.js"></script>
   <script src="js/auth.js"></script>

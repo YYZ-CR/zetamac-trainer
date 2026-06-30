@@ -60,6 +60,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   renderSummary(session);
+  renderRunGraph(session);
   renderBreakdown(session);
   renderFeedback(session);
 
@@ -108,6 +109,148 @@ function renderSummary(session) {
   document.getElementById('summary-accuracy').textContent  = accuracy;
   document.getElementById('summary-avg-time').textContent  = avgStr;
   document.getElementById('summary-mistakes').textContent  = withMistakes;
+}
+
+// ── Run graph ─────────────────────────────────────────────────
+// Monkeytype-style per-run chart. Reconstructs the timeline from each
+// question's timeMs (no wall-clock timestamps are stored) and plots a
+// projected final score over time: (answers/sec) × session duration.
+function renderRunGraph(session) {
+  const panel  = document.getElementById('run-graph-panel');
+  const canvas = document.getElementById('run-chart');
+  const qs     = session.questions || [];
+
+  // Need at least a couple of points (and Chart.js) for a meaningful graph.
+  if (qs.length < 2 || typeof Chart === 'undefined' || !canvas) {
+    if (panel) panel.style.display = 'none';
+    return;
+  }
+  panel.style.display = 'block';
+
+  const duration = session.durationSeconds || 0;
+  const SMOOTH_K = 5; // sliding window (questions) for the smoothed line
+
+  // Cumulative elapsed time (seconds) at the moment each question was answered.
+  const elapsed = [];
+  let acc = 0;
+  for (const q of qs) { acc += q.timeMs; elapsed.push(acc / 1000); }
+
+  // Per-point series, all carrying the question index so the tooltip can show
+  // exactly what was happening at that instant.
+  const rawPts = [];      // instantaneous projected score
+  const smoothPts = [];   // sliding-window projected score (main line)
+
+  for (let i = 0; i < qs.length; i++) {
+    const x = elapsed[i];
+
+    // Instantaneous: this single question's pace projected across the session.
+    const rawScore = duration * (1000 / qs[i].timeMs);
+    rawPts.push({ x, y: round1(rawScore), i });
+
+    // Smoothed: answers/sec over the last K questions × duration.
+    const from = Math.max(0, i - SMOOTH_K + 1);
+    let msSum = 0;
+    for (let j = from; j <= i; j++) msSum += qs[j].timeMs;
+    const count = i - from + 1;
+    const smoothScore = duration * (count / (msSum / 1000));
+    smoothPts.push({ x, y: round1(smoothScore), i });
+  }
+
+  // Mistakes are drawn as red ✗ points directly on the smoothed line so the
+  // index-based tooltip stays aligned across all datasets.
+  const isMistake = ctx => qs[ctx.dataIndex]?.hadMistake;
+
+  const ctx = canvas.getContext('2d');
+  new Chart(ctx, {
+    type: 'line',
+    data: {
+      datasets: [
+        {
+          label: 'Projected score',
+          data: smoothPts,
+          borderColor: '#333',
+          backgroundColor: 'rgba(50,50,50,0.06)',
+          borderWidth: 2,
+          tension: 0.3,
+          pointRadius:      ctx => isMistake(ctx) ? 6 : 0,
+          pointHoverRadius: ctx => isMistake(ctx) ? 8 : 4,
+          pointStyle:       ctx => isMistake(ctx) ? 'crossRot' : 'circle',
+          pointBorderColor: ctx => isMistake(ctx) ? '#c44' : '#333',
+          pointBackgroundColor: ctx => isMistake(ctx) ? '#c44' : '#333',
+          pointBorderWidth: 2,
+          fill: true,
+          order: 2,
+        },
+        {
+          label: 'Instantaneous',
+          data: rawPts,
+          borderColor: 'rgba(150,150,150,0.7)',
+          borderDash: [5, 4],
+          borderWidth: 1,
+          tension: 0.2,
+          pointRadius: 0,
+          pointHoverRadius: 3,
+          fill: false,
+          order: 3,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          display: true,
+          labels: { usePointStyle: true, boxWidth: 8, font: { size: 11 } },
+        },
+        tooltip: {
+          callbacks: {
+            // Header: which question + when it was answered.
+            title: items => {
+              const i = items[0].raw.i;
+              return `Q${i + 1}  ·  ${round1(elapsed[i])}s in`;
+            },
+            // Body: the actual question, time taken, and projected scores.
+            label: item => {
+              const i = item.raw.i;
+              const q = qs[i];
+              if (item.dataset.label === 'Projected score') {
+                const lines = [
+                  `${q.display} = ${q.answer}`,
+                  `Time: ${(q.timeMs / 1000).toFixed(2)}s`,
+                  `Projected: ${Math.round(item.parsed.y)}`,
+                ];
+                if (q.hadMistake) lines.push(`✗ tried: ${q.mistakeValues.join(', ')}`);
+                return lines;
+              }
+              return `Instant: ${Math.round(item.parsed.y)}`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          type: 'linear',
+          title: { display: true, text: 'Seconds', font: { size: 11 } },
+          min: 0,
+          max: duration || undefined,
+          grid: { color: '#eee' },
+          ticks: { font: { size: 11 }, maxTicksLimit: 12 },
+        },
+        y: {
+          beginAtZero: false,
+          title: { display: true, text: 'Projected score', font: { size: 11 } },
+          grid: { color: '#eee' },
+          ticks: { font: { size: 11 }, precision: 0 },
+        },
+      },
+    },
+  });
+}
+
+function round1(v) {
+  return Math.round(v * 10) / 10;
 }
 
 function renderBreakdown(session) {
