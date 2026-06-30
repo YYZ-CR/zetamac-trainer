@@ -134,7 +134,7 @@ function renderRunGraph(session) {
   let acc = 0;
   for (const q of qs) { acc += q.timeMs; elapsed.push(acc / 1000); }
 
-  const RECENT_K = 3; // window (questions) for the instantaneous pace
+  const RECENT_K = 5; // window (questions) for the instantaneous pace
 
   // Per-point series, all carrying the question index so the tooltip can show
   // exactly what was happening at that instant.
