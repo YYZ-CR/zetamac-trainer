@@ -141,19 +141,23 @@ function renderRunGraph(session) {
   const smoothPts = [];   // sliding-window projected score (main line)
 
   for (let i = 0; i < qs.length; i++) {
-    const x = elapsed[i];
+    const x       = elapsed[i];
+    const banked  = i + 1;                          // answers already scored
+    const left    = Math.max(0, duration - x);      // seconds remaining
 
-    // Instantaneous: this single question's pace projected across the session.
-    const rawScore = duration * (1000 / qs[i].timeMs);
-    rawPts.push({ x, y: round1(rawScore), i });
+    // Projected final score = banked score + (time left × current pace).
 
-    // Smoothed: answers/sec over the last K questions × duration.
+    // Instantaneous pace: this single question's rate (answers/sec).
+    const rawRate = 1000 / qs[i].timeMs;
+    rawPts.push({ x, y: round1(banked + left * rawRate), i });
+
+    // Smoothed pace: answers/sec over the last K questions.
     const from = Math.max(0, i - SMOOTH_K + 1);
     let msSum = 0;
     for (let j = from; j <= i; j++) msSum += qs[j].timeMs;
-    const count = i - from + 1;
-    const smoothScore = duration * (count / (msSum / 1000));
-    smoothPts.push({ x, y: round1(smoothScore), i });
+    const count        = i - from + 1;
+    const smoothRate   = count / (msSum / 1000);
+    smoothPts.push({ x, y: round1(banked + left * smoothRate), i });
   }
 
   // Mistakes are drawn as red ✗ points directly on the smoothed line so the
