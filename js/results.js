@@ -128,36 +128,37 @@ function renderRunGraph(session) {
   panel.style.display = 'block';
 
   const duration = session.durationSeconds || 0;
-  const SMOOTH_K = 5; // sliding window (questions) for the smoothed line
 
   // Cumulative elapsed time (seconds) at the moment each question was answered.
   const elapsed = [];
   let acc = 0;
   for (const q of qs) { acc += q.timeMs; elapsed.push(acc / 1000); }
 
+  const RECENT_K = 3; // window (questions) for the instantaneous pace
+
   // Per-point series, all carrying the question index so the tooltip can show
   // exactly what was happening at that instant.
-  const rawPts = [];      // instantaneous projected score
-  const smoothPts = [];   // sliding-window projected score (main line)
+  const rawPts = [];      // instantaneous (recent-pace) projection
+  const smoothPts = [];   // average-pace projection (main line)
 
   for (let i = 0; i < qs.length; i++) {
     const x       = elapsed[i];
-    const banked  = i + 1;                          // answers already scored
+    const banked  = i + 1;                          // questions answered so far
     const left    = Math.max(0, duration - x);      // seconds remaining
 
-    // Projected final score = banked score + (time left × current pace).
+    // Main projection: extrapolate from your AVERAGE pace so far.
+    // avg time/question = elapsed / banked → expected extra questions = left / avg.
+    const avgTimePerQ = x / banked;
+    const expectedMore = avgTimePerQ > 0 ? left / avgTimePerQ : 0;
+    smoothPts.push({ x, y: round1(banked + expectedMore), i });
 
-    // Instantaneous pace: this single question's rate (answers/sec).
-    const rawRate = 1000 / qs[i].timeMs;
-    rawPts.push({ x, y: round1(banked + left * rawRate), i });
-
-    // Smoothed pace: answers/sec over the last K questions.
-    const from = Math.max(0, i - SMOOTH_K + 1);
+    // Instantaneous: average time of the last RECENT_K questions, then project
+    // that pace across the whole session (duration ÷ avg time per question).
+    const from = Math.max(0, i - RECENT_K + 1);
     let msSum = 0;
     for (let j = from; j <= i; j++) msSum += qs[j].timeMs;
-    const count        = i - from + 1;
-    const smoothRate   = count / (msSum / 1000);
-    smoothPts.push({ x, y: round1(banked + left * smoothRate), i });
+    const recentAvgSec = (msSum / (i - from + 1)) / 1000;
+    rawPts.push({ x, y: round1(recentAvgSec > 0 ? duration / recentAvgSec : 0), i });
   }
 
   // Mistakes are drawn as red ✗ points directly on the smoothed line so the
