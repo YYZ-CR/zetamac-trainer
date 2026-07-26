@@ -9,6 +9,7 @@ let mistakeVals = [];
 let score       = 0;
 let timeLeft    = 0;
 let timerInterval = null;
+let gameStartTime = null;
 
 // ── Math ──────────────────────────────────────────────────────
 
@@ -89,11 +90,19 @@ function endGame() {
   document.getElementById('answer-input').disabled = true;
 
   const sessionKey  = randomKey();
+  // Time actually spent playing, and the time sunk into the question that was
+  // still on screen when the clock ran out. Without these the results timeline
+  // ends short of the duration, which made the projected-score line terminate
+  // above the real score.
+  const elapsedMs   = gameStartTime != null ? Math.round(performance.now() - gameStartTime) : null;
+  const unfinishedMs = qStartTime != null ? Math.round(performance.now() - qStartTime) : 0;
   const sessionData = {
     sessionKey,
     configKey,
     score,
     durationSeconds: config.duration,
+    elapsedMs,
+    unfinishedMs,
     questions,
   };
 
@@ -177,6 +186,14 @@ async function initGame() {
 
   // Block non-numeric keys at the keyboard level
   input.addEventListener('keydown', e => {
+    // Enter is muscle memory for anyone coming from Zetamac. There is nothing
+    // to submit (correct answers auto-advance), so treat it as "clear and
+    // retry" rather than silently swallowing the keypress.
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      input.value = '';
+      return;
+    }
     const allowed = ['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab', 'Home', 'End'];
     if (!allowed.includes(e.key) && !/^\d$/.test(e.key)) {
       e.preventDefault();
@@ -184,9 +201,13 @@ async function initGame() {
   });
 
   input.addEventListener('input', () => {
-    // Strip any non-digit characters that snuck in (paste, IME, etc.)
+    // Strip any non-digit characters that snuck in (paste, IME, etc.).
+    // Assigning input.value does not re-fire this handler, so we must fall
+    // through to the checks below rather than returning — otherwise pasting
+    // "42x" for answer 42 leaves the correct answer sitting in the box
+    // unaccepted and the game stalls until the next keystroke.
     const clean = input.value.replace(/\D/g, '');
-    if (clean !== input.value) { input.value = clean; return; }
+    if (clean !== input.value) input.value = clean;
 
     const val    = clean;
     const ansStr = String(currentQ.answer);
@@ -207,11 +228,17 @@ async function initGame() {
   // ── Timer ────────────────────────────────────────────────
   showQuestion(generateQuestion());
 
+  // Anchor the clock to a wall-clock deadline rather than counting interval
+  // ticks. Browsers throttle setInterval in background tabs, so a tick-counted
+  // timer hands out extra playing time whenever the tab loses focus.
+  gameStartTime = performance.now();
+  const deadline = gameStartTime + config.duration * 1000;
+
   timerInterval = setInterval(() => {
-    timeLeft--;
+    timeLeft = Math.max(0, Math.ceil((deadline - performance.now()) / 1000));
     document.getElementById('timer-display').textContent = 'Seconds left: ' + timeLeft;
     if (timeLeft <= 0) endGame();
-  }, 1000);
+  }, 250);
 }
 
 document.addEventListener('DOMContentLoaded', initGame);

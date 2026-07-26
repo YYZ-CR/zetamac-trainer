@@ -21,7 +21,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   const sessionKey = params.get('session')
     || localStorage.getItem('zt_pending_session')
     || localStorage.getItem('zt_last_session');
+  // Both fallbacks are one-shot. zt_last_session used to persist forever, so
+  // any later visit to a bare results.html silently re-rendered the most
+  // recent game instead of redirecting home.
   localStorage.removeItem('zt_pending_session');
+  localStorage.removeItem('zt_last_session');
   if (!sessionKey) { window.location.href = 'index.html'; return; }
 
   // ── Load session ─────────────────────────────────────────
@@ -83,11 +87,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   document.getElementById('share-btn').addEventListener('click', () => {
     const btn = document.getElementById('share-btn');
-    navigator.clipboard.writeText(window.location.href).then(() => {
+    // Build the link from the session key rather than reading location.href.
+    // When the page was reached through a localStorage fallback the URL has no
+    // ?session= at all, so copying it handed out a link that resolves to the
+    // recipient's own last game.
+    const shareUrl = new URL('results.html', window.location.href);
+    shareUrl.search = '?session=' + encodeURIComponent(sessionKey);
+    const link = shareUrl.toString();
+    navigator.clipboard.writeText(link).then(() => {
       btn.textContent = 'Copied!';
       setTimeout(() => { btn.textContent = 'Copy Results Link'; }, 2000);
     }).catch(() => {
-      prompt('Copy this link:', window.location.href);
+      prompt('Copy this link:', link);
     });
   });
 });
@@ -112,16 +123,23 @@ function renderSummary(session) {
 }
 
 // ── Run graph ─────────────────────────────────────────────────
-// Monkeytype-style per-run chart. Reconstructs the timeline from each
-// question's timeMs (no wall-clock timestamps are stored) and plots a
-// projected final score over time: (answers/sec) × session duration.
+// Monkeytype-style per-run chart, plotting SPEED over time rather than a
+// projected final total.
+//
+// Projecting a final score is what the earlier versions of this chart did, and
+// it is unstable by construction: the projection multiplies a pace estimate by
+// the seconds remaining, so a quick opening answer with 118 seconds left reads
+// as a score of 150 and flattens the rest of the run into the floor of the
+// axis. Monkeytype avoids this by charting a rate (wpm), which is bounded and
+// stays comparable all the way through the run. Same idea here: answers per
+// minute, as a running average plus a rolling window.
 function renderRunGraph(session) {
   const panel  = document.getElementById('run-graph-panel');
   const canvas = document.getElementById('run-chart');
   const qs     = session.questions || [];
 
-  // Need at least a couple of points (and Chart.js) for a meaningful graph.
-  if (qs.length < 2 || typeof Chart === 'undefined' || !canvas) {
+  // Below a handful of questions the curves are noise, not signal.
+  if (qs.length < 5 || typeof Chart === 'undefined' || !canvas) {
     if (panel) panel.style.display = 'none';
     return;
   }
@@ -134,36 +152,75 @@ function renderRunGraph(session) {
   let acc = 0;
   for (const q of qs) { acc += q.timeMs; elapsed.push(acc / 1000); }
 
-  const RECENT_K = 5; // window (questions) for the instantaneous pace
+  const RECENT_K   = 5;  // window (questions) for the rolling rate
+  const WARMUP_Q   = 3;  // a rate off one or two answers is meaningless
+  const WARMUP_SEC = 5;  // ...and a per-minute rate measured over <5s is noise
 
   // Per-point series, all carrying the question index so the tooltip can show
   // exactly what was happening at that instant.
-  const rawPts = [];      // instantaneous (recent-pace) projection
-  const smoothPts = [];   // average-pace projection (main line)
+  const rawPts    = [];   // rolling-window rate
+  const smoothPts = [];   // running-average rate (main line)
 
   for (let i = 0; i < qs.length; i++) {
-    const x       = elapsed[i];
-    const banked  = i + 1;                          // questions answered so far
-    const left    = Math.max(0, duration - x);      // seconds remaining
+    const x      = elapsed[i];
+    const banked = i + 1;   // questions answered so far
+    if (x <= 0) continue;
 
-    // Main projection: extrapolate from your AVERAGE pace so far.
-    // avg time/question = elapsed / banked → expected extra questions = left / avg.
-    const avgTimePerQ = x / banked;
-    const expectedMore = avgTimePerQ > 0 ? left / avgTimePerQ : 0;
-    smoothPts.push({ x, y: round1(banked + expectedMore), i });
+    // Running average: answers per minute across everything so far. Converges
+    // on the session's true rate and is what the final score reduces to.
+    if (banked >= WARMUP_Q && x >= WARMUP_SEC) {
+      smoothPts.push({ x, y: round1(banked / x * 60), i });
+    }
 
-    // Instantaneous: average time of the last RECENT_K questions, then project
-    // that pace across the whole session (duration ÷ avg time per question).
-    const from = Math.max(0, i - RECENT_K + 1);
-    let msSum = 0;
-    for (let j = from; j <= i; j++) msSum += qs[j].timeMs;
-    const recentAvgSec = (msSum / (i - from + 1)) / 1000;
-    rawPts.push({ x, y: round1(recentAvgSec > 0 ? duration / recentAvgSec : 0), i });
+    // Rolling: rate over the last RECENT_K questions only. Emitted only once a
+    // FULL window exists — a left-truncated window is arithmetically identical
+    // to the running average, which is why this line used to hide underneath
+    // the main one for the first five questions.
+    if (i >= RECENT_K - 1 && x >= WARMUP_SEC) {
+      // Window covers questions i-K+1 … i; the span before the first of them
+      // is 0, not elapsed[-1].
+      const windowStart = i - RECENT_K >= 0 ? elapsed[i - RECENT_K] : 0;
+      const windowSec   = x - windowStart;
+      if (windowSec > 0) {
+        rawPts.push({ x, y: round1(RECENT_K / windowSec * 60), i });
+      }
+    }
   }
 
-  // Mistakes are drawn as red ✗ points directly on the smoothed line so the
-  // index-based tooltip stays aligned across all datasets.
-  const isMistake = ctx => qs[ctx.dataIndex]?.hadMistake;
+  // Terminal point: the session's true overall rate, which is exactly the
+  // score on the card next to the chart. The last answered question lands
+  // short of the duration (the question still on screen at the whistle is
+  // never recorded), so without this the line stops early and slightly high.
+  const finalScore = session.score ?? qs.length;
+  const finalRate  = duration > 0 ? round1(finalScore / duration * 60) : null;
+  if (finalRate != null) {
+    smoothPts.push({ x: duration, y: finalRate, i: qs.length - 1, final: true });
+  }
+
+  // Bound the y-axis around the bulk of the data. The rolling line can still
+  // spike on a lucky streak; letting Chart.js autoscale to that squashes the
+  // rest of the run flat.
+  // The average line is the primary series and must always fit on the canvas;
+  // only the noisier rolling line is allowed to clip, at its 95th percentile.
+  const mainYs = smoothPts.map(p => p.y);
+  const rollYs = [...rawPts.map(p => p.y)].sort((a, b) => a - b);
+  const pct    = f => rollYs.length
+    ? rollYs[Math.min(rollYs.length - 1, Math.floor(rollYs.length * f))]
+    : null;
+  const anchors = [...mainYs, finalRate, pct(0.05), pct(0.95)].filter(v => v != null);
+  const lo  = Math.min(...anchors);
+  const hi  = Math.max(...anchors);
+  const pad = Math.max(2, (hi - lo) * 0.15);
+  const yLo = Math.max(0, lo - pad);
+  const yHi = hi + pad;
+
+  // Mistakes are drawn as red ✗ points directly on the smoothed line. The
+  // series no longer starts at question 0 (warm-up points are skipped), so
+  // look the question up through the point's own stored index.
+  const isMistake = ctx => {
+    const p = ctx.dataset.data[ctx.dataIndex];
+    return !!p && !p.final && !!qs[p.i]?.hadMistake;
+  };
 
   const ctx = canvas.getContext('2d');
   new Chart(ctx, {
@@ -171,7 +228,7 @@ function renderRunGraph(session) {
     data: {
       datasets: [
         {
-          label: 'Projected score',
+          label: 'Average pace',
           data: smoothPts,
           borderColor: '#333',
           backgroundColor: 'rgba(50,50,50,0.06)',
@@ -187,7 +244,7 @@ function renderRunGraph(session) {
           order: 2,
         },
         {
-          label: 'Instantaneous',
+          label: `Last ${RECENT_K}`,
           data: rawPts,
           borderColor: 'rgba(150,150,150,0.7)',
           borderDash: [5, 4],
@@ -198,12 +255,14 @@ function renderRunGraph(session) {
           fill: false,
           order: 3,
         },
-      ],
+      ].filter(d => d.data.length >= 2),
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      interaction: { mode: 'index', intersect: false },
+      // The two series no longer share an index (warm-up points are skipped),
+      // so match by nearest x rather than by dataIndex.
+      interaction: { mode: 'nearest', axis: 'x', intersect: false },
       plugins: {
         legend: {
           display: true,
@@ -213,23 +272,27 @@ function renderRunGraph(session) {
           callbacks: {
             // Header: which question + when it was answered.
             title: items => {
-              const i = items[0].raw.i;
-              return `Q${i + 1}  ·  ${round1(elapsed[i])}s in`;
+              const p = items[0].raw;
+              if (p.final) return `Final  ·  ${round1(p.x)}s`;
+              return `Q${p.i + 1}  ·  ${round1(elapsed[p.i])}s in`;
             },
             // Body: the actual question, time taken, and projected scores.
             label: item => {
-              const i = item.raw.i;
-              const q = qs[i];
-              if (item.dataset.label === 'Projected score') {
+              const p = item.raw;
+              if (p.final) return `Final: ${finalScore} in ${duration}s  ·  ${Math.round(item.parsed.y)}/min`;
+              const q = qs[p.i];
+              if (!q) return '';
+              if (item.dataset.label === 'Average pace') {
                 const lines = [
                   `${q.display} = ${q.answer}`,
                   `Time: ${(q.timeMs / 1000).toFixed(2)}s`,
-                  `Projected: ${Math.round(item.parsed.y)}`,
+                  `Score so far: ${p.i + 1}`,
+                  `Average: ${Math.round(item.parsed.y)}/min`,
                 ];
-                if (q.hadMistake) lines.push(`✗ tried: ${q.mistakeValues.join(', ')}`);
+                if (q.hadMistake) lines.push(`✗ tried: ${(q.mistakeValues || []).join(', ')}`);
                 return lines;
               }
-              return `Instant: ${Math.round(item.parsed.y)}`;
+              return `Last ${RECENT_K}: ${Math.round(item.parsed.y)}/min`;
             },
           },
         },
@@ -245,7 +308,9 @@ function renderRunGraph(session) {
         },
         y: {
           beginAtZero: false,
-          title: { display: true, text: 'Projected score', font: { size: 11 } },
+          min: Math.floor(yLo),
+          max: Math.ceil(yHi),
+          title: { display: true, text: 'Answers per minute', font: { size: 11 } },
           grid: { color: '#eee' },
           ticks: { font: { size: 11 }, precision: 0 },
         },
@@ -265,10 +330,10 @@ function renderBreakdown(session) {
     if (q.hadMistake) tr.classList.add('had-mistake');
     tr.innerHTML = `
       <td>${i + 1}</td>
-      <td>${q.display} = <strong>${q.answer}</strong></td>
+      <td>${escapeHtml(q.display)} = <strong>${escapeHtml(q.answer)}</strong></td>
       <td>${(q.timeMs / 1000).toFixed(2)}s</td>
       <td>${q.hadMistake
-        ? `<span class="mistake-yes">\u2717 tried: ${q.mistakeValues.join(', ')}</span>`
+        ? `<span class="mistake-yes">\u2717 tried: ${escapeHtml((q.mistakeValues || []).join(', '))}</span>`
         : '<span class="mistake-no">\u2014</span>'
       }</td>
     `;
@@ -313,8 +378,8 @@ function renderFeedback(session) {
         ${slowest.map(q => {
           const tip = getTip(q);
           return `<li>
-            <span>${q.display} = ${q.answer}&nbsp;&nbsp;&mdash;&nbsp;&nbsp;<strong>${(q.timeMs / 1000).toFixed(2)}s</strong></span>
-            ${tip ? `<span class="tip">\uD83D\uDCA1 ${tip}</span>` : ''}
+            <span>${escapeHtml(q.display)} = ${escapeHtml(q.answer)}&nbsp;&nbsp;&mdash;&nbsp;&nbsp;<strong>${(q.timeMs / 1000).toFixed(2)}s</strong></span>
+            ${tip ? `<span class="tip">\uD83D\uDCA1 ${escapeHtml(tip)}</span>` : ''}
           </li>`;
         }).join('')}
       </ul>
@@ -328,8 +393,8 @@ function renderFeedback(session) {
             ${mistakes.map(q => {
               const tip = getTip(q);
               return `<li>
-                <span>${q.display} = ${q.answer}&nbsp;&nbsp;&mdash;&nbsp;&nbsp;tried: <em>${q.mistakeValues.join(', ')}</em></span>
-                ${tip ? `<span class="tip">\uD83D\uDCA1 ${tip}</span>` : ''}
+                <span>${escapeHtml(q.display)} = ${escapeHtml(q.answer)}&nbsp;&nbsp;&mdash;&nbsp;&nbsp;tried: <em>${escapeHtml((q.mistakeValues || []).join(', '))}</em></span>
+                ${tip ? `<span class="tip">\uD83D\uDCA1 ${escapeHtml(tip)}</span>` : ''}
               </li>`;
             }).join('')}
           </ul>`
@@ -341,7 +406,7 @@ function renderFeedback(session) {
       <div class="op-stat-grid">
         ${opStats.map(s => `
           <div class="op-stat-card">
-            <div class="op-stat-name">${s.op}</div>
+            <div class="op-stat-name">${escapeHtml(s.op)}</div>
             <div class="op-stat-detail">
               ${s.count} question${s.count !== 1 ? 's' : ''}<br>
               Avg time: ${(s.avgMs / 1000).toFixed(2)}s<br>
@@ -351,7 +416,7 @@ function renderFeedback(session) {
         `).join('')}
       </div>
       ${slowestOp
-        ? `<p class="feedback-insight">Your slowest operation is <strong>${slowestOp.op}</strong> &mdash; consider focused practice on it.</p>`
+        ? `<p class="feedback-insight">Your slowest operation is <strong>${escapeHtml(slowestOp.op)}</strong> &mdash; consider focused practice on it.</p>`
         : ''
       }
     </div>

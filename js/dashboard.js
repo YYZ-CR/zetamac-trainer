@@ -323,12 +323,13 @@ function renderRecentGames(sessions) {
       : '—';
 
     const tr = document.createElement('tr');
+    const key = encodeURIComponent(s.session_key);
     tr.innerHTML = `
-      <td>${dateStr}</td>
-      <td><strong>${s.score}</strong></td>
-      <td>${s.duration_seconds}s</td>
-      <td>${acc}</td>
-      <td><a href="results.html?session=${s.session_key}" class="view-session-link" data-session="${s.session_key}">View</a></td>
+      <td>${escapeHtml(dateStr)}</td>
+      <td><strong>${escapeHtml(s.score)}</strong></td>
+      <td>${escapeHtml(s.duration_seconds)}s</td>
+      <td>${escapeHtml(acc)}</td>
+      <td><a href="results.html?session=${key}" class="view-session-link" data-session="${escapeHtml(s.session_key)}">View</a></td>
     `;
     tr.querySelector('.view-session-link').addEventListener('click', function (e) {
       e.preventDefault();

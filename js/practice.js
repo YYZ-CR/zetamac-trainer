@@ -10,6 +10,7 @@ let mistakeVals   = [];
 let streak        = 0;
 let answered      = 0;
 let sessionMs     = 0;
+let feedbackTimer = null;   // pending nextQuestion() during the feedback pause
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -232,11 +233,16 @@ function renderPicker() {
   document.getElementById('view-session').style.display = 'none';
   document.getElementById('view-summary').style.display = 'none';
 
-  const entries = Object.values(categoryStats).sort((a, b) => {
-    const avgA = a.count > 0 ? a.totalMs / a.count : 0;
-    const avgB = b.count > 0 ? b.totalMs / b.count : 0;
-    return avgB - avgA;
-  });
+  // 'Other' is the catch-all for questions we could not classify. There is no
+  // generator that can produce it, so drilling it burns the full rejection
+  // budget and then serves the same hard-coded fallback problem every time.
+  const entries = Object.values(categoryStats)
+    .filter(e => e.category !== 'Other')
+    .sort((a, b) => {
+      const avgA = a.count > 0 ? a.totalMs / a.count : 0;
+      const avgB = b.count > 0 ? b.totalMs / b.count : 0;
+      return avgB - avgA;
+    });
 
   const container = document.getElementById('picker-content');
 
@@ -285,8 +291,8 @@ function renderPicker() {
           const mistakePct = e.count > 0 ? Math.round(e.mistakes / e.count * 100) : 0;
           return `<tr>
             <td><input type="checkbox" class="cat-checkbox" data-key="${k}" data-idx="${idx}"></td>
-            <td>${OP_LABELS[e.operation] || e.operation}</td>
-            <td>${e.category}</td>
+            <td>${escapeHtml(OP_LABELS[e.operation] || e.operation)}</td>
+            <td>${escapeHtml(e.category)}</td>
             <td>${e.count}</td>
             <td class="time-cell">${(avgMs / 1000).toFixed(2)}s</td>
             <td>${mistakePct}%</td>
@@ -421,19 +427,25 @@ function commitAnswer() {
   const fb = document.getElementById('session-feedback');
   fb.innerHTML = `
     <span class="fb-result ${hadMistake ? 'fb-mistake' : 'fb-correct'}">${hadMistake ? '\u2717' : '\u2713'} ${(elapsed / 1000).toFixed(2)}s</span>
-    ${tip ? `<span class="fb-tip">${tip}</span>` : ''}
+    ${tip ? `<span class="fb-tip">${escapeHtml(tip)}</span>` : ''}
   `;
   fb.className = 'session-feedback visible';
 
   document.getElementById('session-input').disabled = true;
   updateSessionHUD();
 
-  setTimeout(nextQuestion, tip ? 2000 : 900);
+  feedbackTimer = setTimeout(nextQuestion, tip ? 2000 : 900);
 }
 
 // ── Summary view ──────────────────────────────────────────────
 
 function showSummary() {
+  // Finishing during the feedback pause used to leave the scheduled
+  // nextQuestion() running: it would fire seconds later, re-enable the hidden
+  // input, advance the unseen question and steal focus from the summary.
+  if (feedbackTimer !== null) { clearTimeout(feedbackTimer); feedbackTimer = null; }
+  currentQ = null;
+
   document.getElementById('view-picker').style.display  = 'none';
   document.getElementById('view-session').style.display = 'none';
   document.getElementById('view-summary').style.display = '';
@@ -505,8 +517,8 @@ function showSummary() {
           }
           const acc = Math.round((r.count - r.mistakes) / r.count * 100);
           return `<tr>
-            <td>${OP_LABELS[r.operation] || r.operation}</td>
-            <td>${r.category}</td>
+            <td>${escapeHtml(OP_LABELS[r.operation] || r.operation)}</td>
+            <td>${escapeHtml(r.category)}</td>
             <td>${r.count}</td>
             <td class="time-cell">${(avgMs / 1000).toFixed(2)}s</td>
             <td>${vsHist}</td>
