@@ -195,4 +195,6 @@ function renderAuthBar(user, container) {
     document.getElementById('login-btn').addEventListener('click', () => showAuthModal('login'));
     document.getElementById('register-btn').addEventListener('click', () => showAuthModal('register'));
   }
+  // Appended last: the innerHTML assignments above would wipe it out.
+  if (typeof renderThemeToggle === 'function') renderThemeToggle(container);
 }

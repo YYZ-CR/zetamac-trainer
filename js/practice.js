@@ -213,6 +213,11 @@ async function loadHistory() {
     } catch (_) {}
   }
 
+  // Past practice counts too. Without this, drilling a weak category could
+  // never move its numbers — "vs History" would compare against the same
+  // pre-practice snapshot forever.
+  for (const rec of loadPracticeHistory()) allQ.push(...rec.questions);
+
   const stats = {};
   for (const q of allQ) {
     if (!q.operation || typeof q.timeMs !== 'number') continue;
@@ -224,6 +229,119 @@ async function loadHistory() {
     if (q.hadMistake) stats[k].mistakes++;
   }
   return stats;
+}
+
+// ── Practice history ──────────────────────────────────────────
+// Practice runs are stored separately from `session_*` so they never leak
+// into the dashboard, the score chart, or personal bests — those describe
+// timed games. They exist only to keep the weakness stats honest.
+
+const PRACTICE_PREFIX = 'practice_';
+const PRACTICE_KEEP   = 40;   // most recent runs retained
+
+function loadPracticeHistory() {
+  const out = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (!key || !key.startsWith(PRACTICE_PREFIX)) continue;
+    try {
+      const rec = JSON.parse(localStorage.getItem(key));
+      if (Array.isArray(rec?.questions)) out.push({ key, at: rec.at || 0, questions: rec.questions });
+    } catch (_) {}
+  }
+  return out.sort((a, b) => a.at - b.at);
+}
+
+function savePracticeSession(recs) {
+  if (!recs.length) return;
+  // Keep only the fields the stats need — no need to mirror the game schema.
+  const questions = recs.map(r => ({
+    display:   r.display,
+    operation: r.operation,
+    answer:    r.answer,
+    timeMs:    r.timeMs,
+    hadMistake: r.hadMistake,
+    mistakeValues: r.mistakeValues || [],
+  }));
+  try {
+    localStorage.setItem(PRACTICE_PREFIX + randomKey(), JSON.stringify({
+      at: Date.now(),
+      questions,
+    }));
+  } catch (_) {
+    return;  // quota full — the run is still shown, just not remembered
+  }
+
+  // Prune oldest so this can't grow without bound.
+  const all = loadPracticeHistory();
+  for (let i = 0; i < all.length - PRACTICE_KEEP; i++) {
+    try { localStorage.removeItem(all[i].key); } catch (_) {}
+  }
+}
+
+// ── Adaptive selection ────────────────────────────────────────
+// The draw used to be uniform over whatever the user ticked, which meant the
+// weakness analysis in the picker had no effect on what you actually got
+// asked. Categories are now sampled in proportion to how much trouble they
+// give you, blending lifetime history with how the current run is going.
+
+function categoryWeight(key, liveStats) {
+  const hist = categoryStats[key];
+  const live = liveStats[key];
+
+  // Combine history with this session so the mix adapts as you go.
+  const count   = (hist?.count || 0) + (live?.count || 0);
+  const totalMs = (hist?.totalMs || 0) + (live?.totalMs || 0);
+  const misses  = (hist?.mistakes || 0) + (live?.mistakes || 0);
+  if (!count) return 1;   // never seen — average priority
+
+  const avgSec      = totalMs / count / 1000;
+  const mistakeRate = misses / count;
+
+  // Slow relative to a comfortable ~2s answer, bounded so one pathological
+  // category can't crowd everything else out of the rotation.
+  const speed = Math.min(3, Math.max(0.4, avgSec / 2));
+  // Errors matter more than raw speed; a 50% miss rate doubles the weight.
+  return speed * (1 + 2 * mistakeRate);
+}
+
+function pickWeightedKey(keys, liveStats) {
+  const weights = keys.map(k => categoryWeight(k, liveStats));
+  const total   = weights.reduce((a, b) => a + b, 0);
+  if (!(total > 0)) return keys[Math.floor(Math.random() * keys.length)];
+  let r = Math.random() * total;
+  for (let i = 0; i < keys.length; i++) {
+    r -= weights[i];
+    if (r <= 0) return keys[i];
+  }
+  return keys[keys.length - 1];
+}
+
+// Fold a finished run into an existing stats map, returning a new map.
+function mergeIntoStats(stats, recs) {
+  const out = {};
+  for (const [k, v] of Object.entries(stats)) out[k] = { ...v };
+  for (const r of recs) {
+    const k = `${r.operation}|${r.category}`;
+    if (!out[k]) out[k] = { operation: r.operation, category: r.category, count: 0, totalMs: 0, mistakes: 0 };
+    out[k].count++;
+    out[k].totalMs += r.timeMs;
+    if (r.hadMistake) out[k].mistakes++;
+  }
+  return out;
+}
+
+// Per-category tallies for the run in progress, used by categoryWeight.
+function liveStatsFromRecs(recs) {
+  const st = {};
+  for (const r of recs) {
+    const k = `${r.operation}|${r.category}`;
+    if (!st[k]) st[k] = { count: 0, totalMs: 0, mistakes: 0 };
+    st[k].count++;
+    st[k].totalMs += r.timeMs;
+    if (r.hadMistake) st[k].mistakes++;
+  }
+  return st;
 }
 
 // ── Picker view ───────────────────────────────────────────────
@@ -264,8 +382,19 @@ function renderPicker() {
     subtraction: 'Subtraction',
   };
 
+  // Relative sampling weight, shown as 1-4 dots so the adaptive draw is
+  // visible rather than a hidden behaviour.
+  const weights = entries.map(e => categoryWeight(`${e.operation}|${e.category}`, {}));
+  const maxW    = Math.max(...weights, 1);
+  const focusDots = k => {
+    const w = categoryWeight(k, {});
+    return Math.max(1, Math.min(4, Math.round(w / maxW * 4)));
+  };
+
   container.innerHTML = `
-    <p class="practice-hint">Sorted by average time (slowest first). Select types to drill, then click Start.</p>
+    <p class="practice-hint">Sorted by average time (slowest first). Select types to drill, then click Start.
+    Within your selection, slower and more error-prone types come up more often &mdash; the
+    <em>Focus</em> column shows how much.</p>
     <div class="picker-controls">
       <button class="link-btn" id="select-all-btn">Select all</button>
       <span class="sep">\u00b7</span>
@@ -282,6 +411,7 @@ function renderPicker() {
           <th>Seen</th>
           <th>Avg Time</th>
           <th>Mistake Rate</th>
+          <th>Focus</th>
         </tr>
       </thead>
       <tbody>
@@ -296,6 +426,7 @@ function renderPicker() {
             <td>${e.count}</td>
             <td class="time-cell">${(avgMs / 1000).toFixed(2)}s</td>
             <td>${mistakePct}%</td>
+            <td class="focus-cell">${'\u25cf'.repeat(focusDots(k))}</td>
           </tr>`;
         }).join('')}
       </tbody>
@@ -388,7 +519,8 @@ function updateSessionHUD() {
 
 function nextQuestion() {
   const keys = [...selectedKeys];
-  const key  = keys[Math.floor(Math.random() * keys.length)];
+  if (!keys.length) { showSummary(); return; }
+  const key = pickWeightedKey(keys, liveStatsFromRecs(practiceRecs));
   const [operation, category] = key.split('|');
 
   currentQ    = generateForCategory(operation, category);
@@ -456,6 +588,12 @@ function showSummary() {
     return;
   }
 
+  // Snapshot the pre-run stats for the "vs History" column, then fold this run
+  // into the record so the next visit compares against it.
+  const priorStats = categoryStats;
+  savePracticeSession(practiceRecs);
+  categoryStats = mergeIntoStats(priorStats, practiceRecs);
+
   const byKey = {};
   for (const r of practiceRecs) {
     const k = `${r.operation}|${r.category}`;
@@ -506,7 +644,9 @@ function showSummary() {
       <tbody>
         ${rows.map(r => {
           const avgMs  = r.totalMs / r.count;
-          const histSt = categoryStats[`${r.operation}|${r.category}`];
+          // Compare against the stats as they stood BEFORE this run, otherwise
+          // the run dilutes the baseline it is being measured against.
+          const histSt = priorStats[`${r.operation}|${r.category}`];
           let vsHist = '<span class="vs-same">\u2014</span>';
           if (histSt && histSt.count >= 3) {
             const histAvg = histSt.totalMs / histSt.count;

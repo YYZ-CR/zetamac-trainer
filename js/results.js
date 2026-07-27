@@ -1,3 +1,8 @@
+// Kept so the chart can be rebuilt when the theme changes — Chart.js resolves
+// colours once, at construction.
+let runChart      = null;
+let loadedSession = null;
+
 document.addEventListener('DOMContentLoaded', async () => {
   createAuthModal();
 
@@ -63,6 +68,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('save-register-btn').addEventListener('click', () => showAuthModal('register'));
   }
 
+  loadedSession = session;
   renderSummary(session);
   renderRunGraph(session);
   renderBreakdown(session);
@@ -144,6 +150,7 @@ function renderRunGraph(session) {
     return;
   }
   panel.style.display = 'block';
+  if (runChart) { runChart.destroy(); runChart = null; }
 
   const duration = session.durationSeconds || 0;
 
@@ -222,23 +229,32 @@ function renderRunGraph(session) {
     return !!p && !p.final && !!qs[p.i]?.hadMistake;
   };
 
+  // Chart.js needs concrete colours, so resolve the theme tokens here. The
+  // chart is rebuilt on zt-theme-change (see the listener at the bottom).
+  const cLine  = themeColor('--c-chart-line', '#333');
+  const cFill  = themeColor('--c-chart-fill', 'rgba(50,50,50,0.06)');
+  const cRoll  = themeColor('--c-chart-rolling', 'rgba(150,150,150,0.7)');
+  const cBad   = themeColor('--c-danger', '#c44');
+  const cGrid  = themeColor('--c-rule', '#eee');
+  const cText  = themeColor('--c-ink-muted', '#555');
+
   const ctx = canvas.getContext('2d');
-  new Chart(ctx, {
+  runChart = new Chart(ctx, {
     type: 'line',
     data: {
       datasets: [
         {
           label: 'Average pace',
           data: smoothPts,
-          borderColor: '#333',
-          backgroundColor: 'rgba(50,50,50,0.06)',
+          borderColor: cLine,
+          backgroundColor: cFill,
           borderWidth: 2,
           tension: 0.3,
           pointRadius:      ctx => isMistake(ctx) ? 6 : 0,
           pointHoverRadius: ctx => isMistake(ctx) ? 8 : 4,
           pointStyle:       ctx => isMistake(ctx) ? 'crossRot' : 'circle',
-          pointBorderColor: ctx => isMistake(ctx) ? '#c44' : '#333',
-          pointBackgroundColor: ctx => isMistake(ctx) ? '#c44' : '#333',
+          pointBorderColor: ctx => isMistake(ctx) ? cBad : cLine,
+          pointBackgroundColor: ctx => isMistake(ctx) ? cBad : cLine,
           pointBorderWidth: 2,
           fill: true,
           order: 2,
@@ -246,7 +262,7 @@ function renderRunGraph(session) {
         {
           label: `Last ${RECENT_K}`,
           data: rawPts,
-          borderColor: 'rgba(150,150,150,0.7)',
+          borderColor: cRoll,
           borderDash: [5, 4],
           borderWidth: 1,
           tension: 0.2,
@@ -266,7 +282,7 @@ function renderRunGraph(session) {
       plugins: {
         legend: {
           display: true,
-          labels: { usePointStyle: true, boxWidth: 8, font: { size: 11 } },
+          labels: { usePointStyle: true, boxWidth: 8, font: { size: 11 }, color: cText },
         },
         tooltip: {
           callbacks: {
@@ -300,19 +316,19 @@ function renderRunGraph(session) {
       scales: {
         x: {
           type: 'linear',
-          title: { display: true, text: 'Seconds', font: { size: 11 } },
+          title: { display: true, text: 'Seconds', font: { size: 11 }, color: cText },
           min: 0,
           max: duration || undefined,
-          grid: { color: '#eee' },
-          ticks: { font: { size: 11 }, maxTicksLimit: 12 },
+          grid: { color: cGrid },
+          ticks: { font: { size: 11 }, maxTicksLimit: 12, color: cText },
         },
         y: {
           beginAtZero: false,
           min: Math.floor(yLo),
           max: Math.ceil(yHi),
-          title: { display: true, text: 'Answers per minute', font: { size: 11 } },
-          grid: { color: '#eee' },
-          ticks: { font: { size: 11 }, precision: 0 },
+          title: { display: true, text: 'Answers per minute', font: { size: 11 }, color: cText },
+          grid: { color: cGrid },
+          ticks: { font: { size: 11 }, precision: 0, color: cText },
         },
       },
     },
@@ -594,3 +610,8 @@ function getSubtractionTip(q) {
   // Need to borrow: subtract rounded tens, then handle ones
   return `Left-to-right: ${a}\u2212${tensB}=${a - tensB}, then \u2212${onesB} \u2192 ${ans}`;
 }
+
+// Rebuild the run graph in the new palette when the theme is toggled.
+window.addEventListener('zt-theme-change', () => {
+  if (loadedSession) renderRunGraph(loadedSession);
+});

@@ -36,6 +36,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('login-btn').addEventListener('click', () => showAuthModal('login'));
     document.getElementById('register-btn').addEventListener('click', () => showAuthModal('register'));
   }
+  if (typeof renderThemeToggle === 'function') renderThemeToggle(topBar);
 
   if (!user) {
     document.getElementById('auth-prompt').style.display = 'block';
@@ -116,6 +117,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   setChartRange(20);
+
+  // Chart.js resolves colours at construction, so rebuild on theme change.
+  window.addEventListener('zt-theme-change', () => {
+    if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+    redrawChart();
+  });
 
   // ── Recent games ──────────────────────────────────────────
   document.getElementById('games-panel').style.display = 'block';
@@ -258,11 +265,11 @@ function renderChart(labels, scores, n) {
         {
           label: 'Score',
           data: scores,
-          borderColor: '#333',
-          backgroundColor: 'rgba(50,50,50,0.06)',
+          borderColor: themeColor('--c-chart-line', '#333'),
+          backgroundColor: themeColor('--c-chart-fill', 'rgba(50,50,50,0.06)'),
           tension: 0.2,
           pointRadius,
-          pointBackgroundColor: '#333',
+          pointBackgroundColor: themeColor('--c-chart-line', '#333'),
           pointHoverRadius: pointRadius > 0 ? pointRadius + 2 : 3,
           fill: true,
           order: 1, // draw beneath the trend line
@@ -270,7 +277,7 @@ function renderChart(labels, scores, n) {
         {
           label: 'Trend',
           data: calcTrendline(scores),
-          borderColor: '#c44',
+          borderColor: themeColor('--c-danger', '#c44'),
           borderDash: [6, 4],
           borderWidth: 2,
           pointRadius: 0,
@@ -294,12 +301,12 @@ function renderChart(labels, scores, n) {
       },
       scales: {
         x: {
-          grid: { color: '#eee' },
+          grid: { color: themeColor('--c-rule', '#eee') },
           ticks: { font: { size: 11 }, maxTicksLimit: maxTicks },
         },
         y: {
           beginAtZero: false,
-          grid: { color: '#eee' },
+          grid: { color: themeColor('--c-rule', '#eee') },
           ticks: { font: { size: 11 }, precision: 0 },
         },
       },

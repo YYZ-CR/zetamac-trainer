@@ -1,3 +1,100 @@
+/* ============ THEMES ============
+   Every colour in this file is a token. The default theme reproduces the
+   original Zetamac palette exactly, value for value — switching themes only
+   swaps the definitions below, never the rules that use them.
+   js/theme.js sets data-theme on <html> before first paint. */
+
+:root,
+:root[data-theme="zetamac"] {
+  --c-page-bg:        #d4d4d4;
+  --c-surface:        #fff;
+  --c-border:         #bbb;
+  --c-border-soft:    #ddd;
+  --c-rule:           #eee;
+
+  --c-ink-max:        #000;
+  --c-ink:            #111;
+  --c-ink-strong:     #333;
+  --c-ink-body:       #444;
+  --c-ink-muted:      #555;
+  --c-ink-soft:       #666;
+  --c-ink-faint:      #777;
+  --c-ink-faint2:     #888;
+  --c-ink-dim:        #999;
+  --c-ink-dim2:       #aaa;
+
+  --c-link:           #00c;
+  --c-danger:         #c00;
+  --c-success:        #060;
+
+  --c-accent:         #333;   /* primary button fill */
+  --c-on-accent:      #fff;   /* text on that fill    */
+
+  --c-banner-bg:      #fffde7;
+  --c-banner-border:  #c8b400;
+  --c-mistake-bg:     #fff5f5;
+
+  --c-scrim-light:      rgba(255, 255, 255, 0.92);
+  --c-scrim-light-soft: rgba(255, 255, 255, 0.85);
+  --c-scrim-dark:       rgba(0, 0, 0, 0.45);
+
+  /* Consumed by Chart.js via js/theme.js */
+  --c-chart-line:     #333;
+  --c-chart-fill:     rgba(50, 50, 50, 0.06);
+  --c-chart-rolling:  rgba(150, 150, 150, 0.7);
+}
+
+/* Monkeytype-flavoured dark theme. */
+:root[data-theme="dark"] {
+  --c-page-bg:        #323437;
+  --c-surface:        #2c2e31;
+  --c-border:         #4a4d52;
+  --c-border-soft:    #3f4247;
+  --c-rule:           #3a3d41;
+
+  --c-ink-max:        #f2f1ea;
+  --c-ink:            #e4e3dc;
+  --c-ink-strong:     #d1d0c5;
+  --c-ink-body:       #c2c1b7;
+  --c-ink-muted:      #aeada3;
+  --c-ink-soft:       #9c9b91;
+  --c-ink-faint:      #8d8c82;
+  --c-ink-faint2:     #7f7e75;
+  --c-ink-dim:        #726f67;
+  --c-ink-dim2:       #646259;
+
+  --c-link:           #e2b714;
+  --c-danger:         #ca4754;
+  --c-success:        #7fb069;
+
+  --c-accent:         #e2b714;
+  --c-on-accent:      #24262a;
+
+  --c-banner-bg:      #3b3722;
+  --c-banner-border:  #e2b714;
+  --c-mistake-bg:     #3a2a2d;
+
+  --c-scrim-light:      rgba(44, 46, 49, 0.94);
+  --c-scrim-light-soft: rgba(44, 46, 49, 0.88);
+  --c-scrim-dark:       rgba(0, 0, 0, 0.6);
+
+  --c-chart-line:     #e2b714;
+  --c-chart-fill:     rgba(226, 183, 20, 0.08);
+  --c-chart-rolling:  rgba(190, 188, 175, 0.55);
+}
+
+/* The dark theme leans monospace, the way Monkeytype does. */
+:root[data-theme="dark"] body {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+
+:root[data-theme="dark"] .question-text,
+:root[data-theme="dark"] .answer-input,
+:root[data-theme="dark"] .stat-value,
+:root[data-theme="dark"] .summary-value {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -7,11 +104,17 @@
 body {
   font-family: Arial, Helvetica, sans-serif;
   font-size: 14px;
-  color: #111;
+  color: var(--c-ink);
 }
 
+/* Tell the UA which palette to use for native widget chrome (select popups,
+   scrollbars, focus rings) so they don't render light-on-dark. */
+:root,
+:root[data-theme="zetamac"] { color-scheme: light; }
+:root[data-theme="dark"]    { color-scheme: dark; }
+
 a {
-  color: #00c;
+  color: var(--c-link);
 }
 
 /* ============ TOP BAR ============ */
@@ -27,7 +130,7 @@ a {
 }
 
 .top-bar a {
-  color: #00c;
+  color: var(--c-link);
   text-decoration: none;
 }
 
@@ -36,13 +139,13 @@ a {
 }
 
 .top-bar .sep {
-  color: #999;
+  color: var(--c-ink-dim);
 }
 
 .link-btn {
   background: none;
   border: none;
-  color: #00c;
+  color: var(--c-link);
   cursor: pointer;
   font-size: 13px;
   font-family: inherit;
@@ -56,7 +159,7 @@ a {
 
 /* ============ CONFIG PAGE ============ */
 body.config-page {
-  background: #d4d4d4;
+  background: var(--c-page-bg);
 }
 
 .config-wrap {
@@ -106,7 +209,7 @@ body.config-page {
 
 .op-sub {
   margin-left: 22px;
-  color: #444;
+  color: var(--c-ink-body);
   margin-top: 3px;
   font-size: 13px;
 }
@@ -115,18 +218,18 @@ body.config-page {
   margin-left: 22px;
   margin-top: 4px;
   font-size: 13px;
-  color: #333;
+  color: var(--c-ink-strong);
   line-height: 1.8;
 }
 
 .range-input {
   width: 46px;
   padding: 1px 4px;
-  border: 1px solid #aaa;
+  border: 1px solid var(--c-ink-dim2);
   font-size: 13px;
   text-align: center;
   font-family: inherit;
-  background: #fff;
+  background: var(--c-surface);
   -moz-appearance: textfield;
 }
 
@@ -148,10 +251,10 @@ body.config-page {
 
 .duration-row select {
   padding: 2px 5px;
-  border: 1px solid #aaa;
+  border: 1px solid var(--c-ink-dim2);
   font-size: 13px;
   font-family: inherit;
-  background: white;
+  background: var(--c-surface);
 }
 
 .start-row {
@@ -161,15 +264,15 @@ body.config-page {
 
 .btn-start {
   padding: 4px 18px;
-  background: #fff;
-  border: 1px solid #888;
+  background: var(--c-surface);
+  border: 1px solid var(--c-ink-faint2);
   cursor: pointer;
   font-size: 14px;
   font-family: inherit;
 }
 
 .btn-start:hover {
-  background: #eee;
+  background: var(--c-rule);
 }
 
 .btn-start:disabled {
@@ -179,7 +282,7 @@ body.config-page {
 
 /* ============ GAME PAGE ============ */
 body.game-page {
-  background: #fff;
+  background: var(--c-surface);
 }
 
 .game-hud {
@@ -201,7 +304,7 @@ body.game-page {
   left: 0;
   right: 0;
   transform: translateY(-50%);
-  background: #d4d4d4;
+  background: var(--c-page-bg);
   padding: 22px;
   display: flex;
   align-items: center;
@@ -219,14 +322,14 @@ body.game-page {
   font-size: 32px;
   width: 160px;
   padding: 4px 10px;
-  border: 2px solid #999;
+  border: 2px solid var(--c-ink-dim);
   outline: none;
   font-family: inherit;
-  background: #fff;
+  background: var(--c-surface);
 }
 
 .answer-input:focus {
-  border-color: #555;
+  border-color: var(--c-ink-muted);
 }
 
 .game-loading {
@@ -235,14 +338,14 @@ body.game-page {
   left: 50%;
   transform: translate(-50%, -50%);
   font-size: 16px;
-  color: #666;
+  color: var(--c-ink-soft);
 }
 
 /* Game over overlay */
 .gameover-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--c-scrim-light);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -263,14 +366,14 @@ body.game-page {
 }
 
 .gameover-label {
-  color: #666;
+  color: var(--c-ink-soft);
   font-size: 14px;
   margin-top: 4px;
 }
 
 /* ============ RESULTS PAGE ============ */
 body.results-page {
-  background: #d4d4d4;
+  background: var(--c-page-bg);
 }
 
 .results-wrap {
@@ -286,8 +389,8 @@ body.results-page {
 }
 
 .save-banner {
-  background: #fffde7;
-  border: 1px solid #c8b400;
+  background: var(--c-banner-bg);
+  border: 1px solid var(--c-banner-border);
   padding: 10px 14px;
   margin-bottom: 18px;
   font-size: 13px;
@@ -305,8 +408,8 @@ body.results-page {
 }
 
 .run-graph-panel {
-  background: #fff;
-  border: 1px solid #bbb;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
   padding: 16px 18px;
   margin-bottom: 24px;
 }
@@ -323,8 +426,8 @@ body.results-page {
 }
 
 .summary-card {
-  background: #fff;
-  border: 1px solid #bbb;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
   padding: 14px 20px;
   min-width: 110px;
   text-align: center;
@@ -338,7 +441,7 @@ body.results-page {
 
 .card-label {
   font-size: 11px;
-  color: #666;
+  color: var(--c-ink-soft);
   margin-top: 4px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -347,28 +450,28 @@ body.results-page {
 /* Tabs */
 .tabs {
   display: flex;
-  border-bottom: 2px solid #aaa;
+  border-bottom: 2px solid var(--c-ink-dim2);
 }
 
 .tab-btn {
   padding: 6px 18px;
-  background: #bbb;
-  border: 1px solid #aaa;
+  background: var(--c-border);
+  border: 1px solid var(--c-ink-dim2);
   border-bottom: none;
   cursor: pointer;
   font-size: 13px;
   font-family: inherit;
-  color: #333;
+  color: var(--c-ink-strong);
   margin-right: 2px;
   position: relative;
   bottom: -2px;
 }
 
 .tab-btn.active {
-  background: #d4d4d4;
+  background: var(--c-page-bg);
   font-weight: bold;
-  color: #000;
-  border-bottom: 2px solid #d4d4d4;
+  color: var(--c-ink-max);
+  border-bottom: 2px solid var(--c-page-bg);
 }
 
 .tab-pane {
@@ -385,32 +488,32 @@ body.results-page {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
-  background: #fff;
+  background: var(--c-surface);
 }
 
 .breakdown-table th {
   text-align: left;
   padding: 7px 10px;
-  border-bottom: 2px solid #aaa;
+  border-bottom: 2px solid var(--c-ink-dim2);
   font-weight: bold;
-  background: #eee;
+  background: var(--c-rule);
 }
 
 .breakdown-table td {
   padding: 5px 10px;
-  border-bottom: 1px solid #ddd;
+  border-bottom: 1px solid var(--c-border-soft);
 }
 
 .breakdown-table tr.had-mistake td {
-  background: #fff5f5;
+  background: var(--c-mistake-bg);
 }
 
 .mistake-yes {
-  color: #c00;
+  color: var(--c-danger);
 }
 
 .mistake-no {
-  color: #aaa;
+  color: var(--c-ink-dim2);
 }
 
 /* Feedback */
@@ -431,7 +534,7 @@ body.results-page {
 
 .feedback-list li {
   padding: 4px 0;
-  border-bottom: 1px solid #bbb;
+  border-bottom: 1px solid var(--c-border);
 }
 
 .op-stat-grid {
@@ -442,8 +545,8 @@ body.results-page {
 }
 
 .op-stat-card {
-  background: #fff;
-  border: 1px solid #bbb;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
   padding: 10px 14px;
   font-size: 13px;
   min-width: 130px;
@@ -456,7 +559,7 @@ body.results-page {
 }
 
 .op-stat-detail {
-  color: #555;
+  color: var(--c-ink-muted);
   font-size: 12px;
   line-height: 1.7;
 }
@@ -465,7 +568,7 @@ body.results-page {
   margin-top: 10px;
   font-size: 13px;
   font-style: italic;
-  color: #444;
+  color: var(--c-ink-body);
 }
 
 /* Results actions */
@@ -479,33 +582,33 @@ body.results-page {
 
 .btn {
   padding: 5px 16px;
-  border: 1px solid #888;
+  border: 1px solid var(--c-ink-faint2);
   cursor: pointer;
   font-size: 14px;
   font-family: inherit;
-  background: #fff;
+  background: var(--c-surface);
   text-decoration: none;
-  color: #111;
+  color: var(--c-ink);
   display: inline-block;
 }
 
 .btn:hover {
-  background: #eee;
+  background: var(--c-rule);
 }
 
 .btn-primary {
-  background: #333;
-  color: #fff;
-  border-color: #333;
+  background: var(--c-accent);
+  color: var(--c-on-accent);
+  border-color: var(--c-accent);
 }
 
 .btn-primary:hover {
-  background: #555;
+  background: var(--c-ink-muted);
 }
 
 /* ============ DASHBOARD PAGE ============ */
 body.dashboard-page {
-  background: #d4d4d4;
+  background: var(--c-page-bg);
 }
 
 .dashboard-wrap {
@@ -529,7 +632,7 @@ body.dashboard-page {
 
 .dashboard-subtitle {
   font-size: 13px;
-  color: #555;
+  color: var(--c-ink-muted);
 }
 
 .stats-row {
@@ -540,8 +643,8 @@ body.dashboard-page {
 }
 
 .stat-card {
-  background: #fff;
-  border: 1px solid #bbb;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
   padding: 14px 20px;
   min-width: 120px;
 }
@@ -554,15 +657,15 @@ body.dashboard-page {
 
 .stat-label {
   font-size: 11px;
-  color: #666;
+  color: var(--c-ink-soft);
   margin-top: 4px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
 .panel {
-  background: #fff;
-  border: 1px solid #bbb;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
   padding: 18px;
   margin-bottom: 20px;
 }
@@ -589,22 +692,22 @@ body.dashboard-page {
 
 .chart-range-btn {
   padding: 3px 10px;
-  border: 1px solid #aaa;
-  background: #eee;
+  border: 1px solid var(--c-ink-dim2);
+  background: var(--c-rule);
   cursor: pointer;
   font-size: 12px;
   font-family: inherit;
-  color: #444;
+  color: var(--c-ink-body);
 }
 
 .chart-range-btn:hover {
-  background: #ddd;
+  background: var(--c-border-soft);
 }
 
 .chart-range-btn.active {
-  background: #333;
-  color: #fff;
-  border-color: #333;
+  background: var(--c-accent);
+  color: var(--c-on-accent);
+  border-color: var(--c-accent);
 }
 
 /* Games table controls */
@@ -613,15 +716,15 @@ body.dashboard-page {
   display: flex;
   align-items: center;
   gap: 5px;
-  color: #444;
+  color: var(--c-ink-body);
 }
 
 .page-size-select {
   padding: 2px 5px;
-  border: 1px solid #aaa;
+  border: 1px solid var(--c-ink-dim2);
   font-size: 13px;
   font-family: inherit;
-  background: white;
+  background: var(--c-surface);
 }
 
 .pagination-row {
@@ -633,7 +736,7 @@ body.dashboard-page {
 
 .page-info {
   font-size: 13px;
-  color: #555;
+  color: var(--c-ink-muted);
 }
 
 .chart-container {
@@ -650,17 +753,17 @@ body.dashboard-page {
 .games-table th {
   text-align: left;
   padding: 6px 8px;
-  border-bottom: 2px solid #aaa;
+  border-bottom: 2px solid var(--c-ink-dim2);
   font-weight: bold;
 }
 
 .games-table td {
   padding: 5px 8px;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--c-rule);
 }
 
 .games-table a {
-  color: #00c;
+  color: var(--c-link);
   text-decoration: none;
 }
 
@@ -669,7 +772,7 @@ body.dashboard-page {
 }
 
 .no-data {
-  color: #777;
+  color: var(--c-ink-faint);
   font-style: italic;
   font-size: 13px;
   padding: 8px 0;
@@ -688,7 +791,7 @@ body.dashboard-page {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--c-scrim-dark);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -696,8 +799,8 @@ body.dashboard-page {
 }
 
 .modal {
-  background: #d4d4d4;
-  border: 1px solid #999;
+  background: var(--c-page-bg);
+  border: 1px solid var(--c-ink-dim);
   padding: 26px 28px 22px;
   width: 300px;
   position: relative;
@@ -713,18 +816,18 @@ body.dashboard-page {
   width: 100%;
   padding: 5px 8px;
   margin-bottom: 10px;
-  border: 1px solid #aaa;
+  border: 1px solid var(--c-ink-dim2);
   font-size: 14px;
   font-family: inherit;
-  background: #fff;
+  background: var(--c-surface);
 }
 
 .auth-field:focus {
-  outline: 1px solid #555;
+  outline: 1px solid var(--c-ink-muted);
 }
 
 .auth-error {
-  color: #c00;
+  color: var(--c-danger);
   font-size: 12px;
   margin-bottom: 10px;
   min-height: 16px;
@@ -733,8 +836,8 @@ body.dashboard-page {
 .auth-submit {
   width: 100%;
   padding: 7px;
-  background: #333;
-  color: #fff;
+  background: var(--c-accent);
+  color: var(--c-on-accent);
   border: none;
   cursor: pointer;
   font-size: 14px;
@@ -743,7 +846,7 @@ body.dashboard-page {
 }
 
 .auth-submit:hover:not(:disabled) {
-  background: #555;
+  background: var(--c-ink-muted);
 }
 
 .auth-submit:disabled {
@@ -755,7 +858,7 @@ body.dashboard-page {
   width: 100%;
   background: none;
   border: none;
-  color: #00c;
+  color: var(--c-link);
   cursor: pointer;
   font-size: 12px;
   font-family: inherit;
@@ -775,18 +878,18 @@ body.dashboard-page {
   border: none;
   font-size: 22px;
   cursor: pointer;
-  color: #666;
+  color: var(--c-ink-soft);
   line-height: 1;
   padding: 0 2px;
 }
 
 .modal-close:hover {
-  color: #000;
+  color: var(--c-ink-max);
 }
 
 /* ============ PRACTICE PAGE ============ */
 body.practice-page {
-  background: #d4d4d4;
+  background: var(--c-page-bg);
 }
 
 .practice-wrap {
@@ -808,7 +911,7 @@ body.practice-page {
 }
 
 .practice-loading {
-  color: #666;
+  color: var(--c-ink-soft);
   font-size: 14px;
   font-style: italic;
   margin-bottom: 14px;
@@ -816,7 +919,7 @@ body.practice-page {
 
 .practice-hint {
   font-size: 13px;
-  color: #444;
+  color: var(--c-ink-body);
   margin-bottom: 10px;
 }
 
@@ -832,22 +935,22 @@ body.practice-page {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
-  background: #fff;
+  background: var(--c-surface);
   margin-bottom: 20px;
 }
 
 .picker-table th {
   text-align: left;
   padding: 7px 10px;
-  border-bottom: 2px solid #aaa;
+  border-bottom: 2px solid var(--c-ink-dim2);
   font-weight: bold;
-  background: #eee;
+  background: var(--c-rule);
   white-space: nowrap;
 }
 
 .picker-table td {
   padding: 5px 10px;
-  border-bottom: 1px solid #ddd;
+  border-bottom: 1px solid var(--c-border-soft);
 }
 
 .picker-table td.time-cell {
@@ -877,8 +980,8 @@ body.practice-page {
   gap: 20px;
   font-size: 14px;
   z-index: 10;
-  background: rgba(255,255,255,0.85);
-  border-bottom: 1px solid #ddd;
+  background: var(--c-scrim-light-soft);
+  border-bottom: 1px solid var(--c-border-soft);
 }
 
 .practice-hud .btn {
@@ -891,7 +994,7 @@ body.practice-page {
   left: 0;
   right: 0;
   transform: translateY(-50%);
-  background: #d4d4d4;
+  background: var(--c-page-bg);
   padding: 22px;
   display: flex;
   align-items: center;
@@ -904,8 +1007,8 @@ body.practice-page {
   bottom: 30px;
   left: 50%;
   transform: translateX(-50%);
-  background: #fff;
-  border: 1px solid #bbb;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
   padding: 10px 18px;
   font-size: 13px;
   text-align: center;
@@ -929,18 +1032,18 @@ body.practice-page {
 }
 
 .fb-correct {
-  color: #060;
+  color: var(--c-success);
 }
 
 .fb-mistake {
-  color: #c00;
+  color: var(--c-danger);
 }
 
 .fb-tip {
   display: block;
   font-size: 12px;
   font-style: italic;
-  color: #555;
+  color: var(--c-ink-muted);
 }
 
 /* ── Summary ── */
@@ -951,17 +1054,17 @@ body.practice-page {
 }
 
 .vs-better {
-  color: #060;
+  color: var(--c-success);
   font-weight: bold;
 }
 
 .vs-worse {
-  color: #c00;
+  color: var(--c-danger);
   font-weight: bold;
 }
 
 .vs-same {
-  color: #888;
+  color: var(--c-ink-faint2);
 }
 
 /* ── Feedback tips ── */
@@ -971,5 +1074,12 @@ body.practice-page {
   padding-left: 4px;
   font-size: 12px;
   font-style: italic;
-  color: #555;
+  color: var(--c-ink-muted);
+}
+
+/* Sampling-weight indicator in the practice picker */
+.focus-cell {
+  color: var(--c-ink-soft);
+  letter-spacing: 1px;
+  white-space: nowrap;
 }
