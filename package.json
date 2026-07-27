@@ -3,6 +3,6 @@
   "private": true,
   "scripts": {
     "dev": "npx serve .",
-    "test": "node test_practice.js"
+    "test": "node test_practice.js && node test_db.js"
   }
 }

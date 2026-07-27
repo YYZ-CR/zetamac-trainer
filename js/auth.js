@@ -106,14 +106,10 @@ function createAuthModal() {
           return;
         }
 
-        // Check username availability
-        const { data: existing } = await supabaseClient
-          .from('profiles')
-          .select('username')
-          .eq('username', username)
-          .maybeSingle();
-
-        if (existing) {
+        // Check username availability. Once hardening.sql is applied, profiles
+        // is owner-readable only, so this goes through a SECURITY DEFINER
+        // function; before that the direct read still works.
+        if (!(await isUsernameAvailable(username))) {
           errorEl.textContent = 'That username is already taken.';
           submitBtn.disabled = false;
           submitBtn.textContent = 'Create Account';
@@ -124,7 +120,16 @@ function createAuthModal() {
         if (error) throw error;
 
         if (data.user) {
-          await createProfile(data.user.id, username);
+          // The UNIQUE constraint, not the check above, is the real guard, and
+          // with email confirmation enabled signUp returns a user but no
+          // session — so auth.uid() is null and the insert is rejected. Either
+          // way the account now exists, so say what happened rather than
+          // leaving a profile-less account behind silently.
+          const created = await createProfile(data.user.id, username);
+          if (!created) {
+            errorEl.textContent =
+              'Account created, but the username could not be saved. Try logging in and setting it again.';
+          }
           await claimSessions(data.user.id);
         }
       } else {
