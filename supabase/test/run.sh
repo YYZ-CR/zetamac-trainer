@@ -69,14 +69,21 @@ run_sql "$SQLDIR_TEST/00-shim.sql"        # stands in for Supabase's auth schema
 run_sql "$SQLDIR_MIG/schema.sql"
 run_sql "$SQLDIR_MIG/hardening.sql"
 run_sql "$SQLDIR_MIG/social.sql"
+[ -r "$SQLDIR_MIG/daily.sql" ] && run_sql "$SQLDIR_MIG/daily.sql"
 
 # These files are applied by hand in the Supabase SQL editor, so somebody will
 # eventually paste one twice. Re-applying here proves that is harmless.
-echo "=== re-applying social.sql (idempotency) ==="
+echo "=== re-applying migrations (idempotency) ==="
 run_sql "$SQLDIR_MIG/social.sql"
+[ -r "$SQLDIR_MIG/daily.sql" ] && run_sql "$SQLDIR_MIG/daily.sql"
 
 echo "=== seeding ==="
 run_sql "$SQLDIR_TEST/01-seed.sql"
 
+# Both suites run in ONE psql invocation. The pg_temp.ok/as_user helpers are
+# defined in 02-test.sql and pg_temp is session-scoped, so a second invocation
+# would not see them.
 echo "=== contract tests ==="
-psql_run "-d $DB -f '$SQLDIR_TEST/02-test.sql'" 2>&1 | sed 's/^psql.*NOTICE:  //'
+TESTS="-f '$SQLDIR_TEST/02-test.sql'"
+[ -r "$SQLDIR_MIG/daily.sql" ] && TESTS="$TESTS -f '$SQLDIR_TEST/03-daily-test.sql'"
+psql_run "-d $DB $TESTS" 2>&1 | sed 's/^psql.*NOTICE:  //'

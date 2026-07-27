@@ -134,10 +134,48 @@ Resets at **midnight UTC**, and the UI says so with a live countdown. Any local-
 scheme means two players "on the same day" get different puzzles, which breaks the
 one thing the daily exists to provide.
 
-## Open questions
+## Decisions
 
-- **Puzzle #1 date** — fixes `puzzle_number` forever; pick it deliberately.
-- **Leaderboard depth** — top 100 plus the caller's own row is the usual shape.
-  Showing rank 4,000 to rank 4,000 is worse than showing them a percentile.
-- **Config** — the canonical Zetamac default (2–100 add, 2–12 × 2–100, 120s). Every
-  other config stays unranked, which is also what keeps the main leaderboard honest.
+- **Puzzle #1 is 2026-07-27.** `puzzle_number = (puzzle_date - '2026-07-27') + 1`.
+  This is a one-way door: it is baked into every share string ever posted, so it
+  cannot be changed later without renumbering other people's screenshots.
+- **Leaderboard is top 100 plus the caller's own row**, always, even when they are
+  rank 4,000. Showing someone rank 4,000 out of a list that stops at 100 tells them
+  nothing; showing their row in context tells them what to beat.
+- **Config is the canonical Zetamac default** — addition 2–100 + 2–100,
+  multiplication 2–12 × 2–100, subtraction and division as their reverses, 120
+  seconds. Every other config stays unranked, which is what keeps the board honest.
+
+## Exact payload shapes
+
+```jsonc
+// start_daily()
+{
+  "puzzle_number": 1,
+  "puzzle_date": "2026-07-27",
+  "duration_seconds": 120,
+  "started_at": "2026-07-27T20:41:00Z",   // server clock
+  "seconds_remaining": 120,               // 0 once the window has closed
+  "status": "in_progress",                // in_progress | complete | expired
+  "questions": [ { "display": "84 ÷ 7", "operation": "division", "answer": 12 } ],
+  "result": null                          // the submitted result, once complete
+}
+
+// submit_daily([{ "i": 0, "value": 12, "elapsed_ms": 1430 }])
+{ "score": 87, "total_answered": 91, "accuracy": 0.956,
+  "puzzle_number": 1, "rank": 4, "players": 212, "flagged": false }
+
+// get_daily_status()
+{ "puzzle_number": 1, "puzzle_date": "2026-07-27", "duration_seconds": 120,
+  "played": true, "status": "complete", "seconds_until_reset": 11940,
+  "result": { "score": 87, "accuracy": 0.956, "rank": 4, "players": 212 } }
+
+// get_daily_leaderboard("2026-07-27", 100)
+{ "puzzle_number": 1, "players": 212,
+  "rows": [ { "rank": 1, "username": "hexadecimal", "score": 104, "accuracy": 0.98 } ],
+  "you":  { "rank": 4, "username": "…", "score": 87, "accuracy": 0.956 } }  // null if not played
+```
+
+`questions` is present **only** while an attempt is live. Once the window closes,
+`start_daily` and `get_daily_status` return the result and no questions — otherwise
+the day's puzzle leaks to anyone willing to burn an attempt early and read it later.
