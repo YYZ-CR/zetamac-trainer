@@ -170,6 +170,97 @@ async function isUsernameAvailable(username) {
   }
 }
 
+// ── Public profiles / percentiles ────────────────────────────
+// hardening.sql reduced profiles and game_sessions to owner-only reads, so a
+// public profile page cannot touch either table across a user boundary. Every
+// cross-user read below goes through a SECURITY DEFINER function from
+// supabase/social.sql that returns a fixed, minimal projection — see
+// docs/social-api.md for the exact shapes.
+
+// Why this exists: getPublicProfile() returns null both when the profile is
+// absent/private (a normal answer) and when we simply could not ask — no
+// Supabase client, network failure, or social.sql not applied to the project
+// yet. The profile page has to word those two cases very differently, so the
+// reason for a failed call is recorded here rather than thrown, keeping the
+// helpers' return contract simple. Null means "the last call was fine".
+let lastSocialError = null;
+
+// The public profile payload for a username, or null when it does not exist,
+// is private and not ours, or could not be fetched (see lastSocialError).
+async function getPublicProfile(username) {
+  lastSocialError = null;
+  if (!dbReady()) { lastSocialError = 'Supabase client unavailable'; return null; }
+  if (!username) return null;
+
+  try {
+    const { data, error } = await supabaseClient
+      .rpc('get_public_profile', { p_username: username });
+    if (error) {
+      console.warn('getPublicProfile:', error.message);
+      lastSocialError = error.message || 'get_public_profile failed';
+      return null;
+    }
+    // A JSONB-returning function normally comes back as the object itself,
+    // but PostgREST wraps some function results in a single-element array.
+    // Accept either shape so the client is not sensitive to that detail.
+    const row = Array.isArray(data) ? (data[0] ?? null) : data;
+    return row ?? null;
+  } catch (e) {
+    console.warn('getPublicProfile threw:', e);
+    lastSocialError = String(e?.message ?? e);
+    return null;
+  }
+}
+
+// Where a score ranks among players' bests at the same duration:
+// { score, duration, percentile, players }. Null when it cannot be fetched.
+// `percentile` itself may be null when too few players qualify — the caller
+// decides what is worth showing, the function only reports.
+async function getScorePercentile(score, durationSeconds) {
+  if (!dbReady()) { lastSocialError = 'Supabase client unavailable'; return null; }
+  if (typeof score !== 'number' || typeof durationSeconds !== 'number') return null;
+
+  try {
+    const { data, error } = await supabaseClient.rpc('get_score_percentile', {
+      p_score: score,
+      p_duration: durationSeconds,
+    });
+    if (error) {
+      console.warn('getScorePercentile:', error.message);
+      lastSocialError = error.message || 'get_score_percentile failed';
+      return null;
+    }
+    const row = Array.isArray(data) ? (data[0] ?? null) : data;
+    return row ?? null;
+  } catch (e) {
+    console.warn('getScorePercentile threw:', e);
+    lastSocialError = String(e?.message ?? e);
+    return null;
+  }
+}
+
+// Publish or unpublish the signed-in user's profile. profiles.is_public
+// defaults to FALSE, so this is how a profile ever becomes visible to anyone
+// else. No RPC needed: the existing profiles_update policy already scopes
+// updates to auth.uid() = id, so the row is picked by the session's own user
+// id and the database enforces that it is theirs. Returns whether it stuck.
+async function setProfileVisibility(isPublic) {
+  if (!dbReady()) return false;
+  try {
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user) return false;
+    const { error } = await supabaseClient
+      .from('profiles')
+      .update({ is_public: !!isPublic })
+      .eq('id', user.id);
+    if (error) { console.warn('setProfileVisibility:', error.message); return false; }
+    return true;
+  } catch (e) {
+    console.warn('setProfileVisibility threw:', e);
+    return false;
+  }
+}
+
 // ── Session claiming ─────────────────────────────────────────
 // After login, associate any locally-tracked anonymous sessions with the user
 

@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "dev": "npx serve .",
-    "test": "node test_practice.js && node test_db.js"
+    "test": "node test_practice.js && node test_db.js && node test_profile.js",
+    "test:sql": "supabase/test/run.sh"
   }
 }

@@ -1094,3 +1094,228 @@ body.practice-page {
   font-size: 12px;
   color: var(--c-ink-soft);
 }
+
+/* ============ PUBLIC PROFILE PAGE ============ */
+body.profile-page {
+  background: var(--c-page-bg);
+}
+
+.profile-wrap {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 30px 20px 60px;
+}
+
+.profile-head {
+  margin-bottom: 22px;
+}
+
+.profile-head h1 {
+  font-size: 28px;
+  font-weight: bold;
+  line-height: 1.2;
+  /* Usernames are user-chosen and can be long and unbroken. */
+  overflow-wrap: anywhere;
+}
+
+.profile-meta {
+  font-size: 13px;
+  color: var(--c-ink-muted);
+  margin-top: 4px;
+}
+
+.profile-loading {
+  font-size: 14px;
+  font-style: italic;
+  color: var(--c-ink-soft);
+  padding: 20px 0;
+}
+
+/* Missing profile, private profile, no ?u=, database unreachable */
+.profile-notice {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  padding: 20px 22px;
+  font-size: 14px;
+  line-height: 1.6;
+  margin-top: 10px;
+}
+
+.profile-notice p {
+  margin-top: 8px;
+  color: var(--c-ink-body);
+}
+
+.profile-notice code {
+  background: var(--c-rule);
+  border: 1px solid var(--c-border-soft);
+  padding: 1px 5px;
+  font-size: 13px;
+}
+
+.profile-empty {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  padding: 18px;
+  font-size: 14px;
+  color: var(--c-ink-body);
+}
+
+/* Owner previewing their own unpublished profile */
+.profile-private-banner {
+  background: var(--c-banner-bg);
+  border: 1px solid var(--c-banner-border);
+  padding: 12px 14px;
+  margin-bottom: 20px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--c-ink);
+}
+
+.profile-private-banner .banner-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: 6px;
+}
+
+.profile-private-banner .btn {
+  padding: 3px 12px;
+  font-size: 13px;
+}
+
+.profile-private-banner .banner-status {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--c-ink-muted);
+}
+
+/* ── Personal bests ── */
+.best-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.best-card {
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
+  padding: 12px 18px;
+  min-width: 96px;
+  text-align: center;
+}
+
+.best-score {
+  font-size: 28px;
+  font-weight: bold;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.best-duration {
+  font-size: 11px;
+  color: var(--c-ink-soft);
+  margin-top: 5px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.percentile-line {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--c-rule);
+  font-size: 14px;
+  color: var(--c-ink-body);
+}
+
+.percentile-line strong {
+  color: var(--c-ink-max);
+}
+
+/* ── Per-operation breakdown ── */
+.panel-note {
+  font-size: 11px;
+  color: var(--c-ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.op-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* label | bar | figure, with the meta line tucked under the bar */
+.op-bar-row {
+  display: grid;
+  /* Wide enough for "multiplication" in the dark theme's monospace face. */
+  grid-template-columns: 155px 1fr 62px;
+  grid-template-areas:
+    "label track value"
+    "label meta  meta";
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 4px;
+}
+
+.op-bar-label {
+  grid-area: label;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+
+.op-bar-symbol {
+  font-size: 17px;
+  font-weight: bold;
+  color: var(--c-ink-strong);
+  width: 14px;
+  flex-shrink: 0;
+}
+
+.op-bar-name {
+  font-size: 13px;
+  text-transform: capitalize;
+  color: var(--c-ink);
+  overflow-wrap: anywhere;
+}
+
+.op-bar-track {
+  grid-area: track;
+  background: var(--c-rule);
+  border: 1px solid var(--c-border-soft);
+  height: 20px;
+}
+
+.op-bar-fill {
+  height: 100%;
+  background: var(--c-accent);
+  min-width: 2px;
+}
+
+.op-bar-value {
+  grid-area: value;
+  text-align: right;
+  font-size: 14px;
+  font-weight: bold;
+  font-variant-numeric: tabular-nums;
+}
+
+.op-bar-meta {
+  grid-area: meta;
+  font-size: 12px;
+  color: var(--c-ink-soft);
+}
+
+@media (max-width: 520px) {
+  .op-bar-row {
+    grid-template-columns: 1fr 62px;
+    grid-template-areas:
+      "label label"
+      "track value"
+      "meta  meta";
+  }
+}

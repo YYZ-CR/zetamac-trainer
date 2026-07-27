@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- vercel.json rewrites /@name and /u/name to this page, and the browser
+       keeps that path. Without a base, "js/profile.js" would resolve against
+       /u/ and 404, leaving a blank page — this is the only page in the site
+       that is ever served from a path other than the root. -->
+  <base href="/">
+  <title>Profile — Arithmetic Trainer</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="js/theme.js"></script>
+</head>
+<body class="profile-page">
+
+  <div class="top-bar" id="top-bar"></div>
+
+  <div class="profile-wrap">
+
+    <!-- Shown until the profile resolves one way or the other -->
+    <div class="profile-loading" id="profile-loading">Loading profile…</div>
+
+    <!-- No ?u=, profile missing/private, or the database is unreachable -->
+    <div class="profile-notice" id="profile-notice" style="display:none"></div>
+
+    <div id="profile-content" style="display:none">
+
+      <!-- Owner previewing their own unpublished profile -->
+      <div class="profile-private-banner" id="owner-banner" style="display:none"></div>
+
+      <div class="profile-head">
+        <h1 id="profile-name"></h1>
+        <div class="profile-meta" id="profile-member-since"></div>
+      </div>
+
+      <p class="profile-empty" id="profile-empty" style="display:none">
+        No games recorded yet — nothing to show here until the first one is played.
+      </p>
+
+      <div class="panel" id="bests-panel" style="display:none">
+        <div class="panel-head">
+          <h2>Personal Bests</h2>
+        </div>
+        <div class="best-row" id="best-row"></div>
+        <p class="percentile-line" id="percentile-line" style="display:none"></p>
+      </div>
+
+      <div class="panel" id="chart-panel" style="display:none">
+        <div class="panel-head">
+          <h2>Score Over Time</h2>
+        </div>
+        <div class="chart-container">
+          <canvas id="profile-chart"></canvas>
+        </div>
+      </div>
+
+      <div class="panel" id="ops-panel" style="display:none">
+        <div class="panel-head">
+          <h2>By Operation</h2>
+          <span class="panel-note">Average time per question, most recent 200 games</span>
+        </div>
+        <div class="op-bars" id="op-bars"></div>
+      </div>
+
+      <div class="stats-row" id="totals-row" style="display:none"></div>
+
+    </div>
+
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <script src="js/util.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/db.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/profile.js"></script>
+</body>
+</html>
