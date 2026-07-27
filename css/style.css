@@ -1397,3 +1397,42 @@ body.profile-page {
   padding-top: 0;
   border-top: none;
 }
+
+/* ============ SHARE CARD ============ */
+/* The button that produces the PNG (js/sharecard.js) reuses .btn; only the
+   feedback line beside it is new. It has to say three different things —
+   copied, downloaded instead, failed — and a button whose label flickered
+   would lose the "downloaded instead" case, which is the one sentence the
+   user genuinely needs to read. */
+
+.share-card-status {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--c-ink-muted);
+  /* Reserved so the actions below never jump when a message appears. */
+  min-height: 1.6em;
+}
+
+.share-card-status.is-ok {
+  color: var(--c-success);
+}
+
+.share-card-status.is-error {
+  color: var(--c-danger);
+}
+
+/* Profile page: the button sits inside the Personal Bests panel, under the
+   percentile line, so the card is offered next to the numbers it contains. */
+.share-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.share-card-actions .share-card-status {
+  margin-top: 0;
+  flex: 1 1 240px;
+}

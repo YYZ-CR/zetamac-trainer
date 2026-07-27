@@ -22,6 +22,11 @@ const OP_SYMBOL = { addition: '+', subtraction: '−', multiplication: '×', div
 let profileChart   = null;
 let profileHistory = [];
 
+// Held for the share card, which is built on demand in a click handler and
+// reads whatever renderPercentile() resolved to. Null means the population was
+// too thin to say anything — see percentilePercent() in js/util.js.
+let profilePercentilePct = null;
+
 // Which profile to show. Three URL shapes reach this page:
 //
 //   /profile.html?u=name   direct, and the only shape that works locally
@@ -178,6 +183,40 @@ async function renderProfile(profile) {
   renderOps(profile.ops);
   renderHistoryChart(profile.history);
   await renderPercentile(profile.bests);
+  renderShareCardButton(profile);
+}
+
+// Which run length the shared image should be about. 120s is the standard
+// Zetamac length and the only one a percentile is computed for, so it wins
+// whenever it has been played; otherwise the shortest length that has.
+function shareDurationFor(bests) {
+  const source = bests && typeof bests === 'object' ? bests : {};
+  const has = d => numberOrNull(source[String(d)] ?? source[d]) !== null;
+  if (has(PERCENTILE_DURATION)) return PERCENTILE_DURATION;
+  return PROFILE_DURATIONS.find(has) ?? null;
+}
+
+// The button only appears once there is a score to put on the card, and only
+// if js/sharecard.js actually loaded — a button that silently does nothing is
+// worse than no button.
+function renderShareCardButton(profile) {
+  const wrap = document.getElementById('share-card-actions');
+  if (!wrap || typeof wireShareCardButton !== 'function') return;
+
+  const duration = shareDurationFor(profile.bests);
+  if (duration === null) return;
+
+  wrap.style.display = 'flex';
+  wireShareCardButton(
+    document.getElementById('share-card-btn'),
+    document.getElementById('share-card-status'),
+    () => shareCardDataFromProfile(profile, {
+      duration,
+      // The percentile is only ever computed at PERCENTILE_DURATION, so it
+      // must not be attached to a card about any other length.
+      percentile: duration === PERCENTILE_DURATION ? profilePercentilePct : null,
+    })
+  );
 }
 
 function memberSinceText(iso) {
@@ -259,6 +298,9 @@ async function renderPercentile(bests) {
   // percentile drawn from a dozen people is noise dressed up as a measurement.
   const pct = percentilePercent(res);
   if (pct === null) return;
+
+  // Same figure the share card puts on the image.
+  profilePercentilePct = pct;
 
   const el = document.getElementById('percentile-line');
   el.innerHTML = `Faster than <strong>${escapeHtml(pct)}%</strong> of players at ${escapeHtml(PERCENTILE_DURATION)} seconds.`;

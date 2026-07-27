@@ -3,6 +3,13 @@
 let runChart      = null;
 let loadedSession = null;
 
+// Held for the share card, which is built on demand inside a click handler and
+// so has to read whatever these have resolved to by then. Both arrive after
+// first paint — the percentile from an RPC, the username from a profile read —
+// and neither is allowed to delay the page to get there.
+let resultsPercentilePct = null;
+let resultsUsername      = '';
+
 document.addEventListener('DOMContentLoaded', async () => {
   createAuthModal();
 
@@ -78,6 +85,33 @@ document.addEventListener('DOMContentLoaded', async () => {
   // one network round trip for a single decorative line; nothing the user came
   // here for may wait on it, and nothing it does may be able to abort the rest.
   renderScorePercentile(session).catch(e => console.warn('percentile failed:', e));
+
+  // Likewise decorative, likewise not awaited: the share card puts the
+  // player's name on the image when there is one, and an anonymous card is a
+  // perfectly good card, so nothing may wait on this either.
+  if (user && typeof getProfile === 'function') {
+    Promise.resolve(getProfile(user.id))
+      .then(p => { if (p && p.username) resultsUsername = String(p.username); })
+      .catch(e => console.warn('profile lookup failed:', e));
+  }
+
+  // ── Share card ────────────────────────────────────────────
+  // Built inside the handler (js/sharecard.js), never on load: a 2400×1260
+  // canvas is ~12 MB of backing store and most visitors never press this.
+  if (typeof wireShareCardButton === 'function') {
+    wireShareCardButton(
+      document.getElementById('share-card-btn'),
+      document.getElementById('share-card-status'),
+      () => shareCardDataFromSession(session, {
+        percentile: resultsPercentilePct,
+        username:   resultsUsername,
+      })
+    );
+  } else {
+    // sharecard.js failed to load — leave no button that does nothing.
+    const b = document.getElementById('share-card-btn');
+    if (b) b.style.display = 'none';
+  }
 
   // ── Tabs ─────────────────────────────────────────────────
   document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -167,6 +201,10 @@ async function renderScorePercentile(session) {
   // something, to say precisely nothing.
   const pct = percentilePercent(res);
   if (pct === null) return;
+
+  // Same figure the share card puts on the image; if this line is not worth
+  // rendering here, it is not worth rendering there either.
+  resultsPercentilePct = pct;
 
   el.innerHTML =
     `Faster than <strong>${escapeHtml(pct)}%</strong> of players at ${escapeHtml(duration)} seconds.`;
