@@ -1,11 +1,19 @@
-// test_practice.js — Node.js test for practice.js pure logic
+// test_practice.js — Node.js tests for the pure logic in practice.js and tips.js
 // Run: node test_practice.js
+//
+// These load the REAL source files into a sandbox rather than working from
+// pasted copies. The previous version duplicated the helpers into this file,
+// so the classifier tests could drift out of sync silently and the tip
+// assertions were checking stubs defined here, not the shipped tips.
+
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
 
 let passed = 0, failed = 0;
 
 function assert(label, condition, detail = '') {
   if (condition) {
-    console.log(`  ✓ ${label}`);
     passed++;
   } else {
     console.error(`  ✗ ${label}${detail ? ' — ' + detail : ''}`);
@@ -13,217 +21,68 @@ function assert(label, condition, detail = '') {
   }
 }
 
-// ── Paste pure helpers from practice.js ──────────────────────
-
-function randInt(min, max) {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
+// Report one line per group instead of per assertion; large sampling loops
+// used to emit thousands of ✓ lines and bury everything else.
+function group(name, fn) {
+  const before = failed;
+  console.log(`\n${name}`);
+  fn();
+  const bad = failed - before;
+  console.log(`  ${bad === 0 ? '✓ all passed' : `✗ ${bad} failed`}`);
 }
 
-function parseTwo(display, sep) {
-  const parts = display.split(sep);
-  return [parseInt(parts[0].trim(), 10), parseInt(parts[1].trim(), 10)];
+// ── Load the real sources ────────────────────────────────────
+// practice.js registers a DOMContentLoaded handler at the top level and
+// touches localStorage; everything else it does lives inside functions. A
+// couple of stubs are enough to evaluate it and reach the pure logic.
+const sandbox = {
+  console,
+  document: { addEventListener() {} },
+  localStorage: {
+    length: 0,
+    key() { return null; },
+    getItem() { return null; },
+    setItem() {},
+    removeItem() {},
+  },
+  currentUser: null,
+  performance: { now: () => 0 },
+  Math, JSON, Date, parseInt, parseFloat, String, Number, Array, Object, Set, isFinite, NaN,
+};
+sandbox.window = sandbox;
+sandbox.globalThis = sandbox;
+vm.createContext(sandbox);
+
+for (const file of ['js/util.js', 'js/tips.js', 'js/practice.js']) {
+  const src = fs.readFileSync(path.join(__dirname, file), 'utf8');
+  vm.runInContext(src, sandbox, { filename: file });
 }
 
-function classifyMul(a, b) {
-  if (a === b) return 'Squares';
-  const lo = Math.min(a, b);
-  if (lo >= 2 && lo <= 12) return `\u00d7${lo} tables`;
-  return 'Large \u00d7 Large';
+const {
+  randInt, parseTwo,
+  classifyMul, classifyDiv, classifyAdd, classifySub, classifyQuestion,
+  generateForCategory, genAddPair, genSubPair,
+  getTip, getMultiplicationTip, getDivisionTip, getAdditionTip, getSubtractionTip,
+  categoryWeight, pickWeightedKey,
+} = sandbox;
+
+// categoryStats is a top-level `let` in practice.js. In a vm context that is a
+// global *lexical* binding, not a property of the sandbox object, so it has to
+// be assigned by evaluating in the same context.
+function setCategoryStats(obj) {
+  sandbox.__seed = obj;
+  vm.runInContext('categoryStats = __seed;', sandbox);
 }
 
-function classifyDiv(divisor, quotient) {
-  if (divisor >= 2 && divisor <= 12) return `\u00f7${divisor}`;
-  if (quotient >= 2 && quotient <= 12) return `\u00f7 large (\u00d7${quotient} factor)`;
-  return 'Large \u00f7 Large';
-}
-
-function classifyAdd(a, b) {
-  if (a === b) return 'Doubles';
-  if (a >= 100 || b >= 100) return 'Triple-digit';
-  if (a < 10 && b < 10) return 'Single + Single';
-  if ((a < 10) !== (b < 10)) return 'Double + Single';
-  // Both >= 10 from here
-  if (Math.abs(a - b) <= 2) return 'Near-Doubles';
-  const carry = ((a % 10) + (b % 10)) >= 10;
-  return carry ? 'Double + Double, carry' : 'Double + Double, no carry';
-}
-
-function classifySub(minuend, subtrahend, answer) {
-  if (answer <= 15) return 'Close Numbers';
-  if (minuend >= 100) return 'Triple-digit';
-  if (subtrahend % 10 <= 2 || subtrahend % 10 >= 8) return 'Round Subtrahend';
-  const borrow = (minuend % 10) < (subtrahend % 10);
-  return borrow ? 'Two-digit, borrow' : 'Two-digit, no borrow';
-}
-
-function classifyQuestion(q) {
-  try {
-    if (q.operation === 'multiplication') {
-      const [a, b] = parseTwo(q.display, '\u00d7');
-      return classifyMul(a, b);
-    }
-    if (q.operation === 'division') {
-      const [, divisor] = parseTwo(q.display, '\u00f7');
-      return classifyDiv(divisor, q.answer);
-    }
-    if (q.operation === 'addition') {
-      const [a, b] = parseTwo(q.display, '+');
-      return classifyAdd(a, b);
-    }
-    if (q.operation === 'subtraction') {
-      const [minuend, subtrahend] = parseTwo(q.display, '\u2212');
-      return classifySub(minuend, subtrahend, q.answer);
-    }
-  } catch (_) {}
-  return 'Other';
-}
-
-function generateForCategory(operation, category) {
-  if (operation === 'multiplication') {
-    if (category === 'Squares') {
-      const a = randInt(2, 15);
-      return { display: `${a} \u00d7 ${a}`, answer: a * a, operation, category };
-    }
-    if (category.startsWith('\u00d7') && category.endsWith('tables')) {
-      const factor = parseInt(category.slice(1));
-      const other  = randInt(factor + 1, 100);
-      const [a, b] = Math.random() < 0.5 ? [factor, other] : [other, factor];
-      return { display: `${a} \u00d7 ${b}`, answer: factor * other, operation, category };
-    }
-    const la = randInt(13, 50), lb = randInt(13, 50);
-    return { display: `${la} \u00d7 ${lb}`, answer: la * lb, operation, category };
+// Fail loudly if a rename in the sources silently drops something under test.
+for (const [name, fn] of Object.entries({
+  randInt, parseTwo, classifyMul, classifyDiv, classifyAdd, classifySub,
+  classifyQuestion, generateForCategory, getTip, categoryWeight, pickWeightedKey,
+})) {
+  if (typeof fn !== 'function') {
+    console.error(`FATAL: ${name} was not found in the loaded sources.`);
+    process.exit(1);
   }
-  if (operation === 'division') {
-    if (category.startsWith('\u00f7') && !category.includes('large')) {
-      const divisor  = parseInt(category.slice(1));
-      const quotient = randInt(2, 12);
-      return { display: `${divisor * quotient} \u00f7 ${divisor}`, answer: quotient, operation, category };
-    }
-    if (category.includes('large')) {
-      const m      = category.match(/\u00d7(\d+)/);
-      const factor  = m ? parseInt(m[1]) : randInt(2, 12);
-      const divisor = randInt(13, 99);
-      return { display: `${divisor * factor} \u00f7 ${divisor}`, answer: factor, operation, category };
-    }
-    const da = randInt(13, 50), db = randInt(13, 50);
-    return { display: `${da * db} \u00f7 ${da}`, answer: db, operation, category };
-  }
-  if (operation === 'addition') {
-    const [a, b] = genAddPair(category);
-    return { display: `${a} + ${b}`, answer: a + b, operation, category };
-  }
-  if (operation === 'subtraction') {
-    const [sum, sub, ans] = genSubPair(category);
-    return { display: `${sum} \u2212 ${sub}`, answer: ans, operation, category };
-  }
-  const a = randInt(2, 50), b = randInt(2, 50);
-  return { display: `${a} + ${b}`, answer: a + b, operation: 'addition', category };
-}
-
-function genAddPair(category) {
-  for (let i = 0; i < 200; i++) {
-    let a, b;
-    switch (category) {
-      case 'Doubles':
-        a = randInt(2, 60); b = a; break;
-      case 'Near-Doubles':
-        a = randInt(2, 60); b = a + (Math.random() < 0.5 ? 1 : -1) * randInt(1, 2);
-        if (b < 2) b = a + 1; break;
-      case 'Single + Single':
-        a = randInt(2, 9); b = randInt(2, 9); break;
-      case 'Double + Single':
-        a = randInt(10, 99); b = randInt(2, 9);
-        if (Math.random() < 0.5) { const t = a; a = b; b = t; } break;
-      case 'Double + Double, no carry':
-        a = randInt(10, 89); b = randInt(10, 89); break;
-      case 'Double + Double, carry':
-        a = randInt(10, 89); b = randInt(10, 89); break;
-      case 'Triple-digit':
-        a = randInt(100, 200); b = randInt(2, 99);
-        if (Math.random() < 0.5) { const t = a; a = b; b = t; } break;
-      default:
-        a = randInt(2, 100); b = randInt(2, 100); break;
-    }
-    if (classifyAdd(a, b) === category) return [a, b];
-  }
-  return [randInt(2, 50), randInt(2, 50)];
-}
-
-function genSubPair(category) {
-  for (let i = 0; i < 200; i++) {
-    let sub, sum;
-    switch (category) {
-      case 'Close Numbers':
-        sub = randInt(10, 90);  sum = sub + randInt(2, 15); break;
-      case 'Round Subtrahend': {
-        const base = randInt(1, 9) * 10;
-        sub = base + (Math.random() < 0.5 ? -randInt(1, 2) : randInt(1, 2));
-        if (sub < 3) sub = base + 1;
-        sum = sub + randInt(10, 80); break;
-      }
-      case 'Triple-digit':
-        sub = randInt(10, 99);  sum = sub + randInt(100, 200); break;
-      default:
-        sub = randInt(11, 89);  sum = sub + randInt(10, 80); break;
-    }
-    const ans = sum - sub;
-    if (ans > 0 && classifySub(sum, sub, ans) === category) return [sum, sub, ans];
-  }
-  return [60, 25, 35];
-}
-
-// Tip helpers
-function getTip(q) {
-  try {
-    if (q.operation === 'multiplication') return getMultiplicationTip(q);
-    if (q.operation === 'division')       return getDivisionTip(q);
-    if (q.operation === 'addition')       return getAdditionTip(q);
-    if (q.operation === 'subtraction')    return getSubtractionTip(q);
-  } catch (_) {}
-  return '';
-}
-
-function getMultiplicationTip(q) {
-  const [a, b] = parseTwo(q.display, '\u00d7');
-  const lo = Math.min(a, b), hi = Math.max(a, b);
-  const ans = q.answer;
-  if (lo === 2)  return `Double: ${hi} + ${hi} = ${ans}`;
-  if (lo === 3)  return `Double then add once more: ${hi}\u00d72 = ${hi*2}, + ${hi} = ${ans}`;
-  if (lo === 4)  return `Double twice: ${hi} \u2192 ${hi*2} \u2192 ${ans}`;
-  if (lo === 5)  return `\u00d75: multiply by 10 then halve: ${hi}\u00d710 = ${hi*10}, \u00f72 = ${ans}`;
-  if (lo === 9)  return `\u00d79: ${hi}\u00d710 \u2212 ${hi}: ${hi*10} \u2212 ${hi} = ${ans}`;
-  if (lo === 12) return `\u00d712: ${hi}\u00d710 + ${hi}\u00d72: ${hi*10} + ${hi*2} = ${ans}`;
-  const tens = Math.floor(hi/10)*10, ones = hi%10;
-  if (tens > 0 && ones > 0) return `Split: ${lo}\u00d7${tens} + ${lo}\u00d7${ones} = ${lo*tens} + ${lo*ones} = ${ans}`;
-  return '';
-}
-
-function getDivisionTip(q) {
-  const [a, b] = parseTwo(q.display, '\u00f7');
-  const ans = q.answer;
-  if (b === 2)  return `Halve: ${a} \u00f7 2 = ${ans}`;
-  if (b === 5)  return `\u00f75: double then \u00f710: ${a}\u00d72 = ${a*2}, \u00f710 = ${ans}`;
-  if (b === 10) return `Drop the last zero: ${a} \u00f7 10 = ${ans}`;
-  if (b > 12) {
-    if (ans === 5) return `${b}\u00d75 = ${a}`;
-  }
-  return `What \u00d7 ${b} = ${a}? \u2192 ${ans} \u00d7 ${b} = ${a}`;
-}
-
-function getAdditionTip(q) {
-  const [a, b] = parseTwo(q.display, '+');
-  const ans = q.answer;
-  const diff = Math.abs(a - b);
-  if (diff === 0) return `Doubles: ${a} + ${a} = ${ans}`;
-  if (diff <= 2)  return `Near-doubles tip`;
-  return '';
-}
-
-function getSubtractionTip(q) {
-  const [a, b] = parseTwo(q.display, '\u2212');
-  const ans = q.answer;
-  if (ans <= 15) return `Count up: ${b} + ${ans} = ${a}`;
-  return '';
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -429,24 +288,134 @@ for (const cat of ['Squares', '\u00d72 tables', '\u00d77 tables', '\u00d712 tabl
 }
 
 // ── 13. Tips: return strings for known question types ────────
-console.log('\n13. Tips: non-empty strings for common cases');
-assert('tip: 7×45',  typeof getTip({ operation: 'multiplication', display: '7 \u00d7 45', answer: 315 }) === 'string');
-assert('tip: 315÷7', typeof getTip({ operation: 'division',       display: '315 \u00f7 7',  answer: 45  }) === 'string');
-assert('tip: 27+34', typeof getTip({ operation: 'addition',       display: '27 + 34',       answer: 61  }) === 'string');
-assert('tip: 75−29', typeof getTip({ operation: 'subtraction',    display: '75 \u2212 29',   answer: 46  }) === 'string');
+console.log('\n13. Tips: arithmetic correctness and coverage');
 
-// Spot-check specific tip content
-const t1 = getTip({ operation: 'multiplication', display: '2 \u00d7 47', answer: 94 });
-assert('tip ×2: mentions double', t1.toLowerCase().includes('double'), `got: "${t1}"`);
+// Every tip states worked numbers. Rather than checking for keywords, pull the
+// arithmetic claims back out of the string and verify they are actually true:
+// a tip that says "5×20 = 90" is worse than no tip at all.
+function checkTipArithmetic(label, q) {
+  const tip = getTip(q);
+  assert(`${label}: returns a string`, typeof tip === 'string', `got ${typeof tip}`);
+  if (!tip) return tip;
 
-const t2 = getTip({ operation: 'multiplication', display: '9 \u00d7 13', answer: 117 });
-assert('tip ×9: mentions ×10', t2.includes('10'), `got: "${t2}"`);
+  // Tips chain their working ("5×10 − 5 = 50 − 5 = 45"), so individual
+  // sub-expressions can't be pulled out reliably. What must always hold is
+  // that the line ENDS on a true value: either the answer, or — for the
+  // "recall the multiplication" style tips that work backwards — one of the
+  // operands from the display.
+  const nums = tip.match(/\d+/g);
+  if (!nums) return tip;
+  const last = +nums[nums.length - 1];
+  const sep = q.operation === 'multiplication' ? '×'
+            : q.operation === 'division'       ? '÷'
+            : q.operation === 'addition'       ? '+' : '−';
+  const [x, y] = parseTwo(q.display, sep);
+  const acceptable = [q.answer, x, y].filter(v => Number.isFinite(v));
+  assert(`${label}: tip resolves to a real value`, acceptable.includes(last),
+    `tip ended on ${last}, expected one of ${acceptable.join('/')} — "${tip}"`);
+  return tip;
+}
 
-const t3 = getTip({ operation: 'division', display: '80 \u00f7 2', answer: 40 });
-assert('tip ÷2: mentions halve', t3.toLowerCase().includes('halve'), `got: "${t3}"`);
+// Sweep every generated category and check both correctness and how often a
+// tip comes back empty. Categories that used to go silent: "Double + Single"
+// (~35% empty), "Large x Large" (~13%), "Single + Single" (~12%).
+const TIP_CATEGORIES = [
+  ['multiplication', 'Squares'], ['multiplication', '×2 tables'], ['multiplication', '×7 tables'],
+  ['multiplication', '×11 tables'], ['multiplication', '×12 tables'], ['multiplication', 'Large × Large'],
+  ['division', '÷2'], ['division', '÷7'], ['division', '÷9'],
+  ['division', '÷ large (×10 factor)'], ['division', 'Large ÷ Large'],
+  ['addition', 'Doubles'], ['addition', 'Near-Doubles'], ['addition', 'Single + Single'],
+  ['addition', 'Double + Single'], ['addition', 'Double + Double, carry'],
+  ['addition', 'Double + Double, no carry'], ['addition', 'Triple-digit'],
+  ['subtraction', 'Close Numbers'], ['subtraction', 'Round Subtrahend'],
+  ['subtraction', 'Two-digit, borrow'], ['subtraction', 'Two-digit, no borrow'],
+  ['subtraction', 'Triple-digit'],
+];
 
-const t4 = getTip({ operation: 'subtraction', display: '32 \u2212 27', answer: 5 });
-assert('tip close sub: mentions count up', t4.toLowerCase().includes('count up'), `got: "${t4}"`);
+const SAMPLES = 200;
+const emptyReport = [];
+for (const [op, cat] of TIP_CATEGORIES) {
+  let empty = 0;
+  for (let i = 0; i < SAMPLES; i++) {
+    const q = generateForCategory(op, cat);
+    const tip = checkTipArithmetic(`${op}/${cat}`, q);
+    if (!tip) empty++;
+  }
+  const pct = Math.round(empty / SAMPLES * 100);
+  if (pct > 0) emptyReport.push(`${op}/${cat}: ${pct}% empty`);
+  assert(`tip coverage ${op}/${cat} (${pct}% empty)`, pct <= 5,
+    `${empty}/${SAMPLES} generated questions produced no tip`);
+}
+if (emptyReport.length) console.log('  note — categories still returning empty tips: ' + emptyReport.join(', '));
+
+// Specific tricks still say what they should.
+assert('tip ×2 mentions double',
+  getMultiplicationTip({ operation: 'multiplication', display: '2 × 47', answer: 94 }).toLowerCase().includes('double'));
+assert('tip ×9 uses the ×10 shortcut',
+  getMultiplicationTip({ operation: 'multiplication', display: '9 × 13', answer: 117 }).includes('10'));
+assert('tip ÷2 mentions halve',
+  getDivisionTip({ operation: 'division', display: '80 ÷ 2', answer: 40 }).toLowerCase().includes('halve'));
+assert('tip for close subtraction counts up',
+  getSubtractionTip({ operation: 'subtraction', display: '32 − 27', answer: 5 }).toLowerCase().includes('count up'));
+
+// The ×11 digit-sandwich trick, including the carry case.
+assert('×11 sandwich without carry (11×35=385)',
+  getMultiplicationTip({ operation: 'multiplication', display: '11 × 35', answer: 385 }).includes('3|8|5'));
+assert('×11 sandwich with carry (11×87=957)',
+  getMultiplicationTip({ operation: 'multiplication', display: '11 × 87', answer: 957 }).includes('9|5|7'));
+assert('×11 sandwich with carry (11×99=1089)',
+  getMultiplicationTip({ operation: 'multiplication', display: '11 × 99', answer: 1089 }).includes('10|8|9'));
+
+// Regressions this pass fixed.
+assert('round-ten × round-ten gets a tip (20×30)',
+  getMultiplicationTip({ operation: 'multiplication', display: '20 × 30', answer: 600 }) !== '');
+assert('single + double-digit gets a tip (5 + 90)',
+  getAdditionTip({ operation: 'addition', display: '5 + 90', answer: 95 }) !== '');
+assert('quotient of 10 gets a tip (250 ÷ 25)',
+  getDivisionTip({ operation: 'division', display: '250 ÷ 25', answer: 10 }) !== '');
+assert('round subtrahend avoids the "− 0" noise (75 − 30)',
+  !/−\s*0\b/.test(getSubtractionTip({ operation: 'subtraction', display: '75 − 30', answer: 45 })),
+  getSubtractionTip({ operation: 'subtraction', display: '75 − 30', answer: 45 }));
+
+// ── 13b. Adaptive selection ──────────────────────────────────
+console.log('\n13b. Adaptive category weighting');
+{
+  // categoryWeight reads the module-level categoryStats, so seed it.
+  const seed = {
+    'multiplication|fast': { operation: 'multiplication', category: 'fast', count: 40, totalMs: 40 * 600,  mistakes: 0 },
+    'division|slow':       { operation: 'division',       category: 'slow', count: 40, totalMs: 40 * 5200, mistakes: 20 },
+  };
+  setCategoryStats(seed);
+  const wFast = categoryWeight('multiplication|fast', {});
+  const wSlow = categoryWeight('division|slow', {});
+  assert('slow + error-prone category outweighs the fast clean one', wSlow > wFast * 3,
+    `fast=${wFast.toFixed(2)} slow=${wSlow.toFixed(2)}`);
+  assert('an unseen category gets neutral weight', categoryWeight('addition|never-seen', {}) === 1);
+
+  // Weights are bounded so one category cannot take over completely.
+  seed['division|awful'] =
+    { operation: 'division', category: 'awful', count: 10, totalMs: 10 * 60000, mistakes: 10 };
+  setCategoryStats(seed);
+  assert('weight is capped for pathological categories', categoryWeight('division|awful', {}) <= 9,
+    `got ${categoryWeight('division|awful', {})}`);
+
+  // The draw honours the weights and still returns every key sometimes.
+  const keys = ['multiplication|fast', 'division|slow'];
+  const counts = { 'multiplication|fast': 0, 'division|slow': 0 };
+  for (let i = 0; i < 4000; i++) counts[pickWeightedKey(keys, {})]++;
+  assert('weighted draw favours the weak category',
+    counts['division|slow'] > counts['multiplication|fast'] * 2,
+    JSON.stringify(counts));
+  assert('weighted draw still surfaces the strong category sometimes',
+    counts['multiplication|fast'] > 0, JSON.stringify(counts));
+
+  // In-session results shift the weighting without touching history.
+  const live = { 'multiplication|fast': { count: 30, totalMs: 30 * 9000, mistakes: 25 } };
+  assert('a bad run in-session raises that category\'s weight',
+    categoryWeight('multiplication|fast', live) > wFast,
+    `was ${wFast.toFixed(2)}, now ${categoryWeight('multiplication|fast', live).toFixed(2)}`);
+  setCategoryStats({});
+}
 
 // ── 14. Edge cases ───────────────────────────────────────────
 console.log('\n14. Edge cases');

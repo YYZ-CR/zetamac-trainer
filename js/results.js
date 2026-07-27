@@ -339,9 +339,38 @@ function round1(v) {
   return Math.round(v * 10) / 10;
 }
 
+// A 200-question run rendered every row at once — a 6000px wall of table.
+// Show a first page and let the user pull in the rest.
+const BREAKDOWN_PAGE = 25;
+
 function renderBreakdown(session) {
   const tbody = document.getElementById('breakdown-tbody');
-  session.questions.forEach((q, i) => {
+  const more  = document.getElementById('breakdown-more');
+  const btn   = document.getElementById('breakdown-more-btn');
+  const total = session.questions.length;
+  let shown   = 0;
+
+  function paint() {
+    const next = Math.min(shown + BREAKDOWN_PAGE, total);
+    appendRows(tbody, session.questions, shown, next);
+    shown = next;
+    if (!more || !btn) return;
+    if (shown >= total) {
+      more.style.display = 'none';
+    } else {
+      more.style.display = 'block';
+      const remaining = total - shown;
+      btn.textContent = `Show ${Math.min(BREAKDOWN_PAGE, remaining)} more (${remaining} left)`;
+    }
+  }
+
+  if (btn) btn.addEventListener('click', paint);
+  paint();
+}
+
+function appendRows(tbody, questions, from, to) {
+  for (let i = from; i < to; i++) {
+    const q = questions[i];
     const tr = document.createElement('tr');
     if (q.hadMistake) tr.classList.add('had-mistake');
     tr.innerHTML = `
@@ -354,7 +383,7 @@ function renderBreakdown(session) {
       }</td>
     `;
     tbody.appendChild(tr);
-  });
+  }
 }
 
 function renderFeedback(session) {
@@ -439,177 +468,7 @@ function renderFeedback(session) {
   `;
 }
 
-// ── Tips ──────────────────────────────────────────────────────────
-
-function getTip(q) {
-  try {
-    if (q.operation === 'multiplication') return getMultiplicationTip(q);
-    if (q.operation === 'division')       return getDivisionTip(q);
-    if (q.operation === 'addition')       return getAdditionTip(q);
-    if (q.operation === 'subtraction')    return getSubtractionTip(q);
-  } catch (_) {}
-  return '';
-}
-
-function parseTwo(display, sep) {
-  const parts = display.split(sep);
-  return [parseInt(parts[0].trim(), 10), parseInt(parts[1].trim(), 10)];
-}
-
-function getMultiplicationTip(q) {
-  const [a, b] = parseTwo(q.display, '\u00d7');
-  const lo = Math.min(a, b), hi = Math.max(a, b);
-  const ans = q.answer;
-
-  // Tricks for each small multiplier (default config mulMin1=2, mulMax1=12)
-  if (lo === 2)  return `Double: ${hi} + ${hi} = ${ans}`;
-  if (lo === 3)  return `Double then add once more: ${hi}\u00d72 = ${hi * 2}, + ${hi} = ${ans}`;
-  if (lo === 4)  return `Double twice: ${hi} \u2192 ${hi * 2} \u2192 ${ans}`;
-  if (lo === 5)  return `\u00d75: multiply by 10 then halve: ${hi}\u00d710 = ${hi * 10}, \u00f72 = ${ans}`;
-  if (lo === 6)  return `\u00d76: 5\u00d7${hi} + ${hi}: ${hi * 5} + ${hi} = ${ans}`;
-  if (lo === 7)  return `\u00d77: ${hi}\u00d710 \u2212 ${hi}\u00d73: ${hi * 10} \u2212 ${hi * 3} = ${ans}`;
-  if (lo === 8)  return `\u00d78: double three times: ${hi} \u2192 ${hi * 2} \u2192 ${hi * 4} \u2192 ${ans}`;
-  if (lo === 9)  return `\u00d79: ${hi}\u00d710 \u2212 ${hi}: ${hi * 10} \u2212 ${hi} = ${ans}`;
-  if (lo === 10) return `Append a zero: ${hi}\u00d710 = ${ans}`;
-
-  if (lo === 11) {
-    // Digit-sandwich trick for 2-digit numbers: 11 \u00d7 AB = A(A+B)B
-    if (hi >= 10 && hi <= 99) {
-      const d1 = Math.floor(hi / 10), d2 = hi % 10, s = d1 + d2;
-      if (s < 10)
-        return `\u00d711 trick: put digit-sum (${d1}+${d2}=${s}) between the digits: ${d1}|${s}|${d2} = ${ans}`;
-      else
-        return `\u00d711 trick: digit-sum ${d1}+${d2}=${s} (carry 1): ${d1 + 1}|${s - 10}|${d2} = ${ans}`;
-    }
-    return `\u00d711: ${hi}\u00d710 + ${hi}: ${hi * 10} + ${hi} = ${ans}`;
-  }
-
-  if (lo === 12) return `\u00d712: ${hi}\u00d710 + ${hi}\u00d72: ${hi * 10} + ${hi * 2} = ${ans}`;
-
-  // Fallback: round nearest factor to multiple of 10 and compensate
-  const roundHi = Math.round(hi / 10) * 10, diff = hi - roundHi;
-  if (roundHi !== 0 && Math.abs(diff) <= 2 && diff !== 0) {
-    const sign = diff > 0 ? '+' : '\u2212';
-    return `Round: ${lo}\u00d7${roundHi} = ${lo * roundHi}, ${sign} ${lo}\u00d7${Math.abs(diff)} = ${Math.abs(lo * diff)} \u2192 ${ans}`;
-  }
-
-  // Split larger factor: lo\u00d7hi = lo\u00d7(tens+ones)
-  const tens = Math.floor(hi / 10) * 10, ones = hi % 10;
-  if (tens > 0 && ones > 0)
-    return `Split: ${lo}\u00d7${tens} + ${lo}\u00d7${ones} = ${lo * tens} + ${lo * ones} = ${ans}`;
-
-  return '';
-}
-
-function getDivisionTip(q) {
-  const [a, b] = parseTwo(q.display, '\u00f7');
-  const ans = q.answer;
-
-  // Small divisor tricks (b = 2\u201312)
-  if (b === 2)  return `Halve: ${a} \u00f7 2 = ${ans}`;
-  if (b === 3)  return `Recall \u00d73 = double+add: ${ans}\u00d72 = ${ans * 2}, + ${ans} = ${a}`;
-  if (b === 4)  return `Halve twice: ${a} \u2192 ${a / 2} \u2192 ${ans}`;
-  if (b === 5)  return `\u00f75: double then \u00f710: ${a}\u00d72 = ${a * 2}, \u00f710 = ${ans}`;
-  if (b === 6)  return `\u00f76: halve then \u00f73: ${a} \u00f7 2 = ${a / 2}, \u00f7 3 = ${ans}`;
-  if (b === 7)  return `Recall \u00d77 = \u00d710\u2212\u00d73: ${ans}\u00d710 \u2212 ${ans}\u00d73 = ${ans * 10} \u2212 ${ans * 3} = ${a}`;
-  if (b === 8)  return `Halve three times: ${a} \u2192 ${a / 2} \u2192 ${a / 4} \u2192 ${ans}`;
-  if (b === 9)  return `Recall \u00d79 = \u00d710\u2212n: ${ans}\u00d710 \u2212 ${ans} = ${ans * 10} \u2212 ${ans} = ${a}`;
-  if (b === 10) return `Drop the last zero: ${a} \u00f7 10 = ${ans}`;
-  if (b === 11) return `Recall \u00d711 = \u00d710+n: ${ans}\u00d710 + ${ans} = ${ans * 10} + ${ans} = ${a}`;
-  if (b === 12) return `Recall \u00d712 = \u00d710+\u00d72: ${ans}\u00d710 + ${ans}\u00d72 = ${ans * 10} + ${ans * 2} = ${a}`;
-
-  // Large divisor (b > 12): ans is the small factor; tip based on ans's multiplication trick
-  if (b > 12) {
-    if (ans === 2)  return `${b}\u00d72 = ${a} \u2192 just double ${b}: ${b} + ${b} = ${a}`;
-    if (ans === 3)  return `${b}\u00d73 = ${a} \u2192 double+add: ${b * 2} + ${b} = ${a}`;
-    if (ans === 4)  return `${b}\u00d74 = ${a} \u2192 double twice: ${b} \u2192 ${b * 2} \u2192 ${a}`;
-    if (ans === 5)  return `${b}\u00d75 = ${a} \u2192 ${b}\u00d710\u00f72: ${b * 10}\u00f72 = ${a}`;
-    if (ans === 6)  return `${b}\u00d76 = ${a} \u2192 5\u00d7${b} + ${b}: ${b * 5} + ${b} = ${a}`;
-    if (ans === 7)  return `${b}\u00d77 = ${a} \u2192 ${b}\u00d710\u2212${b}\u00d73: ${b * 10}\u2212${b * 3} = ${a}`;
-    if (ans === 8)  return `${b}\u00d78 = ${a} \u2192 double 3\u00d7: ${b}\u2192${b * 2}\u2192${b * 4}\u2192${a}`;
-    if (ans === 9)  return `${b}\u00d79 = ${a} \u2192 ${b}\u00d710\u2212${b}: ${b * 10}\u2212${b} = ${a}`;
-    if (ans === 11) return `${b}\u00d711 = ${a} \u2192 ${b}\u00d710+${b}: ${b * 10}+${b} = ${a}`;
-    if (ans === 12) return `${b}\u00d712 = ${a} \u2192 ${b}\u00d710+${b}\u00d72: ${b * 10}+${b * 2} = ${a}`;
-  }
-
-  return `What \u00d7 ${b} = ${a}? \u2192 ${ans} \u00d7 ${b} = ${a}`;
-}
-
-function getAdditionTip(q) {
-  const [a, b] = parseTwo(q.display, '+');
-  const ans = q.answer;
-
-  // Near-doubles: when both numbers are equal or differ by 1\u20132
-  const diff = Math.abs(a - b);
-  if (diff <= 2) {
-    const smaller = Math.min(a, b);
-    if (diff === 0) return `Doubles: ${a} + ${a} = ${ans}`;
-    return `Near-doubles: ${smaller} + ${smaller} = ${smaller * 2}, + ${diff} = ${ans}`;
-  }
-
-  // Bridge through nearest multiple of 10: take from one addend to round the other
-  const ceilA = Math.ceil(a / 10) * 10, toA = ceilA - a;
-  if (toA > 0 && toA <= 4 && b >= toA)
-    return `Bridge through ${ceilA}: ${a} + ${toA} = ${ceilA}, + ${b - toA} = ${ans}`;
-
-  const ceilB = Math.ceil(b / 10) * 10, toB = ceilB - b;
-  if (toB > 0 && toB <= 4 && a >= toB)
-    return `Bridge through ${ceilB}: ${b} + ${toB} = ${ceilB}, + ${a - toB} = ${ans}`;
-
-  // Round and compensate: round the near-10 addend, adjust the other
-  const roundA = Math.round(a / 10) * 10, gapA = roundA - a; // positive = rounded up
-  if (gapA >= 1 && gapA <= 4 && b >= gapA)
-    return `Round ${a}\u2192${roundA}: ${roundA} + ${b - gapA} = ${ans}`;
-
-  const roundB = Math.round(b / 10) * 10, gapB = roundB - b;
-  if (gapB >= 1 && gapB <= 4 && a >= gapB)
-    return `Round ${b}\u2192${roundB}: ${a - gapB} + ${roundB} = ${ans}`;
-
-  // Left-to-right: add tens then ones
-  const tensA = Math.floor(a / 10) * 10, onesA = a % 10;
-  const tensB = Math.floor(b / 10) * 10, onesB = b % 10;
-  if (tensA > 0 && tensB > 0) {
-    const onesSum = onesA + onesB;
-    if (onesSum >= 10)
-      return `Left-to-right: ${tensA}+${tensB}=${tensA + tensB}, then ${onesA}+${onesB}=${onesSum} (carry 1) \u2192 ${ans}`;
-    return `Left-to-right: ${tensA}+${tensB}=${tensA + tensB}, then +${onesSum} = ${ans}`;
-  }
-
-  return '';
-}
-
-function getSubtractionTip(q) {
-  // Display uses U+2212 (\u2212) as minus sign
-  const [a, b] = parseTwo(q.display, '\u2212');
-  const ans = q.answer;
-
-  // Count up when the answer is small (numbers are close)
-  if (ans <= 15)
-    return `Count up: ${b} + ${ans} = ${a}`;
-
-  // Round subtrahend to nearest 10 and adjust
-  // diffB = b \u2212 roundB: negative means b was rounded UP (over-subtracted \u2192 add back)
-  //                          positive means b was rounded DOWN (under-subtracted \u2192 subtract more)
-  const roundB = Math.round(b / 10) * 10, diffB = b - roundB;
-  if (Math.abs(diffB) <= 4 && diffB !== 0) {
-    if (diffB < 0) {
-      // e.g. b=29, roundB=30: over-subtracted by 1, add back Math.abs(diffB)
-      return `Round up: ${a} \u2212 ${roundB} = ${a - roundB}, add back ${Math.abs(diffB)} \u2192 ${ans}`;
-    } else {
-      // e.g. b=31, roundB=30: under-subtracted by 1, subtract diffB more
-      return `Round down: ${a} \u2212 ${roundB} = ${a - roundB}, \u2212 ${diffB} more \u2192 ${ans}`;
-    }
-  }
-
-  // Left-to-right: subtract tens then ones
-  const tensA = Math.floor(a / 10) * 10, onesA = a % 10;
-  const tensB = Math.floor(b / 10) * 10, onesB = b % 10;
-  if (onesA >= onesB)
-    return `Left-to-right: ${tensA}\u2212${tensB}=${tensA - tensB}, then \u2212${onesB}+${onesA} \u2192 ${ans}`;
-
-  // Need to borrow: subtract rounded tens, then handle ones
-  return `Left-to-right: ${a}\u2212${tensB}=${a - tensB}, then \u2212${onesB} \u2192 ${ans}`;
-}
+// Mental-math tips live in js/tips.js, shared with practice mode.
 
 // Rebuild the run graph in the new palette when the theme is toggled.
 window.addEventListener('zt-theme-change', () => {

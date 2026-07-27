@@ -98,6 +98,19 @@ async function getUserSessions(userId, limit = 30) {
   return error ? [] : (data ?? []);
 }
 
+// Exact number of games a user has played. getUserSessions caps how many rows
+// it pulls (each one carries a full questions payload), so its length is not
+// the total — the dashboard used to report the capped figure as "Total Games"
+// and silently stop counting past the limit.
+async function countUserSessions(userId) {
+  if (!dbReady()) return null;
+  const { count, error } = await supabaseClient
+    .from('game_sessions')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', userId);
+  return error ? null : count;
+}
+
 // ── Profiles ─────────────────────────────────────────────────
 
 async function getProfile(userId) {

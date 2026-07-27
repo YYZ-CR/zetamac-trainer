@@ -2,6 +2,7 @@
   "name": "zetamac-trainer",
   "private": true,
   "scripts": {
-    "dev": "npx serve ."
+    "dev": "npx serve .",
+    "test": "node test_practice.js"
   }
 }

@@ -1083,3 +1083,17 @@ body.practice-page {
   letter-spacing: 1px;
   white-space: nowrap;
 }
+
+/* "Show more" control under the results breakdown table */
+.breakdown-more {
+  margin-top: 10px;
+  text-align: center;
+}
+
+/* Caveat under the dashboard stat cards when they cover a window, not all time */
+.stats-note {
+  max-width: 800px;
+  margin: -8px auto 18px;
+  font-size: 12px;
+  color: var(--c-ink-soft);
+}

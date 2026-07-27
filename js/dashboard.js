@@ -46,10 +46,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // ── Load data ─────────────────────────────────────────────
-  const [profile, sessions] = await Promise.all([
+  const SESSION_WINDOW = 500;   // rows pulled for the chart and table
+  const [profile, sessions, totalGames] = await Promise.all([
     getProfile(user.id),
-    getUserSessions(user.id, 500),
+    getUserSessions(user.id, SESSION_WINDOW),
+    countUserSessions(user.id),
   ]);
+  // countUserSessions returns null when the client is unavailable; fall back to
+  // what we actually loaded rather than showing nothing.
+  const trueTotal = typeof totalGames === 'number' ? totalGames : sessions.length;
+  const truncated = trueTotal > sessions.length;
 
   document.getElementById('username-display').textContent =
     profile?.username ? `Logged in as ${profile.username}` : user.email;
@@ -68,8 +74,21 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   document.getElementById('stat-best').textContent  = best;
   document.getElementById('stat-avg').textContent   = avg10;
-  document.getElementById('stat-games').textContent = sessions.length;
+  document.getElementById('stat-games').textContent = trueTotal;
   document.getElementById('stats-row').style.display = 'flex';
+
+  // Be explicit when the other figures only cover the loaded window, instead
+  // of quietly presenting them as all-time.
+  const note = document.getElementById('stats-note');
+  if (note) {
+    if (truncated) {
+      note.textContent =
+        `Personal best, the chart and the table cover your most recent ${sessions.length} games of ${trueTotal}.`;
+      note.style.display = 'block';
+    } else {
+      note.style.display = 'none';
+    }
+  }
 
   // ── Chart ─────────────────────────────────────────────────
   document.getElementById('chart-panel').style.display = 'block';
