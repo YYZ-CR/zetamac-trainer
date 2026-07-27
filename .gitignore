@@ -1,1 +1,9 @@
 # config.js is intentionally committed — Supabase anon key is safe to expose in frontend code
+
+# Test tooling only. The site is static and loads its dependencies from a CDN,
+# so nothing here is needed to serve or deploy the app.
+node_modules/
+
+# Screenshots and scratch output from browser-driven tests
+*.local.png
+/tmp-shots/
