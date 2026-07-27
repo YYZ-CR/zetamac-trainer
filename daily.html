@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zetamac Daily — Arithmetic Trainer</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="js/theme.js"></script>
+</head>
+<body class="daily-page">
+
+  <div class="top-bar" id="top-bar"></div>
+
+  <div class="daily-wrap">
+
+    <div class="daily-head">
+      <h1>Zetamac Daily</h1>
+      <div class="daily-meta" id="daily-meta"></div>
+    </div>
+
+    <!-- Shown until the day's state resolves one way or the other -->
+    <div class="daily-loading" id="daily-loading">Loading today's puzzle…</div>
+
+    <!-- Signed out, or the daily RPCs are not deployed / unreachable -->
+    <div class="daily-notice" id="daily-notice" style="display:none"></div>
+
+    <!-- Not played yet: the rules, then the irreversible Start -->
+    <div class="panel" id="daily-intro" style="display:none"></div>
+
+    <!-- Complete or expired: the server's result, or what went wrong -->
+    <div id="daily-result" style="display:none"></div>
+
+    <div class="panel" id="daily-board-panel" style="display:none">
+      <div class="panel-head">
+        <h2>Today's Leaderboard</h2>
+        <span class="panel-note" id="daily-board-note"></span>
+      </div>
+      <div id="daily-board"></div>
+    </div>
+
+    <p class="daily-reset" id="daily-reset" style="display:none" role="status" aria-live="polite"></p>
+
+  </div>
+
+  <!-- The run itself. Same markup and classes as game.html — the daily is the
+       same game with a server-supplied question list and a server-supplied
+       clock, so it must not look or behave like a different one. -->
+  <div class="daily-game" id="daily-game" style="display:none">
+    <div class="game-hud">
+      <span id="daily-timer">Seconds left: —</span>
+      <span id="daily-answered">Answered: 0</span>
+    </div>
+
+    <div class="game-area">
+      <span class="question-text" id="daily-question"></span>
+      <input
+        type="text"
+        class="answer-input"
+        id="daily-input"
+        inputmode="numeric"
+        autocomplete="off"
+        autocorrect="off"
+        autocapitalize="off"
+        spellcheck="false"
+        aria-label="Answer"
+      >
+    </div>
+
+    <!-- Submitting, or submit failed and needs retrying -->
+    <div class="gameover-overlay" id="daily-overlay" style="display:none"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/util.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/db.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/daily.js"></script>
+</body>
+</html>

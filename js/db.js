@@ -319,3 +319,101 @@ async function claimSessions(userId) {
     localStorage.removeItem('pending_sessions');
   }
 }
+
+// ── Zetamac Daily ────────────────────────────────────────────
+// One puzzle a day, the same questions for everyone, one ranked attempt.
+// Every call here is a SECURITY DEFINER RPC from supabase/daily.sql; the exact
+// payload shapes are pinned in docs/daily-design.md. Two properties of that
+// design decide the shape of this section:
+//
+//   * The client is never told the day's questions until it has spent its
+//     attempt, so there is no table to read directly and no fallback path the
+//     way getSession()/isUsernameAvailable() have — without the migration the
+//     daily simply does not exist.
+//   * The client is never consulted about the score. submitDaily() sends
+//     answers and returns whatever the server decided; nothing here computes
+//     or adjusts a score.
+//
+// Why the failure reason is recorded rather than thrown: null is a legitimate
+// answer from all four of these — not signed in, migration not applied,
+// network down — and daily.html has to word "you haven't played yet" very
+// differently from "the daily isn't deployed". Same reasoning as
+// lastSocialError above, kept as a separate variable so a failed leaderboard
+// read can never be mistaken for a failed profile read. Null means "the last
+// daily call was fine".
+let lastDailyError = null;
+
+// A JSONB-returning function normally comes back as the object itself, but
+// PostgREST wraps some function results in a single-element array. All four
+// daily RPCs return JSONB, so the unwrapping lives in one place.
+function unwrapRpc(data) {
+  return Array.isArray(data) ? (data[0] ?? null) : (data ?? null);
+}
+
+// Shared body for the four daily RPCs: guard, call, unwrap, and record why it
+// failed instead of throwing. Returns the payload, or null.
+async function dailyRpc(fn, args) {
+  lastDailyError = null;
+  if (!dbReady()) { lastDailyError = 'Supabase client unavailable'; return null; }
+
+  try {
+    const { data, error } = await supabaseClient.rpc(fn, args || {});
+    if (error) {
+      console.warn(fn + ':', error.message);
+      lastDailyError = error.message || (fn + ' failed');
+      return null;
+    }
+    return unwrapRpc(data);
+  } catch (e) {
+    console.warn(fn + ' threw:', e);
+    lastDailyError = String(e?.message ?? e);
+    return null;
+  }
+}
+
+// Begin (or resume) the caller's attempt at today's puzzle:
+// { puzzle_number, puzzle_date, duration_seconds, started_at,
+//   seconds_remaining, status, questions, result }.
+//
+// Idempotent by design — calling it again returns the SAME attempt with the
+// real remaining time, which is what makes a refresh mid-run resume instead of
+// restart. `questions` is present only while the attempt is live; once the
+// window has closed the payload carries the result and no questions, so the
+// day's puzzle cannot be read by burning an attempt early. Requires a signed-in
+// caller: one attempt cannot be enforced against an anonymous player.
+async function startDaily() {
+  return dailyRpc('start_daily');
+}
+
+// Submit the caller's answers — `[{ i, value, elapsed_ms }]`, elapsed_ms
+// measured from the start of the run and non-decreasing — and return the
+// server's verdict: { score, total_answered, accuracy, puzzle_number, rank,
+// players, flagged }. This is the only place a daily score is decided; the
+// client's own count is a guess and must never be shown in its place.
+async function submitDaily(answers) {
+  if (!Array.isArray(answers)) {
+    lastDailyError = 'submitDaily expects an array of answers';
+    return null;
+  }
+  return dailyRpc('submit_daily', { p_answers: answers });
+}
+
+// What has happened to the caller today: { puzzle_number, puzzle_date,
+// duration_seconds, played, status, seconds_until_reset, result }. Drives the
+// landing page without exposing the questions.
+async function getDailyStatus() {
+  return dailyRpc('get_daily_status');
+}
+
+// Today's board: { puzzle_number, players, rows: [{ rank, username, score,
+// accuracy }], you }. `you` is null when the caller has not completed an
+// attempt, and is returned even when their rank falls outside the top `limit`.
+// Complete attempts only. Usernames in `rows` are user-controlled — escape
+// them before they reach innerHTML.
+async function getDailyLeaderboard(date, limit = 100) {
+  const n = Number(limit);
+  return dailyRpc('get_daily_leaderboard', {
+    p_date:  date ? String(date) : null,
+    p_limit: Number.isFinite(n) && n > 0 ? Math.floor(n) : 100,
+  });
+}
