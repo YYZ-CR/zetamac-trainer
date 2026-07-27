@@ -5,10 +5,9 @@
 // public URL, so the username and every figure derived from a profile is
 // user-controlled and must be escaped before it reaches innerHTML.
 
-// Below this many ranked players a percentile is a statement about a handful
-// of people, not about "players", so the figure is hidden entirely rather than
-// shown with a caveat. Lives here — one place, no migration needed to tune it.
-const PERCENTILE_MIN_PLAYERS = 20;
+// PERCENTILE_MIN_PLAYERS and percentilePercent() come from js/util.js, which
+// every page loads. The results page shows the same figure, and a threshold
+// kept in two files drifts — invisibly, until someone compares two pages.
 
 // Percentile is shown for one duration only. 120s is the standard Zetamac run
 // and by far the most played, so it is the one comparison worth making.
@@ -256,16 +255,10 @@ async function renderPercentile(bests) {
   }
   if (!res) return;
 
-  const players    = Number(res.players);
-  const percentile = numberOrNull(res.percentile);
-  // Below the threshold, say nothing about ranking at all — a percentile drawn
-  // from a dozen people is noise dressed up as a measurement.
-  if (percentile === null || !(players >= PERCENTILE_MIN_PLAYERS)) return;
-
-  // A strictly-below fraction can round to 100 for the top player; claiming
-  // "faster than 100% of players" would include themselves.
-  const raw = Math.round(percentile * 100);
-  const pct = percentile < 1 ? Math.min(raw, 99) : raw;
+  // Below the threshold this returns null and the line stays hidden: a
+  // percentile drawn from a dozen people is noise dressed up as a measurement.
+  const pct = percentilePercent(res);
+  if (pct === null) return;
 
   const el = document.getElementById('percentile-line');
   el.innerHTML = `Faster than <strong>${escapeHtml(pct)}%</strong> of players at ${escapeHtml(PERCENTILE_DURATION)} seconds.`;

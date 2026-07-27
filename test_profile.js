@@ -89,6 +89,32 @@ try { bare = atUrl('/@100%'); } catch (_) { threw = true; }
 assert('a malformed percent escape does not throw', !threw);
 assert('a malformed percent escape still yields the raw name', bare === '100%');
 
+// ── percentilePercent (js/util.js) ───────────────────────────
+// Shared by the profile page and the results page, which is the point: a
+// threshold kept in two files drifts, and the drift is invisible until
+// someone compares two pages.
+console.log('\npercentilePercent');
+
+const utilBox = { console };
+vm.createContext(utilBox);
+vm.runInContext(fs.readFileSync(path.join(__dirname, 'js', 'util.js'), 'utf8'), utilBox);
+const pp = (percentile, players) =>
+  vm.runInContext('percentilePercent(__r)', Object.assign(utilBox, { __r: { percentile, players } }));
+
+assert('a healthy population renders a whole percent', pp(0.784, 412) === 78);
+assert('rounds to nearest',                            pp(0.786, 412) === 79);
+assert('a thin population says nothing',               pp(0.9, 19) === null);
+assert('exactly at the threshold speaks',              pp(0.5, 20) === 50);
+assert('a null percentile says nothing',               pp(null, 400) === null);
+assert('a null payload says nothing',
+  vm.runInContext('percentilePercent(null)', utilBox) === null);
+
+// The top player's strictly-below fraction rounds to 100, and "faster than
+// 100% of players" would include themselves.
+assert('a fraction below 1 never claims 100', pp(0.9999, 4000) === 99);
+assert('an exact 1.0 is allowed to say 100',  pp(1, 4000) === 100);
+assert('the bottom of the field is 0',        pp(0, 400) === 0);
+
 // ── Summary ──────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
