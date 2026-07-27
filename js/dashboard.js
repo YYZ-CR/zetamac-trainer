@@ -60,6 +60,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('username-display').textContent =
     profile?.username ? `Logged in as ${profile.username}` : user.email;
 
+  // Before the empty-state return below: a user with no games still has a
+  // profile to publish, and the link is how anyone finds it.
+  renderProfilePanel(profile);
+
   if (sessions.length === 0) {
     document.getElementById('games-panel').style.display = 'block';
     document.getElementById('games-tbody').innerHTML =
@@ -179,6 +183,118 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   renderPage();
 });
+
+// ── Public profile controls ───────────────────────────────────
+// The dashboard is where a profile is published, unpublished and shared. It
+// needs a profile row to have anything to say: a signed-in user without one
+// has no username, so there is no URL to show and nothing to publish.
+
+function renderProfilePanel(profile) {
+  const panel = document.getElementById('profile-panel');
+  if (!panel || !profile || !profile.username) return;
+
+  const username = String(profile.username);
+
+  // vercel.json rewrites /@name to profile.html?u=name, so /@name is the form
+  // worth showing — but the href must be the real query-string URL, or the
+  // link is broken everywhere except production (there are no rewrites under
+  // a plain static server).
+  const href = 'profile.html?u=' + encodeURIComponent(username);
+  const link = document.getElementById('profile-link');
+  link.setAttribute('href', href);
+  // textContent, not innerHTML: the username is user-controlled.
+  link.textContent = '/@' + username;
+
+  // Absolute, because the copied form is going somewhere else entirely.
+  const absoluteUrl = new URL(href, window.location.href).toString();
+
+  const check  = document.getElementById('profile-public-check');
+  const badge  = document.getElementById('profile-visibility-badge');
+  const note   = document.getElementById('profile-visibility-note');
+  const status = document.getElementById('profile-visibility-status');
+
+  // profiles.is_public arrives with social.sql. Until that migration is
+  // applied the column is simply absent from the row, and `undefined` would
+  // read as "private" from a control that could never make it public. Offer
+  // the link, disable the toggle, and say which of the two it is.
+  const hasVisibility = Object.prototype.hasOwnProperty.call(profile, 'is_public');
+  let isPublic = hasVisibility && !!profile.is_public;
+
+  check.checked  = isPublic;
+  check.disabled = !hasVisibility;
+
+  function describe() {
+    if (!hasVisibility) {
+      badge.textContent = 'Unavailable';
+      note.textContent  =
+        'Publishing is unavailable on this deployment — the database is missing the ' +
+        'visibility column. Your profile stays private, and only you can open this link.';
+      return;
+    }
+    badge.textContent = isPublic ? 'Public' : 'Private';
+    note.textContent  = isPublic
+      ? 'Anyone with this link can see your stats.'
+      : 'This link only works for you while your profile is private — everyone else ' +
+        'opening it is told the profile does not exist.';
+  }
+  describe();
+
+  function setStatus(text, kind) {
+    status.textContent = text;
+    status.className = 'profile-visibility-status' + (kind ? ' is-' + kind : '');
+  }
+
+  check.addEventListener('change', async () => {
+    if (!hasVisibility) return;
+
+    const wanted   = check.checked;
+    const previous = isPublic;
+
+    // Disabled for the whole round trip: a fast double-click would otherwise
+    // put two updates in flight and let whichever landed last decide the
+    // database, while the checkbox showed whichever was clicked last.
+    check.disabled = true;
+    setStatus(wanted ? 'Publishing…' : 'Making private…', 'pending');
+
+    const ok = typeof setProfileVisibility === 'function'
+      ? await setProfileVisibility(wanted)
+      : false;
+
+    check.disabled = false;
+
+    if (ok) {
+      isPublic = wanted;
+      setStatus(wanted
+        ? 'Your profile is now public.'
+        : 'Your profile is now private.', 'ok');
+    } else {
+      // Never leave the box claiming a state the database does not have.
+      check.checked = previous;
+      setStatus(`Couldn't save that — your profile is still ${previous ? 'public' : 'private'}. Try again.`, 'error');
+    }
+    describe();
+  });
+
+  const copyBtn = document.getElementById('copy-profile-link-btn');
+  copyBtn.addEventListener('click', () => {
+    const done = () => {
+      copyBtn.textContent = 'Copied!';
+      setTimeout(() => { copyBtn.textContent = 'Copy link'; }, 2000);
+    };
+    // navigator.clipboard is undefined outside a secure context, so this has
+    // to survive the property being missing as well as the promise rejecting
+    // — over plain http the unguarded call throws instead of failing.
+    let p = null;
+    try { p = navigator.clipboard?.writeText(absoluteUrl); } catch (_) { p = null; }
+    if (p && typeof p.then === 'function') {
+      p.then(done).catch(() => { prompt('Copy this link:', absoluteUrl); });
+    } else {
+      prompt('Copy this link:', absoluteUrl);
+    }
+  });
+
+  panel.style.display = 'block';
+}
 
 // ── Chart ─────────────────────────────────────────────────────
 

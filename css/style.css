@@ -1319,3 +1319,81 @@ body.profile-page {
       "meta  meta";
   }
 }
+
+/* ============ DASHBOARD: PUBLIC PROFILE PANEL ============ */
+
+.profile-link-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* The pretty /@name form. Usernames can be long, and the row must not be able
+   to push the panel wider than the page on a phone. */
+.profile-link {
+  font-size: 15px;
+  font-weight: bold;
+  color: var(--c-link);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.profile-public-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  font-size: 14px;
+  color: var(--c-ink);
+  cursor: pointer;
+  width: fit-content;
+}
+
+/* Disabled while the update is in flight, and permanently when the database
+   has no visibility column — both need to look unavailable, not merely inert. */
+.profile-public-toggle:has(input:disabled) {
+  color: var(--c-ink-dim);
+  cursor: default;
+}
+
+.profile-public-toggle input {
+  cursor: inherit;
+  margin: 0;
+  /* Without this the tick is the browser's own blue, which is the one colour
+     on the page that does not move with the theme. */
+  accent-color: var(--c-accent);
+}
+
+.profile-visibility-note {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--c-ink-soft);
+}
+
+.profile-visibility-status {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--c-ink-muted);
+  min-height: 1.4em;
+}
+
+.profile-visibility-status.is-ok {
+  color: var(--c-success);
+}
+
+.profile-visibility-status.is-error {
+  color: var(--c-danger);
+}
+
+/* ============ RESULTS: PERCENTILE LINE ============ */
+/* Same sentence and weight as the profile page's .percentile-line; only the
+   spacing differs, because here it sits under the summary cards rather than
+   inside a panel — the cards already carry the gap above it. */
+.results-page .percentile-line {
+  margin-top: 0;
+  margin-bottom: 24px;
+  padding-top: 0;
+  border-top: none;
+}

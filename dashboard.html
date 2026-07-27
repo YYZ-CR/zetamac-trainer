@@ -45,6 +45,27 @@
     </div>
     <p class="stats-note" id="stats-note" style="display:none"></p>
 
+    <!-- Shown only for a signed-in user who already has a profile row -->
+    <div class="panel" id="profile-panel" style="display:none">
+      <div class="panel-head">
+        <h2>Public Profile</h2>
+        <span class="panel-note" id="profile-visibility-badge"></span>
+      </div>
+
+      <div class="profile-link-row">
+        <a class="profile-link" id="profile-link" href="profile.html"></a>
+        <button class="btn" id="copy-profile-link-btn">Copy link</button>
+      </div>
+
+      <label class="profile-public-toggle">
+        <input type="checkbox" id="profile-public-check">
+        <span>Make my profile public</span>
+      </label>
+
+      <p class="profile-visibility-note" id="profile-visibility-note"></p>
+      <p class="profile-visibility-status" id="profile-visibility-status" role="status" aria-live="polite"></p>
+    </div>
+
     <div class="panel" id="chart-panel" style="display:none">
       <div class="panel-head">
         <h2>Score Over Time</h2>

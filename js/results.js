@@ -74,6 +74,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderBreakdown(session);
   renderFeedback(session);
 
+  // Deliberately after everything above, and deliberately not awaited. This is
+  // one network round trip for a single decorative line; nothing the user came
+  // here for may wait on it, and nothing it does may be able to abort the rest.
+  renderScorePercentile(session).catch(e => console.warn('percentile failed:', e));
+
   // ── Tabs ─────────────────────────────────────────────────
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -126,6 +131,46 @@ function renderSummary(session) {
   document.getElementById('summary-accuracy').textContent  = accuracy;
   document.getElementById('summary-avg-time').textContent  = avgStr;
   document.getElementById('summary-mistakes').textContent  = withMistakes;
+}
+
+// ── Percentile ────────────────────────────────────────────────
+// Where this run's score sits in the field at its own duration — every
+// duration, not just the 120s the profile page compares on, because the
+// question "was that good?" is asked of whatever was just played.
+//
+// Silent on every failure path. A missing line is a non-event; an error
+// message about a statistic nobody asked for is a distraction from the ones
+// they did.
+async function renderScorePercentile(session) {
+  const el = document.getElementById('results-percentile');
+  // db.js may not have loaded at all (blocked CDN, missing config).
+  if (!el || typeof getScorePercentile !== 'function') return;
+
+  // The loader above normalises a database row to camelCase, and a locally
+  // cached session already has that shape; accept the raw snake_case too so
+  // this does not depend on which path produced the object.
+  const score    = Number(session.score);
+  const duration = Number(session.durationSeconds ?? session.duration_seconds);
+  if (!Number.isFinite(score) || !Number.isFinite(duration) || duration <= 0) return;
+
+  let res = null;
+  try {
+    res = await getScorePercentile(score, duration);
+  } catch (e) {
+    console.warn('getScorePercentile threw:', e);
+    return;
+  }
+
+  // Null below the population threshold — see percentilePercent in js/util.js.
+  // Nothing renders in that case, not even a placeholder: "not enough data"
+  // would sit here competing for attention with the figures that do mean
+  // something, to say precisely nothing.
+  const pct = percentilePercent(res);
+  if (pct === null) return;
+
+  el.innerHTML =
+    `Faster than <strong>${escapeHtml(pct)}%</strong> of players at ${escapeHtml(duration)} seconds.`;
+  el.style.display = 'block';
 }
 
 // ── Run graph ─────────────────────────────────────────────────
