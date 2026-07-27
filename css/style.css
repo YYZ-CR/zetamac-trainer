@@ -118,15 +118,41 @@ a {
 }
 
 /* ============ TOP BAR ============ */
+/* Pinned to the top of the viewport. It was already position:fixed, but with a
+   transparent background — so page content scrolled underneath it and the
+   links became unreadable over table rows. Full width with the page colour
+   behind it means it genuinely stays put. */
 .top-bar {
   position: fixed;
-  top: 10px;
-  right: 15px;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 9px 15px;
   font-size: 13px;
   display: flex;
+  justify-content: flex-end;
   gap: 8px;
   align-items: center;
   z-index: 100;
+  background: var(--c-page-bg);
+  border-bottom: 1px solid var(--c-border);
+  /* The bar spans the full width but its links are right-aligned, so without
+     this the empty left-hand stretch would silently swallow clicks meant for
+     whatever sits beneath it. Children opt back in below. */
+  pointer-events: none;
+}
+
+.top-bar > * {
+  pointer-events: auto;
+}
+
+/* Keep page content clear of the fixed bar. game-page has no top bar and
+   centres its own fixed elements, so it is left alone. */
+body.config-page,
+body.results-page,
+body.dashboard-page,
+body.practice-page {
+  padding-top: 35px;
 }
 
 .top-bar a {
@@ -971,7 +997,9 @@ body.practice-page {
 /* ── Practice session ── */
 .practice-hud {
   position: fixed;
-  top: 0;
+  /* Sits below the fixed top bar rather than underneath it — the bar is
+     opaque, so at top:0 it covered the HUD and its Finish button entirely. */
+  top: 35px;
   left: 0;
   right: 0;
   padding: 12px 16px;
@@ -1082,12 +1110,6 @@ body.practice-page {
   color: var(--c-ink-soft);
   letter-spacing: 1px;
   white-space: nowrap;
-}
-
-/* "Show more" control under the results breakdown table */
-.breakdown-more {
-  margin-top: 10px;
-  text-align: center;
 }
 
 /* Caveat under the dashboard stat cards when they cover a window, not all time */

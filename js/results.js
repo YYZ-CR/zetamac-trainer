@@ -129,16 +129,16 @@ function renderSummary(session) {
 }
 
 // ── Run graph ─────────────────────────────────────────────────
-// Monkeytype-style per-run chart, plotting SPEED over time rather than a
-// projected final total.
+// Monkeytype-style per-run chart: "at the pace you were going here, what would
+// you have finished on?", as a running average plus a rolling window.
 //
-// Projecting a final score is what the earlier versions of this chart did, and
-// it is unstable by construction: the projection multiplies a pace estimate by
-// the seconds remaining, so a quick opening answer with 118 seconds left reads
-// as a score of 150 and flattens the rest of the run into the floor of the
-// axis. Monkeytype avoids this by charting a rate (wpm), which is bounded and
-// stays comparable all the way through the run. Same idea here: answers per
-// minute, as a running average plus a rolling window.
+// Earlier versions of this chart were unreadable, and the fix was misdiagnosed
+// as the units. It wasn't: projected score is just rate × duration ÷ 60, a
+// constant multiple, so the two plot the same curve. The real problem was the
+// opening — one 0.8s answer projects a score of 150 in a 120s game, which
+// blows out the y-axis and flattens the rest of the run into the floor. That
+// is handled below by the warm-up gates and the percentile-fitted axis, so the
+// score reading is stable to display directly.
 function renderRunGraph(session) {
   const panel  = document.getElementById('run-graph-panel');
   const canvas = document.getElementById('run-chart');
@@ -159,47 +159,47 @@ function renderRunGraph(session) {
   let acc = 0;
   for (const q of qs) { acc += q.timeMs; elapsed.push(acc / 1000); }
 
-  const RECENT_K   = 5;  // window (questions) for the rolling rate
-  const WARMUP_Q   = 3;  // a rate off one or two answers is meaningless
-  const WARMUP_SEC = 5;  // ...and a per-minute rate measured over <5s is noise
+  const RECENT_K   = 5;  // window (questions) for the rolling projection
+  const WARMUP_Q   = 3;  // a projection off one or two answers is meaningless
+  const WARMUP_SEC = 5;  // ...and so is one extrapolated from under 5 seconds
 
   // Per-point series, all carrying the question index so the tooltip can show
   // exactly what was happening at that instant.
-  const rawPts    = [];   // rolling-window rate
-  const smoothPts = [];   // running-average rate (main line)
+  const rawPts    = [];   // rolling-window projection
+  const smoothPts = [];   // running-average projection (main line)
 
   for (let i = 0; i < qs.length; i++) {
     const x      = elapsed[i];
     const banked = i + 1;   // questions answered so far
     if (x <= 0) continue;
 
-    // Running average: answers per minute across everything so far. Converges
-    // on the session's true rate and is what the final score reduces to.
+    // Running average: the score you'd finish on holding your average pace so
+    // far. Converges on the real score as the clock runs down.
     if (banked >= WARMUP_Q && x >= WARMUP_SEC) {
-      smoothPts.push({ x, y: round1(banked / x * 60), i });
+      smoothPts.push({ x, y: round1(banked * duration / x), i });
     }
 
-    // Rolling: rate over the last RECENT_K questions only. Emitted only once a
-    // FULL window exists — a left-truncated window is arithmetically identical
-    // to the running average, which is why this line used to hide underneath
-    // the main one for the first five questions.
+    // Rolling: the same projection from the last RECENT_K questions only.
+    // Emitted once a FULL window exists — a left-truncated window is
+    // arithmetically identical to the running average, which is why this line
+    // used to hide underneath the main one for the first five questions.
     if (i >= RECENT_K - 1 && x >= WARMUP_SEC) {
       // Window covers questions i-K+1 … i; the span before the first of them
       // is 0, not elapsed[-1].
       const windowStart = i - RECENT_K >= 0 ? elapsed[i - RECENT_K] : 0;
       const windowSec   = x - windowStart;
       if (windowSec > 0) {
-        rawPts.push({ x, y: round1(RECENT_K / windowSec * 60), i });
+        rawPts.push({ x, y: round1(RECENT_K * duration / windowSec), i });
       }
     }
   }
 
-  // Terminal point: the session's true overall rate, which is exactly the
-  // score on the card next to the chart. The last answered question lands
-  // short of the duration (the question still on screen at the whistle is
-  // never recorded), so without this the line stops early and slightly high.
+  // Terminal point: the score actually finished on, so the line lands on the
+  // number shown on the card beside it. The last answered question falls short
+  // of the duration (the question still on screen at the whistle is never
+  // recorded), so without this the line stops early and slightly high.
   const finalScore = session.score ?? qs.length;
-  const finalRate  = duration > 0 ? round1(finalScore / duration * 60) : null;
+  const finalRate  = duration > 0 ? finalScore : null;
   if (finalRate != null) {
     smoothPts.push({ x: duration, y: finalRate, i: qs.length - 1, final: true });
   }
@@ -244,7 +244,7 @@ function renderRunGraph(session) {
     data: {
       datasets: [
         {
-          label: 'Average pace',
+          label: 'Projected score',
           data: smoothPts,
           borderColor: cLine,
           backgroundColor: cFill,
@@ -295,20 +295,20 @@ function renderRunGraph(session) {
             // Body: the actual question, time taken, and projected scores.
             label: item => {
               const p = item.raw;
-              if (p.final) return `Final: ${finalScore} in ${duration}s  ·  ${Math.round(item.parsed.y)}/min`;
+              if (p.final) return `Final score: ${finalScore}`;
               const q = qs[p.i];
               if (!q) return '';
-              if (item.dataset.label === 'Average pace') {
+              if (item.dataset.label === 'Projected score') {
                 const lines = [
                   `${q.display} = ${q.answer}`,
                   `Time: ${(q.timeMs / 1000).toFixed(2)}s`,
                   `Score so far: ${p.i + 1}`,
-                  `Average: ${Math.round(item.parsed.y)}/min`,
+                  `On this pace: ${Math.round(item.parsed.y)}`,
                 ];
                 if (q.hadMistake) lines.push(`✗ tried: ${(q.mistakeValues || []).join(', ')}`);
                 return lines;
               }
-              return `Last ${RECENT_K}: ${Math.round(item.parsed.y)}/min`;
+              return `Last ${RECENT_K}: ${Math.round(item.parsed.y)}`;
             },
           },
         },
@@ -326,7 +326,7 @@ function renderRunGraph(session) {
           beginAtZero: false,
           min: Math.floor(yLo),
           max: Math.ceil(yHi),
-          title: { display: true, text: 'Answers per minute', font: { size: 11 }, color: cText },
+          title: { display: true, text: `Projected score (${duration}s)`, font: { size: 11 }, color: cText },
           grid: { color: cGrid },
           ticks: { font: { size: 11 }, precision: 0, color: cText },
         },
@@ -339,33 +339,11 @@ function round1(v) {
   return Math.round(v * 10) / 10;
 }
 
-// A 200-question run rendered every row at once — a 6000px wall of table.
-// Show a first page and let the user pull in the rest.
-const BREAKDOWN_PAGE = 25;
-
+// The full run, every question, no paging — you should be able to scan or
+// Ctrl-F the whole thing without clicking through it.
 function renderBreakdown(session) {
   const tbody = document.getElementById('breakdown-tbody');
-  const more  = document.getElementById('breakdown-more');
-  const btn   = document.getElementById('breakdown-more-btn');
-  const total = session.questions.length;
-  let shown   = 0;
-
-  function paint() {
-    const next = Math.min(shown + BREAKDOWN_PAGE, total);
-    appendRows(tbody, session.questions, shown, next);
-    shown = next;
-    if (!more || !btn) return;
-    if (shown >= total) {
-      more.style.display = 'none';
-    } else {
-      more.style.display = 'block';
-      const remaining = total - shown;
-      btn.textContent = `Show ${Math.min(BREAKDOWN_PAGE, remaining)} more (${remaining} left)`;
-    }
-  }
-
-  if (btn) btn.addEventListener('click', paint);
-  paint();
+  appendRows(tbody, session.questions, 0, session.questions.length);
 }
 
 function appendRows(tbody, questions, from, to) {
