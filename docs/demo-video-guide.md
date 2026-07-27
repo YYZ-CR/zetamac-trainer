@@ -1,11 +1,15 @@
-# Remotion: A Practical Reference
+# Making Professional Demo Videos: A Practical Reference
 
-A working guide to building programmatic video with [Remotion](https://www.remotion.dev), plus
-the surrounding pipeline — capturing real app footage, encoding for the web, and the craft rules
-for demo videos.
+A working guide to producing a product/demo video that reads as professional rather than
+"vibe coded" — the tool landscape, the code frameworks, capturing real app footage, encoding
+for the web, and the craft rules that actually separate premium output from generic output.
 
-Written against **Remotion 4.0.500** and **Playwright 1.62.0** (July 2026). Not specific to any
-one project.
+Written against **Remotion 4.0.500**, **HyperFrames 0.7.76**, and **Playwright 1.62.0**
+(July 2026). Not specific to any one project.
+
+**Start here:** [§0 Tool landscape](#0-tool-landscape) to pick a stack, then
+[§18 The anti-slop checklist](#18-the-anti-slop-checklist) before you ship anything. The
+Remotion-specific chapters (§3–§12) apply once you've chosen a code framework.
 
 **Confidence markers used throughout:**
 - ✅ **Verified** — read from source (Remotion docs repo, x264/FFmpeg/OBS/Chromium source, npm registry) or tested locally
@@ -16,6 +20,7 @@ one project.
 
 ## Table of contents
 
+0. [Tool landscape — pick a stack](#0-tool-landscape)
 1. [Decide first: should you use Remotion at all?](#1-decide-first)
 2. [Licensing — read before you commit](#2-licensing)
 3. [Mental model](#3-mental-model)
@@ -33,6 +38,179 @@ one project.
 15. [Demo video craft](#15-demo-video-craft)
 16. [AI asset pipeline](#16-ai-asset-pipeline)
 17. [Troubleshooting](#17-troubleshooting)
+18. [The anti-slop checklist](#18-the-anti-slop-checklist)
+19. [Motion tokens, type, colour, sound](#19-motion-tokens-type-colour-sound)
+20. [Assets, templates, and hiring](#20-assets-templates-and-hiring)
+
+---
+
+## 0. Tool landscape
+
+### The constraint that orders everything
+
+**No generative video model can render your UI.** Not "poorly" — structurally. Veo, Sora, Runway,
+Kling and Luma are diffusion models with no access to your app and no notion of pixel-exact text.
+Documented behaviour: they produce text that "looks plausible at a glance but is actually a jumble
+of nonsensical characters." Head-to-head testing found Sora 2 rendering a chalkboard where only two
+words were legible — and that's *large signage*, orders of magnitude easier than 13px UI labels.
+
+The vendor-recommended workaround is literally *"remove that section or overlay clean text in an
+editor."* That tells you everything.
+
+⚠️ **Use generative video for a 3-second cinematic opener and nothing else.** Image-to-video from a
+real screenshot gives you camera drift on a *moving poster* — the moment the model animates an
+interaction, the UI dissolves.
+
+**Therefore the pipeline is always:** capture the real UI → compose/animate in code → AI only for
+voiceover and optional b-roll.
+
+### Categories
+
+| Category | Examples | Verdict for a UI demo |
+|---|---|---|
+| **Code video frameworks** | Remotion, HyperFrames, Revideo, Canvas Commons, Manim | ✅ The compose layer. Agent authors the creative work. |
+| **Runtime animation libs** | Motion (motion.dev), GSAP, Anime.js | Animation *inside* a framework. Cannot emit MP4 alone. |
+| **Screen recorders** | Screen Studio, Cap, OBS, CleanShot | ✅ The capture layer. |
+| **Scripted capture** | Playwright `page.screencast`, Puppeteer | ✅ Capture, deterministic and re-runnable. |
+| **Agent video services** | motion.so, Arcade, Demosmith, Supademo | Convenient, but templated look and/or no live app. |
+| **Template render APIs** | Shotstack, Creatomate, JSON2Video, Plainly | For *N variants of a designed template*, not one hero video. |
+| **Designer asset formats** | Rive, Lottie/After Effects | ✅ Import a designer's logo sting or character. Not agent-authorable. |
+| **Generative video** | Veo, Runway, Sora, Kling | B-roll and title cards only. |
+| **Avatar platforms** | HeyGen, Synthesia | Only if you want a presenter. |
+
+### The two serious code frameworks
+
+|  | **Remotion** | **HyperFrames** |
+|---|---|---|
+| Model | React, frame-index driven | Plain HTML + `data-*` attrs, frame adapters (GSAP/CSS/Lottie/Three) |
+| Licence | Source-available; free ≤3 people | **Apache 2.0**, no thresholds, no per-render fees |
+| Maturity | 3 years, 4.0.500, biggest ecosystem | **4 months** (npm pkg created 2026-03-23), publishes daily |
+| Agent tooling | Skills (~126k installs, #4 globally) | 19 skills + workflows, ships `CLAUDE.md`/`AGENTS.md` in scaffold |
+| Design-system layer | You build it | **`frame.md`** — first-class |
+| Self-review tooling | `--log=verbose` | `lint`, `check`, `validate`, `inspect`, `snapshot`, `compare` |
+| Production users | Quran.com, Mux (independently verified) | HeyGen, tldraw |
+| Screen recording | **Remotion Recorder** (free template) | `capture <url>` → editable components |
+
+**HyperFrames is the more on-point tool for "must not look vibe coded"**, for two reasons that
+aren't marketing:
+
+1. **`frame.md`** — a design-system file the agent composes *against*, so it isn't inventing
+   styling. This is the single most direct mechanism against generic output that either tool ships.
+2. **A real self-review loop.** `snapshot` captures key frames as PNGs, `inspect` reports rendered
+   layout across the timeline, `compare` renders variants into one labelled sheet. An agent can
+   render, *look at its own output*, and iterate. The Manim literature (arXiv:2510.01174,
+   2507.14306) identifies exactly this — no visual feedback loop — as the root cause of LLM-authored
+   animation failing with spatial collisions and text running off-frame.
+
+**Remotion is the safer pick** if maturity, ecosystem breadth, and Lambda scale matter more than
+the licence threshold.
+
+### ✅ HyperFrames verified working (tested locally, July 2026)
+
+```bash
+npm install hyperframes          # v0.7.76
+npx hyperframes doctor           # checks node/ffmpeg/chrome
+npx hyperframes browser ensure   # downloads Chrome Headless Shell (~115 MB)
+npx hyperframes init my-demo --example=swiss-grid --resolution=1080p --non-interactive
+cd my-demo
+npx hyperframes compositions             # list
+npx hyperframes render -c compositions/intro.html
+```
+
+Requires **FFmpeg *and* FFprobe on PATH** (`apt-get install -y ffmpeg` provides both) plus Chrome
+Headless Shell. `doctor` also lists optional whisper-cpp (transcription), Kokoro (local TTS), and
+MusicGen (local BGM).
+
+Measured: **56 frames at 1920×1080 rendered in 10.5s** on 4 vCPUs; output H.264 yuv420p 30fps.
+
+⚠️ **Gotcha worth knowing: scaffolded compositions load GSAP from a CDN.** In any network-restricted
+environment (CI, corporate proxy, sandbox) the timeline script fails, and because elements start
+off-screen by design, **you get a silently blank video** — the render "succeeds" with only a
+`sub_timeline_script_failure` warning. Vendor GSAP locally:
+
+```bash
+npm install gsap@3.14.2
+mkdir -p assets/vendor && cp node_modules/gsap/dist/gsap.min.js assets/vendor/
+# then rewrite the CDN <script src> in index.html and compositions/*.html
+```
+
+Note the render time went 10.5s → 54s once GSAP actually loaded and animated — the fast render was
+fast because nothing was happening. **Always extract a frame and look at it before trusting a
+render.**
+
+### Composition format
+
+```html
+<template id="intro-template">
+  <div data-composition-id="intro" data-width="1920" data-height="1080" data-duration="1.86">
+    <div class="title">HELLO</div>
+    <style> /* scoped to [data-composition-id="intro"] */ </style>
+    <script src="../assets/vendor/gsap.min.js"></script>
+    <script>
+      const tl = gsap.timeline({ paused: true });   // MUST be paused
+      tl.to('.title', { x: 0, duration: 0.8, ease: 'power3.out' });
+      window.__timelines = [tl];                     // renderer seeks these
+    </script>
+  </div>
+</template>
+```
+
+The renderer seeks `window.__timelines` per frame, so output is byte-identical across runs. Same
+determinism contract as Remotion, different ergonomics: **GSAP's timeline is a pure function of
+time and far better for choreography** (sequencing 40 overlapping beats with `"<"` and `"-=0.3"`
+labels); Remotion's frame model is better for composition (scenes, audio, React reuse).
+
+### motion.so — what it actually is
+
+⚠️ **Four unrelated products are called "Motion."** `motion.so` (AI motion-design agent, by Mosaic,
+YC W25), `motion.dev` (the animation library, ex-Framer Motion), `usemotion.com` (AI calendar,
+raised $60M), `motion.software` (Windows screen recorder). Searching "Motion MCP" finds the
+calendar app's.
+
+The agent integration is **real** — verified via third-party code hitting `https://mcp.motion.so/mcp`
+(OAuth 2.1 device flow) and a REST API at `https://api.motion.so/api/motion` (`POST /sessions` →
+poll → `output.download_url`).
+
+**But it does not drive your app.** You supply *screenshots* (up to 10 public URLs) or a link it
+scrapes, and it composites them into motion graphics. "No screen recording required" is true because
+it substitutes animation *around* still images for a walkthrough. Good for a 20s teaser; it cannot
+show a multi-step flow with live state.
+
+Three structural concerns for professional output:
+- Output is conditioned on **21 named brand presets** (`mosaic, apple, claude, cursor, linear,
+  vercel, stripe, figma, notion, spotify, supabase, raycast, framer, resend, mintlify, sentry,
+  tesla, nike, shopify, airbnb, posthog`) — and design systems are **gated to Pro/Max**. Lower tiers
+  converge on the default look.
+- The showcase work is **human-directed studio service**, sometimes with live shoots — not
+  one-prompt output.
+- **Show HN got 10 points / 3 comments.** Near-zero public developer ecosystem. Pricing unpublished.
+
+Operational gotchas from the one developer who wrapped the API publicly: **every API call costs
+credits** (there is no free auth-validation endpoint), and the outer `status` field flips to
+`completed` before the file is ready — *"Don't write client code that just watches the outer
+status — it lies."* Wait for `output.status` **and** `output.download_url`. No resolution parameter
+exists in the API.
+
+### Things to actively avoid
+
+- **Theatre.js** — `@theatre/core` and `@theatre/studio` stuck at 0.7.2 since 2024-05-19. Dormant. (Also: studio is AGPL-3.0.)
+- **Motion Canvas** — abandoned upstream; last release 2024-12-14, motioncanvas.io now NXDOMAIN. The volunteer fork is [Canvas Commons](https://canvascommons.io/); the maintained commercial line is [Revideo](https://github.com/midrender/revideo).
+- **`playwright-video`** — dead since 2022, superseded by built-in `recordVideo`.
+- **Trying to make Motion (motion.dev) author video** — it's wall-clock driven. Remotion documents that there is deliberately no integration.
+
+### Licence quick-reference
+
+| Tool | Licence | Commercial gotcha |
+|---|---|---|
+| HyperFrames | Apache 2.0 | None |
+| Remotion | Source-available | Paid at 4+ people; contractors count in v5 |
+| GSAP | **Free, not open source** | No building "Competitive Products" (visual animation builders) |
+| Anime.js | MIT | None — the genuinely-open GSAP alternative |
+| Motion core | MIT | Motion+ ≈ €299 one-time (adds MCP + AI Kit) |
+| Rive runtimes | MIT (editor proprietary) | Editor $0/$9/$32/$120 per month |
+| Lottie runtimes | MIT | Needs After Effects upstream |
+| P5.js | **LGPL-2.1** | Not MIT — check if you bundle |
+| Canvas Commons ffmpeg pkg | **GPLv3** | Copyleft |
 
 ---
 
@@ -1546,6 +1724,271 @@ export const calculateMetadataFn = async ({props}) => {
 
 ---
 
+## 18. The anti-slop checklist
+
+This section exists because "make it look professional" is not a vibe — the tells are empirically
+documented and mostly mechanical.
+
+### The evidence
+
+`JCarterJohnson/vibecoded-design-tells` mined **3.2M Reddit posts across 47 subreddits** and ranked
+the tells by share of on-topic comments (3,033 comments). Ranked:
+
+1. **shadcn/Tailwind defaults**
+2. **"AI purple"** — the violet/indigo → blue gradient
+3. **Gradient hero text**
+4. **Centered hero + three equal cards**
+5. **Unprompted neon glow**
+6. **Emoji as icons**
+7. …then bento grids, glassmorphism, aurora/mesh/blob backgrounds
+
+~13% of posts literally say "they all look the same" / "screams AI." People pattern-match in under
+a second.
+
+Separately, Adrian Krebs scored **1,590 Show HN landing pages** against 16 AI-design patterns:
+**22% heavy slop, 32% mild, 46% clean.** His additions: **Inter everywhere**, the Space Grotesk +
+Instrument Serif pairing (which was itself the *escape* from Inter, and got averaged), serif-italic
+accent words, lavender accents, low-contrast dark mode, badge-above-the-H1.
+
+### Kill list — zero instances allowed
+
+- [ ] Purple/violet → blue gradient (tell #2 — anywhere in the frame)
+- [ ] Gradient-filled text
+- [ ] Neon glow not present in the real product
+- [ ] Emoji as icons
+- [ ] Three equal cards in a row
+- [ ] Inter — or the Space Grotesk + Instrument Serif pairing
+- [ ] Corporate Memphis figures, abstract 3D blobs, floating gradient orbs
+- [ ] Lens flare, light leak, glitch, RGB-split as a transition
+- [ ] Lorem ipsum or implausible fake data in any UI shot
+- [ ] "streamline / empower / supercharge / world-class / enterprise-grade"
+- [ ] Any linear-eased keyframe
+- [ ] Whoosh on every cut (the loudest "I used a template" signal in the medium)
+
+**Smell test:** if a frame could be a screenshot of a shadcn landing page, redo it.
+
+### Motion
+
+- [ ] Every move uses a custom curve. Entrances **decelerate**, exits **accelerate**
+- [ ] Exits run **~15% faster** than entrances (M3: enter 225ms, exit 195ms)
+- [ ] UI micro-moves ≤300ms; hero/brand moves 400–600ms; **the two speeds never mix in one shot**
+- [ ] **Duration scales with distance travelled** — nothing is globally 300ms
+- [ ] Siblings staggered **40–80ms**, never simultaneous
+- [ ] Motion blur on, 180° shutter (shutter = 2× frame rate)
+- [ ] Something anticipates, and something overshoots-and-settles, at least once
+- [ ] Exactly **one focal point per shot**
+- [ ] Fine grain / subtle vignette so it doesn't read as a default render
+
+### Type
+
+- [ ] One family, ≤3 weights
+- [ ] Body ≥40px at 1080p; titles ≥1.5× body
+- [ ] Everything inside 90% title-safe; mobile-critical text inside centre 80% vertical
+- [ ] **Every card on screen ≥ (characters ÷ 13) seconds**
+- [ ] ≤30 chars/line, ≤3 lines
+- [ ] No horizontal stretching — use a condensed cut instead
+- [ ] Display type tracked tight; small labels tracked open
+
+### Colour
+
+- [ ] **60/30/10** — dominant neutral / secondary neutral / one accent
+- [ ] Extend only via tints and shades. Count distinct hues; if >3, cut
+- [ ] Off-white is warm, not `#FFFFFF`; darkest black is not `#000000`
+- [ ] Any gradient is **single-hue and reads as lighting, not decoration**
+- [ ] Body text ≥4.5:1 contrast
+
+### Sound
+
+- [ ] Every visual event has an audio event
+- [ ] UI sounds are **layered**, not single stock hits
+- [ ] Sound weight matches visual weight (bigger = lower + slower)
+- [ ] Key reveals land frame-accurately on the beat — but **do not cut on every beat**, and let at least one shot hold across several bars
+- [ ] Music ducks **8–12 dB** under VO
+- [ ] −14 LUFS integrated, −1 dBTP ceiling
+
+### Structure
+
+- [ ] 60–90s (under 90s ≈ 50% higher completion)
+- [ ] Recognisable problem in the first **5–7s**; >50% of viewers decide within 10s
+- [ ] ≤200 words of narration for 90s
+- [ ] **3–5 features maximum** — ideally one job-to-be-done
+- [ ] Narration supports the visuals, never duplicates them
+- [ ] Capture at 4K/60, cursor smoothed, auto-zoom on click regions
+
+### What the benchmarks actually do
+
+- **Linear** — dark-mode UI, **minimal narration**, 45–90s, **one job-to-be-done per video**
+- **Vercel** — one moment: push code, watch it deploy. Not a feature tour
+- **Stripe** — same footage reads two ways (developer sees components, exec sees expansion)
+- **Arc** — went viral by being **anti-launch-video**: self-aware framing, problem restated repeatedly, one-line vision
+
+Typefaces: Stripe and Linear both use **Söhne** (Klim); Vercel uses **Geist**. *"If Inter is the
+democratic default, Söhne is the aspirational upgrade."*
+
+---
+
+## 19. Motion tokens, type, colour, sound
+
+### Copy these curves
+
+✅ Material 3, verified values:
+
+| Easing | cubic-bezier |
+|---|---|
+| Standard | `0.2, 0, 0, 1` |
+| Standard decelerate | `0, 0, 0, 1` |
+| Standard accelerate | `0.3, 0, 1, 1` |
+| **Emphasized decelerate** (entering) | `0.05, 0.7, 0.1, 1` |
+| **Emphasized accelerate** (exiting) | `0.3, 0, 0.8, 0.15` |
+
+Durations: short 50/100/150/200 · medium 250/300/350/400 · long 450/500/550/600 · extra-long
+700/800/900/1000ms.
+
+> **`cubic-bezier(0.05, 0.7, 0.1, 1)` is the "expensive" curve** — launches hard, settles softly.
+> The closest thing to a copy-paste answer for "make this feel premium."
+
+**IBM Carbon's contribution is conceptual:** two motion styles — *productive* (fast, functional) and
+*expressive* (slow, for moments that interrupt) — and **duration scales with distance/size**. That
+one rule fixes most amateur motion. Pull exact values from `npm i @carbon/motion` rather than
+trusting recalled numbers.
+
+**Emil Kowalski** (animations.dev) is the reference text for the taste layer. Free writing:
+[emilkowal.ski/ui/great-animations](https://emilkowal.ski/ui/great-animations). Distilled: default
+to **ease-out**; built-in CSS curves aren't strong enough, use custom cubic-beziers; keep UI
+animation under 300ms; springs feel natural because they maintain velocity when interrupted.
+**`ease-in` is wrong for UI** — it accelerates at the end, the opposite of what you want.
+
+### Type sources
+
+**Free and genuinely good — not compromises:**
+- [Fontshare](https://www.fontshare.com/) (ITF) — Satoshi, General Sans, Switzer, Clash Display, Cabinet Grotesk. Free for commercial use including broadcast, no attribution. ⚠️ You may not modify or redistribute the files, and self-hosting as a webfont needs written consent (use their API). Desktop files are fine for video rendering.
+- [Geist](https://vercel.com/font) — SIL OFL, variable
+- [UNCUT](https://uncut.wtf/) — ~163 contemporary free/open faces. **The best place to find something good that isn't Inter.**
+
+**⚠️ The licensing trap almost everyone misses:** a **desktop font licence usually does not cover
+paid advertising**. Klim's terms permit non-broadcast video on your own site and socials but
+explicitly exclude *"any form of video content for paid advertising."* Pangram Pangram requires a
+**Broadcast Licence per campaign**. Organic demo on your own site = fine. Put paid spend behind it =
+budget another licence.
+
+**⚠️ Do not use SF Pro.** Apple's Design Resources licence restricts the SF fonts to mocking up
+UI for software running on Apple platforms. It does not permit general marketing or video use.
+
+### Sound — the highest ROI in the entire pipeline
+
+This is the most lopsided finding in the research:
+
+> *"A well-lit, in-focus, visually appealing production will be perceived as poor quality by most
+> viewers if the soundtrack is lacking, **even if the visual quality itself is superb**."*
+> *"Eyes will forgive a sub-par image long before ears will forgive sub-par audio."*
+
+Sound is commonly cited as ~50% of a film's effect. **Most productions allocate ~10% of budget to
+audio.** That gap is your arbitrage.
+
+**Libraries:** Epidemic Sound, Artlist (unified licence covering social → commercial advertising —
+the main 2026 advantage), Musicbed (highest-end, artist-signed), Soundstripe, Uppbeat, Soundsnap
+(SFX-only, studio-grade).
+
+**SFX packs for motion graphics specifically:** SONNISS Motion Graphics Sounds Kit (415 WAVs);
+AEJuice Motion Design Sound Effects (categorised Digital / Error / Movements / UI Elements / UI
+Notification / Whoosh — exactly the taxonomy a demo needs, ~$149 lifetime bundle).
+
+**Free/CC0:** Kenney ([interface-sounds](https://kenney.nl/assets/interface-sounds),
+[ui-audio](https://kenney.nl/assets/ui-audio)) — CC0, no attribution. ⚠️ These are *game* UI sounds:
+bright and slightly toy-like. Fine for playful consumer products, wrong for B2B. Freesound (per-asset
+licences, NC ones are landmines), Mixkit (free licence explicitly permits commercial including ads).
+
+**⚠️ Licensing questions to answer before committing:** does it cover **paid ads**, not just
+organic? **Web embedding**, not just YouTube? Is **attribution required** (Kevin MacLeod's catalogue
+is largely CC-BY — needs a visible credit)? Does the right **survive cancellation**? Will it trigger
+**Content ID** on your own uploads?
+
+**The premium move is less music, not better music.** Subscription-library "uplifting corporate
+ukulele" and "minimal tech pulse" beds are instantly recognisable — and each track is shared with
+every other subscriber. Apple/Linear/Vercel-style launch films use a low ambient bed plus precise
+UI sound design. That is cheaper *and* reads as more premium.
+
+---
+
+## 20. Assets, templates, and hiring
+
+### Do templates get you to "professional"?
+
+**No — they get you to "competent."** Templates fail on the *surface* layer (type, colour, sound,
+visual signatures) and succeed on the *structural* layer (choreography, lower thirds, chart builds,
+end cards). Buy the unglamorous structure; author your hero moments.
+
+The specific tell of "obviously a template" is **coherence failure** — the template's aesthetic and
+your product's aesthetic visibly being two design systems sharing a frame. This is why binary After
+Effects templates are the worst option and copy-in-source component kits are the best: you can only
+fix a coherence failure if you can edit the surface.
+
+**Remotion component kits (copy-in-source, so restylable):**
+[remocn](https://remocn.dev/) (shadcn-style registry, 64+ components — best of category),
+[Locomotion](https://www.locomotion.pro/) (62+ SaaS/product-tour templates — study the choreography,
+restyle the surface), [remotion-cinematic](https://github.com/codeverbojan/remotion-cinematic)
+(scene-relative camera + geometry-aware cursor — the two things that separate a demo from a
+screencast), Remotion Bits, remotion-open-fx.
+
+**⚠️ After Effects marketplaces** (Envato Elements ~$16.50/mo, VideoHive, Motion Array) are the
+highest-risk path for looking generic — they're optimised for *marketplace preview appeal*, which
+means loud. Worse, Envato Elements' licence **dies with the subscription**, is **one licence per end
+product**, has a **"skill and effort" clause** (the item may not be the primary value of the end
+product), and an **on-demand prohibition** that is squarely aimed at agent-driven parameterised
+render pipelines. Get legal comfort before automating one.
+
+If you do want AE in the loop, [Plainly](https://www.plainlyvideos.com/) renders real `.aep` files
+in the cloud with an HTTP API ($69/mo for 50 render-minutes) — the highest visual ceiling of the
+render APIs, and the answer to "can an agent parameterise an AE template."
+
+### Device mockups
+
+**The screen recorder matters more than the mockup.** Screen Studio ($108/yr annual, macOS) is the
+polish benchmark — auto-zoom, cursor smoothing, **motion blur on cursor movement** (the feature that
+makes output read as "edited in After Effects"). Cross-platform: Cap ($58 one-time lifetime desktop
+licence, open source), OpenScreen (MIT, Linux included), OBS (free, zero polish).
+
+Mockups: [Rotato](https://rotato.app/) (3D, video-capable, ~$49–99/yr — the premium option, though
+the rotating-device-in-3D trope is itself now recognisable), [Angle](https://angle.sh/) (7,600+
+**vector** mockups, infinitely crisp and restylable), [Screely](https://screely.com/) (free browser
+frames, genuinely good taste). **Avoid photographic lifestyle scenes** — they read as stock and
+actively hurt a software demo.
+
+> **The biggest tell here isn't the frame — it's the content inside it.** Lorem ipsum, "John Doe",
+> `example@email.com`, empty states, implausible numbers. Populate mockups with specific,
+> domain-plausible data and a free frame looks fine; use a $99 3D mockup with placeholder content
+> and it looks like a template.
+
+### B-roll
+
+**For a software demo, b-roll usually hurts.** Your actual UI is more credible than anything you
+substitute, and stock footage is the fastest way to feel like you're hiding something. Narrow
+legitimate uses: an emotional cold-open establishing the *problem* before cutting to product, or
+showing something genuinely off-screen. Even then prefer **motion graphics over live-action stock** —
+abstract graphics read as designed, stock reads as bought.
+
+### Should you hire someone?
+
+| Tier | Price (60–90s) |
+|---|---|
+| Template freelancer | <$500 |
+| Fiverr Pro | $300–800 |
+| SaaS 2D animation (standard) | $2,500–10,000 |
+| Studio animated explainer | $5,000–15,000 (*"sweet spot for most B2B teams"*) |
+| Fully custom enterprise | $30,000+ |
+
+School of Motion's $7-vs-$1000 experiment found the pro's work "light-years beyond" — but the
+differentiator was **conceptual/strategic fit**, not raw animation skill. That's the part you can't
+buy at the bottom of the market *and* can't prompt your way to.
+
+**The best value-per-dollar split:** do the visuals yourself under strict constraints, and pay a
+human for **(a) sound design and mix** and **(b) one round of creative direction on script and
+storyboard before you animate anything.** Sound is ~50% of perceived quality and gets ~10% of
+typical budget; direction is where an LLM genuinely can't help, because it averages. Those two
+together are low-four-figures rather than $8–15k.
+
+---
+
 ## Quick reference card
 
 ```bash
@@ -1569,16 +2012,21 @@ ffmpeg -i master.webm -c:v libx264 -preset slow -tune stillimage -crf 18 \
   -c:a aac -b:a 160k -movflags +faststart demo.mp4
 ```
 
-**The five things that matter most:**
-1. Install the agent skills before generating any Remotion code
-2. Everything derives from `useCurrentFrame()` — no CSS animation, no wall-clock, no randomness
-3. Always clamp `interpolate()`
-4. Free licence stops at 3 employees; trigger is headcount, not revenue; contractors count in v5
-5. Record real UIs; use Remotion for the wrapper
+**The seven things that matter most:**
+1. **No generative video model can render your UI.** Capture the real thing.
+2. Install the agent skills before generating any composition code
+3. Everything derives from the frame — no CSS animation, no wall-clock, no randomness
+4. Always clamp `interpolate()` (Remotion) / always `gsap.timeline({paused: true})` (HyperFrames)
+5. Free Remotion licence stops at 3 people; trigger is headcount, not revenue
+6. **Render a frame and look at it before trusting any render** — blank output fails quietly
+7. Run the [anti-slop checklist](#18-the-anti-slop-checklist). No purple gradients, no Inter, no linear easing, no whoosh on every cut.
 
 ---
 
 *Sources: Remotion docs source (`remotion-dev/remotion@main`), `LICENSE.md`, official agent skills,
+HyperFrames 0.7.76 (installed and rendered locally), motion.so API/MCP surface via third-party
+wrappers, `JCarterJohnson/vibecoded-design-tells` (3.2M Reddit posts), Adrian Krebs' Show HN
+design-slop survey (n=1,590), Material 3 motion tokens, Emil Kowalski's animations.dev,
 Playwright 1.62.0 types and `videoRecorder.ts`, Chromium `page_handler.cc`/`render_widget_host_view_base.cc`,
 x264 `common/base.c`, OBS `SimpleOutput.cpp`/`obs-x264.c`/`mac-videotoolbox/encoder.c`, FFmpeg
 `filters.texi`/`videotoolboxenc.c`, npm registry, and Remotion GitHub issues #3070, #4300, #4783,
