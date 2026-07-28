@@ -64,6 +64,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   // profile to publish, and the link is how anyone finds it.
   renderProfilePanel(profile);
 
+  // Same reason — somebody with no games can still be in a league, and the
+  // league is a reason to go and play one. Not awaited: a slow or absent
+  // leagues migration must not hold up the rest of the dashboard.
+  renderDashboardLeagues();
+
   if (sessions.length === 0) {
     document.getElementById('games-panel').style.display = 'block';
     document.getElementById('games-tbody').innerHTML =
@@ -293,6 +298,75 @@ function renderProfilePanel(profile) {
     }
   });
 
+  panel.style.display = 'block';
+}
+
+// ── Private leagues, compactly ────────────────────────────────
+// A list of doors, nothing more: names, sizes, and a link to leagues.html,
+// which owns every other league state. The boards themselves are not rendered
+// here — one board is a table, and five would be the whole dashboard.
+//
+// The panel stays hidden when getMyLeagues() fails. supabase/leagues.sql is
+// applied by hand, so "leagues are not deployed on this project" is a normal
+// state for this page to be in, and it is not an error the owner of the
+// dashboard can do anything about.
+
+const DASH_LEAGUE_LIMIT = 5;
+
+async function renderDashboardLeagues() {
+  const panel = document.getElementById('leagues-panel');
+  const body  = document.getElementById('leagues-panel-body');
+  const note  = document.getElementById('leagues-panel-note');
+  if (!panel || !body || typeof getMyLeagues !== 'function') return;
+
+  let leagues = null;
+  try {
+    leagues = await getMyLeagues();
+  } catch (e) {
+    console.warn('renderDashboardLeagues:', e);
+    return;
+  }
+
+  // null is a failed call; [] is "in no leagues" and has its own copy.
+  if (leagues === null) return;
+
+  if (!leagues.length) {
+    if (note) note.textContent = '';
+    body.innerHTML = `
+      <p class="dash-league-empty">
+        You're not in a league yet. A league is a private leaderboard over the
+        daily — same questions, same day — for people you actually know.
+      </p>
+      <p class="dash-league-more"><a href="leagues.html">Create one or join with a code</a></p>
+    `;
+    panel.style.display = 'block';
+    return;
+  }
+
+  if (note) note.textContent = leagues.length === 1 ? '1 league' : leagues.length + ' leagues';
+
+  const shown = leagues.slice(0, DASH_LEAGUE_LIMIT);
+  const items = shown.map(l => {
+    const key   = String(l.league_key ?? '');
+    const name  = String(l.name ?? 'Untitled league');
+    const n     = Number(l.member_count);
+    const count = Number.isFinite(n) ? (n === 1 ? '1 member' : n + ' members') : '';
+    const owner = l.is_owner === true ? ' · you own it' : '';
+    // League names are user-controlled — one person names a thing that
+    // everybody else's dashboard then renders.
+    return `
+      <li class="dash-league-item">
+        <a class="dash-league-name" href="leagues.html?l=${escapeHtml(encodeURIComponent(key))}">${escapeHtml(name)}</a>
+        <span class="dash-league-meta">${escapeHtml(count + owner)}</span>
+      </li>
+    `;
+  }).join('');
+
+  const more = leagues.length > shown.length
+    ? `<p class="dash-league-more"><a href="leagues.html">All ${escapeHtml(leagues.length)} leagues</a></p>`
+    : `<p class="dash-league-more"><a href="leagues.html">Manage your leagues</a></p>`;
+
+  body.innerHTML = `<ul class="dash-league-list">${items}</ul>${more}`;
   panel.style.display = 'block';
 }
 

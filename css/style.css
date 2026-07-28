@@ -1974,3 +1974,508 @@ body.duel-page {
   background: var(--c-surface);
   z-index: 40;
 }
+
+/* ============ LEAGUES ============ */
+/* leagues.html is a document-flow page throughout — there is no run to play
+   here, only lists, a join screen and a board — so it reuses .panel and the
+   shared .btn family and adds only what those do not cover.
+
+   No new colour tokens: every rule below resolves to one that already exists
+   in both theme blocks at the top of this file. A league board is a table of
+   names and numbers, and it has no palette of its own to get wrong. */
+
+body.leagues-page {
+  background: var(--c-page-bg);
+}
+
+.league-wrap {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 30px 20px 60px;
+}
+
+.league-back {
+  display: inline-block;
+  font-size: 13px;
+  color: var(--c-link);
+  margin-bottom: 14px;
+}
+
+.league-head {
+  margin-bottom: 22px;
+}
+
+.league-head h1 {
+  font-size: 28px;
+  font-weight: bold;
+  line-height: 1.2;
+  /* A league name is chosen by one person and read by many, and nothing stops
+     it being sixty unbroken characters. */
+  overflow-wrap: anywhere;
+}
+
+.league-meta {
+  font-size: 13px;
+  color: var(--c-ink-muted);
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+.league-loading {
+  font-size: 14px;
+  font-style: italic;
+  color: var(--c-ink-soft);
+  padding: 20px 0;
+}
+
+/* Signed out, unknown code, left the league, leagues not deployed */
+.league-notice {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  padding: 20px 22px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.league-notice p {
+  margin-top: 10px;
+  color: var(--c-ink-body);
+}
+
+.league-notice-actions,
+.league-created-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+.league-lede {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--c-ink-body);
+  margin-bottom: 14px;
+}
+
+/* ── Your leagues ── */
+
+.league-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.league-list-item {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--c-rule);
+}
+
+.league-list-item:last-child {
+  border-bottom: none;
+}
+
+.league-list-name {
+  font-size: 16px;
+  font-weight: bold;
+  color: var(--c-link);
+  overflow-wrap: anywhere;
+}
+
+.league-list-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--c-ink-soft);
+}
+
+.league-list-code {
+  letter-spacing: 1px;
+  color: var(--c-ink-faint);
+}
+
+.league-tag {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--c-on-accent);
+  background: var(--c-accent);
+  padding: 1px 6px;
+}
+
+/* ── Create / join forms ── */
+
+.league-form-panel {
+  margin-top: 20px;
+}
+
+.league-form-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.league-form-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--c-ink-soft);
+}
+
+.league-form-input {
+  flex: 1 1 220px;
+  min-width: 0;
+  font-family: inherit;
+  font-size: 14px;
+  padding: 7px 9px;
+  color: var(--c-ink);
+  background: var(--c-page-bg);
+  border: 1px solid var(--c-border);
+}
+
+/* An invite code is dictated and transcribed, so it is spaced out and always
+   shown in the upper case it is normalised to. */
+.league-code-input {
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+.league-form-status {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--c-ink-muted);
+  /* Reserved so the panel does not jump when a message appears. */
+  min-height: 1.6em;
+}
+
+.league-form-status.is-ok    { color: var(--c-success); }
+.league-form-status.is-error { color: var(--c-danger); }
+
+/* ── The join screen ── */
+
+.league-rules {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--c-ink-body);
+}
+
+.league-rules li {
+  padding-left: 16px;
+  border-left: 2px solid var(--c-rule);
+}
+
+.league-rules strong {
+  color: var(--c-ink);
+}
+
+.league-warn {
+  margin-top: 18px;
+  background: var(--c-banner-bg);
+  border: 1px solid var(--c-banner-border);
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--c-ink);
+}
+
+/* Why there is no list of members on this screen. */
+.league-noroster {
+  margin-top: 16px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--c-ink-soft);
+}
+
+.league-start-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+
+.league-start-row .league-form-status {
+  margin-top: 0;
+  flex: 1 1 200px;
+}
+
+/* ── The board ── */
+
+.league-scopes {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.league-scope-btn {
+  font-family: inherit;
+  font-size: 12px;
+  padding: 4px 12px;
+  cursor: pointer;
+  color: var(--c-ink-muted);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+}
+
+.league-scope-btn:hover {
+  color: var(--c-ink);
+}
+
+.league-scope-btn.active {
+  color: var(--c-on-accent);
+  background: var(--c-accent);
+  border-color: var(--c-accent);
+}
+
+.league-board-empty {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--c-ink-soft);
+}
+
+.league-board-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.league-board-table th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: normal;
+  color: var(--c-ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 0 8px 8px;
+  border-bottom: 1px solid var(--c-border-soft);
+}
+
+.league-board-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--c-rule);
+}
+
+.league-board-table .col-rank {
+  width: 44px;
+  color: var(--c-ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Wide enough for "hasn't played" to sit on one line in the dark theme, whose
+   body font is monospace and therefore noticeably wider than the light one. */
+.league-board-table .col-num {
+  text-align: right;
+  width: 118px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Usernames are user-chosen and can be long and unbroken. */
+.league-board-table .col-name {
+  overflow-wrap: anywhere;
+}
+
+/* The caller's own row, wherever it lands. A fill rather than a weight change,
+   so it is findable at a glance in a hundred-row league. */
+.league-board-table tr.is-you td {
+  background: var(--c-banner-bg);
+  font-weight: bold;
+  color: var(--c-ink);
+}
+
+.league-board-table tr.is-you .col-rank {
+  color: var(--c-ink);
+}
+
+/* A member who has not played this scope. Dimmed, but present — omitting them
+   would make a league of six look like a league of four. */
+.league-board-table tr.league-row-idle td {
+  color: var(--c-ink-faint);
+}
+
+.league-noplay {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--c-ink-dim);
+  /* Two words, and broken across two lines it reads as two facts. */
+  white-space: nowrap;
+}
+
+.league-noname {
+  font-style: italic;
+  color: var(--c-ink-faint);
+}
+
+.league-you-tag,
+.league-owner-tag {
+  margin-left: 8px;
+  font-size: 10px;
+  font-weight: normal;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 1px 6px;
+}
+
+.league-you-tag {
+  color: var(--c-on-accent);
+  background: var(--c-accent);
+}
+
+.league-owner-tag {
+  color: var(--c-ink-soft);
+  border: 1px solid var(--c-border);
+}
+
+.league-board-foot {
+  margin-top: 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--c-ink-soft);
+}
+
+/* ── The invite code ── */
+
+.league-share {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  padding: 16px 18px;
+  margin-top: 20px;
+}
+
+.league-share-label {
+  display: block;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--c-ink-soft);
+  margin-bottom: 8px;
+}
+
+/* The code itself, big enough to read off a screen across a desk. */
+.league-code {
+  font-size: 22px;
+  font-weight: bold;
+  letter-spacing: 4px;
+  color: var(--c-ink);
+  margin-bottom: 12px;
+  overflow-wrap: anywhere;
+}
+
+.league-share-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.league-share-input {
+  flex: 1 1 260px;
+  min-width: 0;
+  font-family: inherit;
+  font-size: 13px;
+  padding: 7px 9px;
+  color: var(--c-ink);
+  background: var(--c-page-bg);
+  border: 1px solid var(--c-border);
+}
+
+.league-share-status {
+  font-size: 12px;
+  color: var(--c-ink-soft);
+  margin-top: 8px;
+  min-height: 15px;
+}
+
+.league-share-status.is-ok    { color: var(--c-success); }
+.league-share-status.is-error { color: var(--c-danger); }
+
+/* ── Leaving ── */
+
+.league-manage-note,
+.league-leave-warn {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--c-ink-body);
+  margin-top: 10px;
+}
+
+.league-leave-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.league-leave-confirm {
+  font-size: 13px;
+  color: var(--c-ink);
+  overflow-wrap: anywhere;
+}
+
+/* Only used for the second click of a leave, which is the one destructive
+   action on this page. */
+.btn-danger {
+  color: var(--c-danger);
+  border-color: var(--c-danger);
+}
+
+.btn-danger:hover {
+  color: var(--c-on-accent);
+  background: var(--c-danger);
+  border-color: var(--c-danger);
+}
+
+/* ── The dashboard's compact leagues panel ── */
+
+.dash-league-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.dash-league-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--c-rule);
+  font-size: 14px;
+}
+
+.dash-league-item:last-child {
+  border-bottom: none;
+}
+
+.dash-league-name {
+  color: var(--c-link);
+  overflow-wrap: anywhere;
+}
+
+.dash-league-meta {
+  font-size: 12px;
+  color: var(--c-ink-soft);
+}
+
+.dash-league-empty {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--c-ink-soft);
+}
+
+.dash-league-more {
+  margin-top: 12px;
+  font-size: 13px;
+}

@@ -626,3 +626,231 @@ async function submitDuelRun(key, answers) {
     p_answers: answers,
   });
 }
+
+// ── Private leagues ──────────────────────────────────────────
+// A named group, an invite code, and its own leaderboard over the daily.
+// Every call here is a SECURITY DEFINER RPC from supabase/leagues.sql; the
+// exact payload shapes are pinned in docs/leagues-design.md. Three properties
+// of that design decide the shape of this section:
+//
+//   * Accounts only. Every league RPC is granted to `authenticated` and to
+//     nothing else, and each one re-checks auth.uid() — so a signed-out caller
+//     gets `league_requires_account` rather than an empty list. There is no
+//     anonymous path to fall back to, unlike duels.
+//   * Refusals are RAISEd, not returned. `league_forbidden`, `league_full`,
+//     `league_limit_reached` and the rest arrive as `error` on the Supabase
+//     response — NOT as a thrown JS exception — so a client that only wrapped
+//     these in try/catch would render a blank page to a non-member. leagueRpc()
+//     reads the code out of `error` and turns it into a sentence.
+//   * get_my_leagues returns a BARE JSON ARRAY, not an object wrapper. It is
+//     the one function here that must not go through unwrapRpc(), which would
+//     silently hand back only the first league.
+//
+// Same reason as lastSocialError / lastDailyError / lastDuelError for recording
+// the failure rather than throwing: null is a legitimate answer from getLeague()
+// (no such code) and leagues.html has to word that very differently from
+// "leagues are not deployed". lastLeagueCode is the machine-readable half —
+// null means the last call succeeded and any null payload was a real answer.
+
+// The refusals supabase/leagues.sql raises, each as the sentence somebody
+// should actually read. The key is the RAISE message, which is what PostgREST
+// puts in error.message; the HINT is deliberately not shown, because it is
+// written for whoever is reading the database and not for the person holding
+// the invite code.
+const LEAGUE_REFUSALS = {
+  league_requires_account:
+    'Leagues need an account — sign in and try again.',
+  league_bad_name:
+    'A league name has to be between 1 and 60 characters.',
+  league_key_unavailable:
+    "Couldn't allocate a code for this league. Try again in a moment.",
+  league_not_found:
+    'There is no league with that code.',
+  league_forbidden:
+    'Only members can see this league. Join it with its code to see the board.',
+  league_not_member:
+    "You're not in this league, so there's nothing to leave.",
+  league_full:
+    'This league is full — it already has the maximum of 100 members.',
+  league_limit_reached:
+    "You're already in the maximum of 20 leagues. Leave one to make room.",
+  league_bad_scope:
+    'That leaderboard view does not exist.',
+};
+
+// Set when the last league call failed: a sentence for the user
+// (lastLeagueError) and the raised code, 'league_missing' or
+// 'league_unavailable' (lastLeagueCode).
+let lastLeagueError = null;
+let lastLeagueCode  = null;
+
+// What a typed or pasted invite code means, client-side. The same rule
+// supabase/leagues.sql's league_normalize_key applies — uppercase, drop
+// everything that is not a letter or a digit — so that "  wpq7-k3nd rx " and
+// "WPQ7K3NDRX" are the same league here as they are there.
+//
+// The server normalises anyway; this exists so the input does not LOOK broken
+// while somebody is pasting into it, and so the client can build a canonical
+// invite URL rather than echoing back whatever punctuation came with the code.
+//
+// Deliberately no length rule, unlike the SQL: truncating or emptying the
+// field under the user's cursor is worse than sending a code the server will
+// reject. The callers below apply the 32-character bound instead.
+function normalizeLeagueKey(key) {
+  return String(key ?? '').replace(/[^0-9A-Za-z]/g, '').toUpperCase();
+}
+
+// Which refusal an error object represents, or 'league_missing' when the
+// function itself is not there (migration not applied), or 'league_unavailable'
+// for anything else. The raised name is in error.message, but PostgREST has
+// moved detail between fields across versions, so all four are searched.
+function leagueErrorCode(error) {
+  if (!error) return null;
+  const blob = [error.message, error.details, error.hint, error.code]
+    .filter(v => typeof v === 'string')
+    .join(' ');
+
+  for (const code of Object.keys(LEAGUE_REFUSALS)) {
+    if (blob.indexOf(code) !== -1) return code;
+  }
+  // PostgREST reports an absent function as PGRST202 / "Could not find the
+  // function ... in the schema cache"; older stacks say "does not exist".
+  if (/PGRST202|schema cache|does not exist|could not find the function/i.test(blob)) {
+    return 'league_missing';
+  }
+  return 'league_unavailable';
+}
+
+// Shared body for the six league RPCs: guard, call, unwrap, and record why it
+// failed instead of throwing. Returns the payload, or null.
+//
+// `unwrap` is false for exactly one caller — get_my_leagues, whose payload is
+// a bare array that unwrapRpc() would reduce to its first element.
+async function leagueRpc(fn, args, unwrap = true) {
+  lastLeagueError = null;
+  lastLeagueCode  = null;
+
+  if (!dbReady()) {
+    lastLeagueCode  = 'league_unavailable';
+    lastLeagueError = 'Leagues are unavailable right now.';
+    return null;
+  }
+
+  try {
+    const { data, error } = await supabaseClient.rpc(fn, args || {});
+    if (error) {
+      const code = leagueErrorCode(error);
+      lastLeagueCode  = code;
+      lastLeagueError = LEAGUE_REFUSALS[code] || 'Leagues are unavailable right now.';
+      console.warn(fn + ':', error.message, '→', code);
+      return null;
+    }
+    return unwrap ? unwrapRpc(data) : (data ?? null);
+  } catch (e) {
+    console.warn(fn + ' threw:', e);
+    lastLeagueCode  = 'league_unavailable';
+    lastLeagueError = 'Leagues are unavailable right now.';
+    return null;
+  }
+}
+
+// A code that cannot possibly name a league, refused without a round trip.
+// league_normalize_key returns SQL NULL for an empty or over-long key and every
+// RPC turns that into league_not_found, so this is the same answer, sooner.
+function leagueRejectKey(key) {
+  lastLeagueCode  = 'league_not_found';
+  lastLeagueError = LEAGUE_REFUSALS.league_not_found;
+  return null;
+}
+
+// Create a league and return { league_key, name }, or null (see
+// lastLeagueError). Signed-in callers only. The name is trimmed and bounded
+// server-side (1..60 characters); a name that fails that comes back as
+// 'league_bad_name'.
+async function createLeague(name) {
+  return leagueRpc('create_league', { p_name: String(name ?? '') });
+}
+
+// Join a league by its invite code and return the league payload
+// { league_key, name, owner_username, member_count, is_member, is_owner,
+//   max_members, created_at }, or null.
+//
+// Idempotent by contract: joining a league you are already in is success, not
+// an error, and does not move your joined_at. Raises (→ null, with
+// lastLeagueCode set) for 'league_full', 'league_limit_reached' and
+// 'league_not_found'.
+async function joinLeague(key) {
+  const k = normalizeLeagueKey(key);
+  if (!k || k.length > 32) return leagueRejectKey(k);
+  return leagueRpc('join_league', { p_key: k });
+}
+
+// Leave a league and return what actually happened:
+// { league_key, name, left, league_deleted, ownership_transferred,
+//   new_owner_username, member_count }.
+//
+// The three outcomes are not interchangeable and the caller must report the
+// one that occurred: the last member leaving DELETES the league, an owner
+// leaving TRANSFERS it to the longest-standing remaining member, and anyone
+// else just leaves. Raises 'league_not_member' for a league the caller was
+// never in — leave is not idempotent, deliberately.
+async function leaveLeague(key) {
+  const k = normalizeLeagueKey(key);
+  if (!k || k.length > 32) return leagueRejectKey(k);
+  return leagueRpc('leave_league', { p_key: k });
+}
+
+// Every league the caller is in, as an ARRAY of
+// { league_key, name, owner_username, member_count, is_owner, max_members,
+//   joined_at, created_at }, most recently joined first.
+//
+// [] means "in no leagues" and is a normal answer; null means the call failed
+// and lastLeagueCode says why. get_my_leagues returns a bare JSON array, so
+// this is the one wrapper that must not unwrap — see leagueRpc.
+async function getMyLeagues() {
+  const data = await leagueRpc('get_my_leagues', {}, false);
+  if (Array.isArray(data)) return data;
+  if (lastLeagueCode) return null;
+  return [];
+}
+
+// The public face of one league for whoever is holding its code:
+// { league_key, name, owner_username, member_count, is_member, is_owner,
+//   max_members, created_at }. Deliberately carries NO roster — an invite code
+//  is a way to join, not a directory of who has already joined — so a join
+// screen built from this cannot leak the membership.
+//
+// Null means either "no league with that code" (lastLeagueCode null — an
+// ordinary answer) or "the call failed" (lastLeagueCode set). Those are
+// different pages.
+async function getLeague(key) {
+  const k = normalizeLeagueKey(key);
+  if (!k || k.length > 32) { lastLeagueError = null; lastLeagueCode = null; return null; }
+  return leagueRpc('get_league', { p_key: k });
+}
+
+// The league's leaderboard over the daily, for MEMBERS ONLY:
+// { league_key, name, scope, member_count, puzzle_date, window_days,
+//   rows: [{ rank, username, is_public, score, played, games, is_you,
+//   is_owner }] }.
+//
+// Scope is 'today' | 'week' | 'best'; anything else is refused rather than
+// silently defaulted. A non-member gets 'league_forbidden' (SQLSTATE 42501),
+// which arrives as `error` and becomes null here with lastLeagueCode set — an
+// empty board would be indistinguishable from a league nobody has played in.
+//
+// Two fields decide how a row may be rendered, and neither may be inferred:
+// `played` false means the member has no complete attempt in this scope and
+// must be shown as such rather than as a zero, and `is_public` false means
+// their profile is unpublished and their username must NOT be linked.
+// Usernames and the league name are user-controlled — escape them before they
+// reach innerHTML.
+async function getLeagueBoard(key, scope) {
+  const k = normalizeLeagueKey(key);
+  if (!k || k.length > 32) return leagueRejectKey(k);
+  const s = String(scope ?? 'today').toLowerCase().trim();
+  return leagueRpc('get_league_board', {
+    p_key:   k,
+    p_scope: (s === 'week' || s === 'best') ? s : 'today',
+  });
+}

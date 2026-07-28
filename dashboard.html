@@ -66,6 +66,16 @@
       <p class="profile-visibility-status" id="profile-visibility-status" role="status" aria-live="polite"></p>
     </div>
 
+    <!-- Private leagues, compact. Hidden entirely when supabase/leagues.sql is
+         not applied — an undeployed feature is not an error worth showing. -->
+    <div class="panel" id="leagues-panel" style="display:none">
+      <div class="panel-head">
+        <h2>Your Leagues</h2>
+        <span class="panel-note" id="leagues-panel-note"></span>
+      </div>
+      <div id="leagues-panel-body"></div>
+    </div>
+
     <div class="panel" id="chart-panel" style="display:none">
       <div class="panel-head">
         <h2>Score Over Time</h2>

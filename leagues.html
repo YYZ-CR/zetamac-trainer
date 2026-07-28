@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Leagues — Arithmetic Trainer</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="js/theme.js"></script>
+</head>
+<body class="leagues-page">
+
+  <div class="top-bar" id="top-bar"></div>
+
+  <div class="league-wrap">
+
+    <!-- Only on a single league's page, so there is always a way back to the
+         index without reaching for the browser's Back button. -->
+    <a class="league-back" id="league-back" href="leagues.html" style="display:none">&larr; Your leagues</a>
+
+    <div class="league-head">
+      <h1 id="league-title">Leagues</h1>
+      <div class="league-meta" id="league-meta"></div>
+    </div>
+
+    <!-- Shown until the state resolves one way or the other -->
+    <div class="league-loading" id="league-loading">Loading…</div>
+
+    <!-- Signed out, unknown code, left the league, or the RPCs are not deployed -->
+    <div class="league-notice" id="league-notice" style="display:none"></div>
+
+    <!-- Your leagues, the join screen, or the confirmation after creating one -->
+    <div class="panel" id="league-panel" style="display:none"></div>
+
+    <!-- The board itself: members only -->
+    <div class="panel" id="league-board-panel" style="display:none">
+      <div class="panel-head">
+        <h2>Leaderboard</h2>
+        <span class="panel-note" id="league-board-note"></span>
+      </div>
+      <div class="league-scopes" id="league-scopes"></div>
+      <div id="league-board"></div>
+    </div>
+
+    <!-- The invite code and its link. Below the board, because for a member
+         who is already in the league the board is the thing they came for. -->
+    <div class="league-share" id="league-share" style="display:none">
+      <label class="league-share-label" for="league-share-text">Invite people with this code</label>
+      <div class="league-code" id="league-code"></div>
+      <div class="league-share-row">
+        <input type="text" id="league-share-text" class="league-share-input" readonly value="">
+        <button class="btn" id="league-share-btn">Copy link</button>
+      </div>
+      <p class="league-share-status" id="league-share-status" role="status" aria-live="polite"></p>
+    </div>
+
+    <!-- Create a league / join with a code. Index page only. -->
+    <div id="league-forms" style="display:none"></div>
+
+    <!-- Leaving, and what leaving actually does. Board page only. -->
+    <div class="panel" id="league-manage" style="display:none"></div>
+
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/util.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/db.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/leagues.js"></script>
+</body>
+</html>
