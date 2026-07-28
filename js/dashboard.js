@@ -60,6 +60,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('username-display').textContent =
     profile?.username ? `Logged in as ${profile.username}` : user.email;
 
+  // An account with no profile row is a dead end everywhere else in the app:
+  // the register flow already says "try logging in and setting it again", but
+  // until now there was nowhere to set it. This is that place.
+  if (!profile?.username) renderUsernameClaim(user);
+
   // Before the empty-state return below: a user with no games still has a
   // profile to publish, and the link is how anyone finds it.
   renderProfilePanel(profile);
@@ -554,4 +559,59 @@ function renderRecentGames(sessions) {
     });
     tbody.appendChild(tr);
   }
+}
+
+// ── Claiming a username after the fact ────────────────────────
+// Reachable when a logged-in account has no profiles row. That happens when
+// registration created the auth user but the profile insert was refused —
+// with email confirmation enabled, signUp returns a user and no session, so
+// auth.uid() is null at that moment and the RLS check fails.
+//
+// The UNIQUE constraint on profiles.username is the real guard. The
+// availability check here only exists to give a better message than a
+// constraint violation, and it is deliberately re-checked by the insert.
+function renderUsernameClaim(user) {
+  const panel = document.getElementById('username-claim');
+  const input = document.getElementById('claim-username');
+  const btn   = document.getElementById('claim-btn');
+  const err   = document.getElementById('claim-error');
+  if (!panel || !input || !btn) return;
+
+  panel.style.display = 'block';
+
+  const fail = (msg) => {
+    err.textContent = msg;
+    btn.disabled = false;
+    btn.textContent = 'Save';
+  };
+
+  btn.addEventListener('click', async () => {
+    const username = input.value.trim();
+    err.textContent = '';
+
+    if (!username)            return fail('Pick a username first.');
+    if (username.length > 40) return fail('Usernames are at most 40 characters.');
+
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+
+    try {
+      if (!(await isUsernameAvailable(username))) {
+        return fail(`"${username}" is taken — try another.`);
+      }
+      if (!(await createProfile(user.id, username))) {
+        // Most likely the UNIQUE constraint, i.e. someone took it between the
+        // check above and this insert. Naming that beats a generic failure.
+        return fail('That username could not be saved. It may have just been taken.');
+      }
+      window.location.reload();
+    } catch (e) {
+      console.error('username claim failed:', e);
+      fail('Something went wrong saving that username.');
+    }
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') btn.click();
+  });
 }

@@ -35,6 +35,10 @@ being 4,000th behind strangers.
 
 **A share card** rendered client-side to a canvas, in whichever theme you are using.
 
+If an account ends up without a username — registration can leave it that way when
+email confirmation is enabled — the dashboard offers a way to claim one, since a
+username is what every leaderboard, league and duel names you by.
+
 Two themes: the original Zetamac light palette, reproduced value for value, and a
 Monkeytype-flavoured dark one.
 
@@ -88,6 +92,7 @@ npm run test:sql               # SQL contract suite — needs a local PostgreSQL
 ZT_CHROMIUM=<path> node test/browser/daily.mjs     # browser tests
 ZT_CHROMIUM=<path> node test/browser/duel.mjs
 ZT_CHROMIUM=<path> node test/browser/leagues.mjs
+ZT_CHROMIUM=<path> node test/browser/dashboard.mjs
 ```
 
 `supabase/test/` rebuilds a throwaway database from the migration files and asserts

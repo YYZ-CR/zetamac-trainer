@@ -28,6 +28,25 @@
       <button class="btn" id="prompt-register-btn" style="margin-left:8px">Register</button>
     </div>
 
+    <!-- Logged in, but no profiles row. Registration can leave an account in
+         this state (with email confirmation on, signUp returns a user but no
+         session, so auth.uid() is null and the insert is refused). Without a
+         username there is no name on a leaderboard, no /@you, and no way for a
+         duel or a league to name you — so this is the way back. -->
+    <div class="auth-prompt" id="username-claim" style="display:none">
+      <p><strong>Your account doesn't have a username yet.</strong></p>
+      <p class="claim-note">
+        You need one before you can appear on a leaderboard, in a league, or at
+        your own profile link. Your games are already saved — this only names them.
+      </p>
+      <div class="claim-row">
+        <input type="text" id="claim-username" class="auth-field claim-field"
+               placeholder="Pick a username" autocomplete="username" maxlength="40">
+        <button class="btn btn-primary" id="claim-btn">Save</button>
+      </div>
+      <div class="auth-error" id="claim-error" role="alert"></div>
+    </div>
+
     <!-- Shown when logged in -->
     <div class="stats-row" id="stats-row" style="display:none">
       <div class="stat-card">

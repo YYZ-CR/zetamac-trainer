@@ -2479,3 +2479,20 @@ body.leagues-page {
   margin-top: 12px;
   font-size: 13px;
 }
+
+/* ── Username claim (dashboard) ─────────────────────────────── */
+.claim-note {
+  color: var(--c-ink-soft);
+  font-size: 13px;
+  margin: 6px 0 12px;
+}
+.claim-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.claim-field {
+  margin: 0;
+  max-width: 260px;
+}
