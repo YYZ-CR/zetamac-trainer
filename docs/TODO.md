@@ -155,21 +155,36 @@ Two things not to "simplify" later:
 
 ## 5. Demo video
 
-Originally requested, deferred in favour of the social features (a share loop
-compounds; a video decays). The case is stronger now that there is a product to
-show.
+**Planned in full: `docs/demo-video-plan.md`** — outline, shot-by-shot script,
+storyboard, capture plan and export matrix. `docs/demo-video-guide.md` remains the
+technical reference (Remotion, the harness, ffmpeg). Nothing has been shot.
 
-`docs/demo-video-guide.md` is a full reference — structure, capture pipeline,
-anti-slop checklist, motion/type/colour/sound tokens. A capture harness approach was
-verified: Playwright with `deviceScaleFactor: 2` **and**
-`--force-device-scale-factor=2` (both, or you get gray padding), seeded RNG for
-determinism, screenshot-per-frame.
+Read the plan's evidence-quality section first. Research was web search only —
+`WebFetch` is blocked by this environment, so no primary source was opened — and
+every claim is labelled evidenced, convention or inference.
 
-**Watch for:** a stubbed or failed dependency renders a blank frame while reporting
-success. This has happened twice in this project (a HyperFrames render, and a
-Chart.js-stubbed pace graph). Always extract a frame and look at it.
+Three things from it worth knowing before you spend a weekend on this:
 
----
+- **No product in this genre appears to have a brand-made launch video.**
+  Monkeytype started with a rough Reddit post and a streamer picking it up six days
+  later. The video is what you hand a creator; it is not the growth mechanism.
+- **69% of social video is watched muted** (Verizon Media / Publicis Media, 2019,
+  n=5,616). The burned-in text is the script. Skip the voiceover.
+- **Never speed-ramp a shot with the countdown timer in frame.** It is the fastest
+  way to make this specific product look staged.
+
+Two numbers in the plan are unverified and would break the edit if wrong: X's
+free-tier length limit, and the 60-second Shorts ceiling that sets the master's
+length.
+
+### A product change the video research turned up
+
+- [ ] **The share card leads with a score, and a score may be the wrong shape to
+      spread.** Wordle's grid worked because it was spoiler-free and comparable at a
+      glance; Nerdle shares a score and still reaches for a glyph sequence rather
+      than a bare number. A card that led with the **pace curve** — a shape you can
+      hold next to somebody else's without knowing the questions — is closer to the
+      mechanic that demonstrably travels. Cheap to try: the curve is already drawn.
 
 ## 6. Known gaps, none blocking
 
