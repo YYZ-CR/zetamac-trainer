@@ -50,19 +50,12 @@
     <!-- Shown when logged in. The same five tiles, in the same order, as the
          top of the public profile page — js/stats.js renders both, so the two
          pages cannot drift into showing different records of the same account.
-         The old Best / Average / Games row is gone: Total Games was
-         duplicated by the strip, and the two remaining figures moved into the
-         Personal Bests panel below, where the other scores are. -->
+         The third tile is one personal best, at the duration played most and
+         labelled with it; the per-duration Personal Bests panel that used to
+         sit below is gone, and the rolling average it carried in its head is
+         in the note line under the strip. -->
     <div class="stat-strip" id="stat-strip" style="display:none"></div>
     <p class="stats-note" id="stats-note" style="display:none"></p>
-
-    <div class="panel" id="bests-panel" style="display:none">
-      <div class="panel-head">
-        <h2>Personal Bests</h2>
-        <span class="panel-note" id="bests-note"></span>
-      </div>
-      <div class="best-row" id="best-row"></div>
-    </div>
 
     <div class="panel" id="chart-panel" style="display:none">
       <div class="panel-head">
@@ -134,8 +127,8 @@
   <script src="js/config.js"></script>
   <script src="js/db.js"></script>
   <script src="js/auth.js"></script>
-  <!-- Shared with profile.html: the stat strip, the best cards and the
-       operation bars are the same markup on both pages. -->
+  <!-- Shared with profile.html: the stat strip and the operation bars are the
+       same markup on both pages. -->
   <script src="js/stats.js"></script>
   <script src="js/dashboard.js"></script>
 </body>

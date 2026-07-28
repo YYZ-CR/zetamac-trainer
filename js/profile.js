@@ -13,14 +13,15 @@
 // and by far the most played, so it is the one comparison worth making.
 const PERCENTILE_DURATION = 120;
 
-// How many recent games the bests panel averages over, matching the dashboard.
+// How many recent games the note under the strip averages over, matching the
+// dashboard.
 const PROFILE_AVG_WINDOW = 10;
 
-// STAT_DURATIONS, STAT_OP_ORDER, numberOrNull, formatCount, formatPercent,
-// formatSeconds, renderStatStrip, renderBestCards and renderOpBars come from
-// js/stats.js, which dashboard.html loads too. This page and the dashboard
-// show the same record of the same account, so they render it with the same
-// code rather than with two copies that drift.
+// STAT_OP_ORDER, numberOrNull, formatCount, formatPercent, formatSeconds,
+// renderStatStrip, recentAverageText and renderOpBars come from js/stats.js,
+// which dashboard.html loads too. This page and the dashboard show the same
+// record of the same account, so they render it with the same code rather
+// than with two copies that drift.
 
 // Kept so the chart can be rebuilt when the theme changes — Chart.js resolves
 // colours once, at construction.
@@ -178,10 +179,10 @@ async function renderProfile(profile) {
     return;
   }
 
-  // Same order as the dashboard: strip → bests → score over time → by
+  // Same order as the dashboard: strip → note → score over time → by
   // operation. Recent Games is the dashboard's alone.
   renderStatStrip(document.getElementById('stat-strip'), profile);
-  renderBests(profile);
+  renderRecentAverage(profile);
   renderHistoryChart(profile.history);
   renderOps(profile.ops);
   await renderPercentile(profile.bests);
@@ -225,17 +226,45 @@ function renderOwnerBanner() {
   });
 }
 
-// ── Personal bests ────────────────────────────────────────────
+// ── The note under the strip ──────────────────────────────────
+// Both figures the Personal Bests panel used to carry live here now: the
+// rolling average that sat in its head, and the percentile that sat at its
+// foot. They are written as one sentence rather than two stacked fragments,
+// because two orphaned clauses under a strip of tiles read as leftovers.
+//
+// The percentile arrives from a second RPC after the rest of the page has
+// rendered, so the note is composed by one function that both halves call and
+// that is safe to run twice.
 
-function renderBests(profile) {
-  if (!renderBestCards(document.getElementById('best-row'), profile.bests)) return;
+let profileNoteAvg = '';    // "Averaging 75 across the last 3 games", or ''
+let profileNotePct = null;  // whole-number percentile, or null
 
+function renderProfileNote() {
+  const el = document.getElementById('stats-note');
+  if (!el) return;
+
+  const parts = [];
+  if (profileNoteAvg) parts.push(escapeHtml(profileNoteAvg));
+  if (profileNotePct !== null) {
+    // Capitalised only when it leads: with the average present it is the
+    // second half of that sentence, not a new one.
+    const faster = parts.length ? 'faster' : 'Faster';
+    parts.push(
+      `${faster} than <strong>${escapeHtml(profileNotePct)}%</strong> ` +
+      `of players at ${escapeHtml(PERCENTILE_DURATION)} seconds`
+    );
+  }
+
+  if (!parts.length) { el.style.display = 'none'; return; }
+  el.innerHTML = `${parts.join(' — ')}.`;
+  el.style.display = 'block';
+}
+
+function renderRecentAverage(profile) {
   // history arrives oldest-first, so the last entries are the recent games.
   const recent = Array.isArray(profile.history) ? [...profile.history].reverse() : [];
-  const note   = document.getElementById('bests-note');
-  if (note) note.textContent = bestsNoteText(recent.map(h => h && h.score), PROFILE_AVG_WINDOW);
-
-  show('bests-panel');
+  profileNoteAvg = recentAverageText(recent.map(h => h && h.score), PROFILE_AVG_WINDOW);
+  renderProfileNote();
 }
 
 async function renderPercentile(bests) {
@@ -252,14 +281,13 @@ async function renderPercentile(bests) {
   }
   if (!res) return;
 
-  // Below the threshold this returns null and the line stays hidden: a
+  // Below the threshold this returns null and the clause stays absent: a
   // percentile drawn from a dozen people is noise dressed up as a measurement.
   const pct = percentilePercent(res);
   if (pct === null) return;
 
-  const el = document.getElementById('percentile-line');
-  el.innerHTML = `Faster than <strong>${escapeHtml(pct)}%</strong> of players at ${escapeHtml(PERCENTILE_DURATION)} seconds.`;
-  el.style.display = 'block';
+  profileNotePct = pct;
+  renderProfileNote();
 }
 
 // ── Per-operation breakdown ───────────────────────────────────

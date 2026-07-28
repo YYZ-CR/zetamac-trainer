@@ -19,8 +19,8 @@ const dayISO = (back) => {
 const q = (operation, timeMs, hadMistake) => ({ operation, timeMs, hadMistake });
 
 // Three games, three consecutive days ending today. Hand-computable:
-//   10 questions, 3 of them fumbled  → accuracy 70%
-//   bests 120s → 40, 60s → 30        → two cards, never pooled
+//   10 questions, 3 of them fumbled  → 70% of questions clean
+//   120s played twice (best 40), 60s once (best 30) → Best tile is 40 at 120s
 //   scores 40, 30, 20                → avg last 3 = 30
 //   one question with a bogus operation, which must be dropped
 const SESSIONS = [
@@ -46,6 +46,9 @@ const PUBLIC_PROFILE = {
   accuracy: 0.962,
   days_practiced: 87,
   streak: 12,
+  // 300s carries the biggest number by a distance and is played least — a
+  // Best tile that shows 190 has taken a max across durations, which is the
+  // one thing it must never do.
   bests: { '60': 41, '120': 84, '300': 190 },
   ops: {
     addition:       { avg_ms: 1420, count: 9000, accuracy: 0.98 },
@@ -53,6 +56,8 @@ const PUBLIC_PROFILE = {
     multiplication: { avg_ms: 1980, count: 4000, accuracy: 0.93 },
     division:       { avg_ms: 2310, count: 3000, accuracy: 0.90 },
   },
+  // Every recent game is a 120s run, so 120 is the duration played most and
+  // the one the Best tile has to name.
   history: [
     { d: '2026-07-20', score: 70, duration: 120 },
     { d: '2026-07-21', score: 75, duration: 120 },
@@ -152,6 +157,76 @@ console.log('[the removed panels are gone from the DOM, not hidden]');
   await ctx.close();
 }
 
+// ── The Best tile is not a max across durations ───────────────
+// The assertion this change lives or dies by. bests carries 190 at 300s and
+// 84 at 120s; every game in history is a 120s run. A tile reading 190 has
+// pooled scores that are not the same measurement — a 300-second run scores
+// roughly two and a half times a 120-second one — which is exactly why the
+// old Personal Bests panel showed one card per duration.
+console.log('[the Best tile is the best at the duration played most, not the biggest number]');
+{
+  const { ctx, p, errs } = await page({ profileRow: { id: 'u1', username: 'hexadecimal' },
+                                        sessions: SESSIONS, publicProfile: PUBLIC_PROFILE });
+  const tiles = await p.evaluate(TILES);
+  ok(tiles[2][0] === '84',
+     `Best is 84, the 120s best (got ${tiles[2][0]})`);
+  ok(tiles[2][0] !== '190',
+     'and specifically not 190, the 300s best, which no assertion here would otherwise catch');
+  ok(tiles[2][1] === 'Best · 120s',
+     `the label names the duration the number belongs to (got "${tiles[2][1]}")`);
+  ok(!(await p.textContent('#stat-strip')).includes('190'),
+     '190 appears nowhere in the strip');
+  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+  await ctx.close();
+}
+
+// Two durations, equal games played. The documented rule is that the longer
+// duration wins, so this must be 190 at 300s — and it must be that for the
+// stated reason, not because 190 is the bigger number, which is why the block
+// above exists.
+console.log('[a tie on games played is broken toward the longer duration]');
+{
+  const TIED = {
+    ...PUBLIC_PROFILE,
+    bests: { '120': 84, '300': 190 },
+    history: [
+      { d: '2026-07-19', score: 70, duration: 120 },
+      { d: '2026-07-20', score: 71, duration: 300 },
+      { d: '2026-07-21', score: 72, duration: 120 },
+      { d: '2026-07-22', score: 73, duration: 300 },
+    ],
+  };
+  const { ctx, p, errs } = await page({ profileRow: { id: 'u1', username: 'hexadecimal' },
+                                        sessions: SESSIONS, publicProfile: TIED });
+  const tiles = await p.evaluate(TILES);
+  ok(tiles[2][0] === '190', `two games each -> the 300s best, 190 (got ${tiles[2][0]})`);
+  ok(tiles[2][1] === 'Best · 300s', `labelled 300s (got "${tiles[2][1]}")`);
+  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+  await ctx.close();
+}
+
+// The mirror image of the tie: one more 300s game than 120s games, and the
+// tile follows the games played rather than staying on 120 out of habit.
+console.log('[play a longer duration more and the tile follows the games, not the duration]');
+{
+  const LONG = {
+    ...PUBLIC_PROFILE,
+    bests: { '120': 84, '300': 190 },
+    history: [
+      { d: '2026-07-20', score: 70, duration: 120 },
+      { d: '2026-07-21', score: 71, duration: 300 },
+      { d: '2026-07-22', score: 72, duration: 300 },
+    ],
+  };
+  const { ctx, p, errs } = await page({ profileRow: { id: 'u1', username: 'hexadecimal' },
+                                        sessions: SESSIONS, publicProfile: LONG });
+  const tiles = await p.evaluate(TILES);
+  ok(tiles[2][0] === '190' && tiles[2][1] === 'Best · 300s',
+     `the most-played duration is 300s now (got ${tiles[2][0]} / "${tiles[2][1]}")`);
+  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+  await ctx.close();
+}
+
 // ── The strip, from the server payload ────────────────────────
 console.log('[the five tiles render the get_public_profile payload]');
 {
@@ -160,11 +235,11 @@ console.log('[the five tiles render the get_public_profile payload]');
   const tiles = await p.evaluate(TILES);
   ok(tiles.length === 5, `exactly five tiles (got ${tiles.length})`);
   ok(JSON.stringify(tiles.map(t => t[1])) ===
-     JSON.stringify(['Total Games', 'Questions', 'Accuracy', 'Days Practiced', 'Day Streak']),
+     JSON.stringify(['Total Games', 'Questions', 'Best · 120s', 'Days Practiced', 'Day Streak']),
      'the labels are the five asked for, in order');
   ok(tiles[0][0] === '1,234',  `Total Games is 1,234 (got ${tiles[0][0]})`);
   ok(tiles[1][0] === '45,678', `Questions is 45,678 (got ${tiles[1][0]})`);
-  ok(tiles[2][0] === '96.2%',  `Accuracy is 96.2% (got ${tiles[2][0]})`);
+  ok(tiles[2][0] === '84',     `Best is 84 (got ${tiles[2][0]})`);
   ok(tiles[3][0] === '87',     `Days Practiced is 87 (got ${tiles[3][0]})`);
   ok(tiles[4][0] === '12',     `Day Streak is 12 (got ${tiles[4][0]})`);
 
@@ -174,12 +249,43 @@ console.log('[the five tiles render the get_public_profile payload]');
   ok(called && called[1].p_username === 'hexadecimal',
      'it looked the profile up by the signed-in username');
 
-  ok(await p.evaluate(() =>
-       Array.from(document.querySelectorAll('#best-row .best-card'))
-         .map(c => c.textContent.replace(/\s+/g, ' ').trim()).join('|') === '41 60s|84 120s|190 300s'),
-     'the best cards are one per duration played, never pooled across durations');
-  ok((await p.textContent('#bests-note')).trim() === 'Avg last 3 · 30',
-     'the rolling average moved into the bests panel head');
+  ok((await p.textContent('#stats-note')).includes('Averaging 30 across the last 3 games.'),
+     'the rolling average moved into the note under the strip');
+  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+  await ctx.close();
+}
+
+// ── Accuracy is gone, asserted positively ─────────────────────
+// The Accuracy column of the Recent Games table is a per-session figure and
+// stays, so this is asserted about the strip rather than about the page.
+console.log('[no accuracy tile anywhere in the strip]');
+{
+  const { ctx, p, errs } = await page({ profileRow: { id: 'u1', username: 'hexadecimal' },
+                                        sessions: SESSIONS, publicProfile: PUBLIC_PROFILE });
+  const tiles = await p.evaluate(TILES);
+  ok(!tiles.some(t => /accuracy/i.test(t[1])), 'no tile is labelled Accuracy');
+  ok(!tiles.some(t => t[0].includes('%')), 'no tile shows a percentage at all');
+  ok(!(await p.textContent('#stat-strip')).includes('96.2'),
+     "the payload's accuracy figure, 96.2%, is nowhere in the strip");
+  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+  await ctx.close();
+}
+
+// ── The Personal Bests panel ──────────────────────────────────
+console.log('[the Personal Bests panel is gone from the DOM, not hidden]');
+{
+  const { ctx, p, errs } = await page({ profileRow: { id: 'u1', username: 'hexadecimal' },
+                                        sessions: SESSIONS, publicProfile: PUBLIC_PROFILE });
+  ok(await p.evaluate(() => document.getElementById('bests-panel') === null),
+     'no #bests-panel element exists at all');
+  ok(await p.evaluate(() => document.getElementById('best-row') === null),
+     'no #best-row element exists');
+  ok(await p.evaluate(() => document.getElementById('bests-note') === null),
+     'no #bests-note element exists');
+  ok(await p.evaluate(() => document.querySelectorAll('.best-card').length === 0),
+     'and not one best card was rendered anywhere');
+  ok(!/Personal Bests/i.test((await p.textContent('body')) || ''),
+     'the words "Personal Bests" appear nowhere');
   ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
   await ctx.close();
 }
@@ -191,8 +297,8 @@ console.log('[panel order: stats → score over time → by operation → recent
                                         sessions: SESSIONS, publicProfile: PUBLIC_PROFILE });
   ok(await p.evaluate(ORDERED, ['stat-strip', 'chart-panel', 'ops-panel', 'games-panel']),
      'the four sections are in that document order');
-  ok(await p.evaluate(ORDERED, ['stat-strip', 'bests-panel', 'chart-panel']),
-     'and the bests panel sits between the strip and the chart');
+  ok(await p.evaluate(ORDERED, ['stat-strip', 'stats-note', 'chart-panel']),
+     'and the note sits between the strip and the chart, where the bests panel was');
   // Negative control: the same helper must refuse an order that is wrong,
   // or the two assertions above prove only that four elements exist.
   ok(!(await p.evaluate(ORDERED, ['ops-panel', 'chart-panel'])),
@@ -216,17 +322,20 @@ console.log('[no username -> the strip is computed locally, not five dashes]');
   ok(!tiles.every(t => t[0] === '—'), 'and they are not five em-dashes');
   ok(tiles[0][0] === '3',   `Total Games is the real count, 3 (got ${tiles[0][0]})`);
   ok(tiles[1][0] === '10',  `Questions is 10 (got ${tiles[1][0]})`);
-  ok(tiles[2][0] === '70%', `Accuracy is 70% (got ${tiles[2][0]})`);
+  ok(tiles[2][0] === '40',  `Best is 40, the 120s maximum (got ${tiles[2][0]})`);
+  ok(tiles[2][1] === 'Best · 120s',
+     `and 120s is the duration played most, twice of three (got "${tiles[2][1]}")`);
   ok(tiles[3][0] === '3',   `Days Practiced is 3 (got ${tiles[3][0]})`);
   ok(tiles[4][0] === '3',   `Day Streak is 3 (got ${tiles[4][0]})`);
+  ok(!tiles.some(t => /accuracy/i.test(t[1]) || t[0].includes('%')),
+     'the locally computed strip has no accuracy tile either');
   ok(await p.evaluate(() => !window.__rpc.some(c => c[0] === 'get_public_profile')),
      'no profile lookup is attempted without a username');
-  ok((await p.textContent('#stats-note')).includes('computed from the games loaded'),
+  const fallbackNote = await p.textContent('#stats-note');
+  ok(fallbackNote.includes('computed from the games loaded'),
      'and the page says the figures came from the loaded games');
-  ok(await p.evaluate(() =>
-       Array.from(document.querySelectorAll('#best-row .best-card'))
-         .map(c => c.textContent.replace(/\s+/g, ' ').trim()).join('|') === '30 60s|40 120s'),
-     'the bests are the per-duration maxima of the loaded sessions');
+  ok(fallbackNote.includes('Averaging 30 across the last 3 games.'),
+     'the rolling average is in the note on this path too');
 
   // The whitelist is the reason a client-written `operation` cannot become a
   // row: the fourth question in the newest session says "bogus".
@@ -247,6 +356,24 @@ console.log('[no username -> the strip is computed locally, not five dashes]');
      'an unrecognised operation is dropped, not rendered');
   ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
   await p.screenshot({ path: `${SHOTS}/dashboard-local-fallback.png`, fullPage: true });
+  await ctx.close();
+}
+
+// The same rule on the fallback path, which computes the counts itself rather
+// than reading them off history: one 300-second run scoring 190, against two
+// 120-second runs whose best is 40.
+console.log('[the local fallback does not pool scores across durations either]');
+{
+  const LONG_RUN = [...SESSIONS, {
+    session_key: 'k4', created_at: `${dayISO(3)}T10:00:00Z`, score: 190, duration_seconds: 300,
+    questions: [q('addition', 1000, false)],
+  }];
+  const { ctx, p, errs } = await page({ profileRow: null, sessions: LONG_RUN });
+  const tiles = await p.evaluate(TILES);
+  ok(tiles[2][0] === '40', `Best is still the 120s best, 40 (got ${tiles[2][0]})`);
+  ok(tiles[2][0] !== '190', 'the single 300s run did not take the tile');
+  ok(tiles[2][1] === 'Best · 120s', `labelled 120s (got "${tiles[2][1]}")`);
+  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
   await ctx.close();
 }
 

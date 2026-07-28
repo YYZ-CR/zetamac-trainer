@@ -78,17 +78,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   renderStatStrip(document.getElementById('stat-strip'), record);
 
-  if (renderBestCards(document.getElementById('best-row'), record.bests)) {
-    const note = document.getElementById('bests-note');
-    if (note) note.textContent = bestsNoteText(sessions.map(s => s.score), DASH_AVG_WINDOW);
-    document.getElementById('bests-panel').style.display = 'block';
-  }
-
-  // Be explicit about what the figures actually cover instead of quietly
-  // presenting a window as all time.
+  // The note under the strip carries the recent-form average — the figure the
+  // Personal Bests panel used to show in its head — and then any caveat about
+  // what the figures cover, so a window is never quietly presented as all
+  // time. Sentences, joined, rather than a row of orphaned labels.
   const note = document.getElementById('stats-note');
   if (note) {
     const parts = [];
+    const avg = recentAverageText(sessions.map(s => s.score), DASH_AVG_WINDOW);
+    if (avg) parts.push(`${avg}.`);
     if (!fromServer) {
       parts.push('These figures are computed from the games loaded on this page.');
     }
@@ -198,7 +196,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // ── The record, computed locally ──────────────────────────────
-// The fallback for the strip, the best cards and the operation bars when
+// The fallback for the strip and the operation bars when
 // get_public_profile cannot be reached — no username yet, or
 // supabase/social.sql not applied on this deployment. It returns the same
 // shape that function does, so nothing downstream has to know which source it
@@ -215,8 +213,9 @@ const DASH_OPS_WINDOW = 200;  // sessions the operation bars average over
 function recordFromSessions(sessions, totalGames) {
   let questions = 0;
   let mistakes  = 0;
-  const bests = {};
-  const days  = new Set();
+  const bests  = {};
+  const played = {};   // games per duration — see games_by_duration below
+  const days   = new Set();
 
   for (const s of sessions) {
     const qs = Array.isArray(s.questions) ? s.questions : [];
@@ -229,6 +228,8 @@ function recordFromSessions(sessions, totalGames) {
 
     const duration = numberOrNull(s.duration_seconds);
     const score    = numberOrNull(s.score);
+    if (duration !== null) played[String(duration)] = (played[String(duration)] || 0) + 1;
+
     if (duration !== null && score !== null) {
       const key = String(duration);
       if (!(key in bests) || score > bests[key]) bests[key] = score;
@@ -246,6 +247,12 @@ function recordFromSessions(sessions, totalGames) {
     days_practiced:  days.size,
     streak:          streakFromDays(days),
     bests,
+    // Not part of the get_public_profile payload: the server's own answer to
+    // "which duration is played most" is the `duration` on each history row,
+    // and this path has no history. renderStatStrip prefers this key when it
+    // is present and falls back to counting history when it is not, so the
+    // Best tile picks a duration on both paths.
+    games_by_duration: played,
     ops:             opsFromSessions(sessions),
   };
 }

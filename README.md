@@ -38,13 +38,17 @@ puzzle. Being 3rd of 6 behind people you know is a better reason to practice tha
 being 4,000th behind strangers.
 
 **Your dashboard** opens on a five-tile record of everything you have done — total
-games, questions answered, accuracy, days practiced and current day streak — over your
-personal bests, a score-over-time chart, a per-operation breakdown and a paged list of
-recent games.
+games, questions answered, your best score, days practiced and current day streak —
+over a score-over-time chart, a per-operation breakdown and a paged list of recent
+games. The Best tile is the best at the duration you play most and says which
+(`BEST · 120S`): scores at different run lengths are different measurements, and a
+single figure pooled across them would just be your longest run every time. A line
+under the tiles carries the average of your last 10 games.
 
 **Public profiles** at `/@username` are the same page for somebody else to read: the
-same five tiles, the same bests, the same chart and the same per-operation breakdown
-(`+ 1.42s · − 1.66s · × 1.98s · ÷ 2.31s`), plus a percentile. Private by default.
+same five tiles, the same chart and the same per-operation breakdown
+(`+ 1.42s · − 1.66s · × 1.98s · ÷ 2.31s`), with a percentile in the line under the
+tiles. Private by default.
 **Recent games are the dashboard's alone** — `get_public_profile` returns no
 per-session rows, and a public page listing them would be a cross-user data exposure.
 
@@ -193,6 +197,13 @@ Chromium (`npm install && npx playwright install chromium`). Run one on its own 
 `node test/browser/duel.mjs`; set `ZT_CHROMIUM=<path>` to point at a different
 Chromium build, and `ZT_BASE=<url>` to serve from a different port.
 
+`test/browser/mobile-nav.mjs` is the widest of them: six viewport widths by two
+themes by signed-in and signed-out, across every page that has a header. It exists
+because the header used to overflow *leftward* on a phone, so every check of the
+right edge passed while the link back to the game sat outside the viewport. It ends
+with a negative control that neutralizes the media query and requires the overflow to
+come back.
+
 `test/browser/dashboard.mjs` and `test/browser/profile.mjs` are a pair: they render the
 same stubbed payload through both pages and assert the same numbers out of each, so a
 change that moves one and not the other fails. `profile.mjs` also asserts, positively,
@@ -233,8 +244,8 @@ modules, no bundler, no runtime dependencies. Supabase and Chart.js come from a 
 Script order in the HTML is load-bearing: `theme.js` in `<head>` (it must run before
 first paint), then supabase → chart.js → `util.js` → `config.js` → `db.js` →
 `auth.js` → the page script last. `dashboard.html` and `profile.html` load one more,
-`js/stats.js`, between `auth.js` and their page script: the stat strip, the best cards
-and the operation bars are the same markup on both, and one copy is what stops the two
+`js/stats.js`, between `auth.js` and their page script: the stat strip and the
+operation bars are the same markup on both, and one copy is what stops the two
 pages disagreeing about the same account.
 
 ### Security

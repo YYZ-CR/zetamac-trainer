@@ -220,12 +220,27 @@ the league-succession rule and the duel rule by name, so it will tell you.
 
 ## 6. The dashboard and the public profile are one design
 
-Both pages render the same four things in the same order — a five-tile record strip
-(total games, questions, accuracy, days practiced, day streak), personal bests, score
-over time, and a per-operation breakdown — from `js/stats.js`. The dashboard adds
-Recent Games below that; the public page stops.
+Both pages render the same three things in the same order — a five-tile record strip
+(total games, questions, best, days practiced, day streak), score over time, and a
+per-operation breakdown — from `js/stats.js`. The dashboard adds Recent Games below
+that; the public page stops.
 
-Four things to keep true rather than rediscover:
+Five things to keep true rather than rediscover:
+
+- **The Best tile is never a max across durations.** Scores at different run lengths
+  are different measurements — a 300-second run scores about two and a half times a
+  120-second one — so the tile shows the best at the duration played *most* and names
+  that duration in its label (`BEST · 120S`). Ties on games played go to the longer
+  duration. `pickBestDuration` in `js/stats.js` is the whole rule; both browser suites
+  feed it a payload whose biggest number sits at its least-played duration, and a
+  pooled max fails them. This replaced a Personal Bests panel that showed one card per
+  duration for exactly this reason, so a single number that ignores duration would be
+  the same bug wearing a smaller hat.
+- **The strip has no accuracy tile** (removed on request) and no Personal Bests panel.
+  The two figures the panel carried — the rolling average of the last 10 games and the
+  percentile — are one sentence in the note under the strip (`#stats-note`, on both
+  pages). Deleting either from that note loses a figure the site computes and shows
+  nowhere else.
 
 - **`js/stats.js` is the single copy.** Adding a tile means editing one file, and both
   pages get it. `test/browser/dashboard.mjs` and `test/browser/profile.mjs` feed the

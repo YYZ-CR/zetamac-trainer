@@ -39,20 +39,16 @@
       </p>
 
       <!-- Same structure as dashboard.html, in the same order, rendered by the
-           same functions in js/stats.js: strip → bests → score over time → by
+           same functions in js/stats.js: strip → score over time → by
            operation. The dashboard's Recent Games list has no counterpart
            here on purpose — get_public_profile returns no per-session rows,
-           and publishing them would be a cross-user data exposure. -->
-      <div class="stat-strip" id="stat-strip" style="display:none"></div>
+           and publishing them would be a cross-user data exposure.
 
-      <div class="panel" id="bests-panel" style="display:none">
-        <div class="panel-head">
-          <h2>Personal Bests</h2>
-          <span class="panel-note" id="bests-note"></span>
-        </div>
-        <div class="best-row" id="best-row"></div>
-        <p class="percentile-line" id="percentile-line" style="display:none"></p>
-      </div>
+           The note under the strip is the dashboard's #stats-note element,
+           and it carries the two figures the removed Personal Bests panel
+           used to hold: the rolling average and the percentile. -->
+      <div class="stat-strip" id="stat-strip" style="display:none"></div>
+      <p class="stats-note" id="stats-note" style="display:none"></p>
 
       <div class="panel" id="chart-panel" style="display:none">
         <div class="panel-head">
@@ -87,8 +83,8 @@
   <script src="js/config.js"></script>
   <script src="js/db.js"></script>
   <script src="js/auth.js"></script>
-  <!-- Shared with dashboard.html: the stat strip, the best cards and the
-       operation bars are the same markup on both pages. -->
+  <!-- Shared with dashboard.html: the stat strip and the operation bars are
+       the same markup on both pages. -->
   <script src="js/stats.js"></script>
   <script src="js/profile.js"></script>
 </body>

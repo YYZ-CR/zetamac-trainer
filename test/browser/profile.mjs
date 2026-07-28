@@ -28,6 +28,8 @@ const PUBLIC_PROFILE = {
   accuracy: 0.962,
   days_practiced: 87,
   streak: 12,
+  // 300s holds the biggest number and, per `history` below, is never played:
+  // the Best tile must show 84 at 120s, not 190.
   bests: { '60': 41, '120': 84, '300': 190 },
   ops: {
     addition:       { avg_ms: 1420, count: 9000, accuracy: 0.98 },
@@ -104,21 +106,91 @@ console.log('[the five tiles are the dashboard’s five, with the payload’s va
   const tiles = await p.evaluate(TILES);
   ok(tiles.length === 5, `exactly five tiles (got ${tiles.length})`);
   ok(JSON.stringify(tiles.map(t => t[1])) ===
-     JSON.stringify(['Total Games', 'Questions', 'Accuracy', 'Days Practiced', 'Day Streak']),
+     JSON.stringify(['Total Games', 'Questions', 'Best · 120s', 'Days Practiced', 'Day Streak']),
      'the same labels, in the same order, as the dashboard');
   ok(tiles[0][0] === '1,234',  `Total Games is 1,234 (got ${tiles[0][0]})`);
   ok(tiles[1][0] === '45,678', `Questions is 45,678 (got ${tiles[1][0]})`);
-  ok(tiles[2][0] === '96.2%',  `Accuracy is 96.2% (got ${tiles[2][0]})`);
+  ok(tiles[2][0] === '84',     `Best is 84 (got ${tiles[2][0]})`);
   ok(tiles[3][0] === '87',     `Days Practiced is 87 (got ${tiles[3][0]})`);
   ok(tiles[4][0] === '12',     `Day Streak is 12 (got ${tiles[4][0]})`);
-  ok(await p.evaluate(() =>
-       Array.from(document.querySelectorAll('#best-row .best-card'))
-         .map(c => c.textContent.replace(/\s+/g, ' ').trim()).join('|') === '41 60s|84 120s|190 300s'),
-     'the best cards match the dashboard’s, one per duration');
-  ok((await p.textContent('#bests-note')).trim() === 'Avg last 3 · 75',
-     'the bests panel head carries the rolling average, as on the dashboard');
-  ok((await p.textContent('#percentile-line')).includes('78%'),
-     'the percentile line survives the rearrangement');
+
+  const note = (await p.textContent('#stats-note')).replace(/\s+/g, ' ').trim();
+  ok(note.includes('Averaging 75 across the last 3 games'),
+     `the rolling average is in the note under the strip (got "${note}")`);
+  ok(note.includes('78%'), 'and so is the percentile');
+  ok(note === 'Averaging 75 across the last 3 games — faster than 78% of players at 120 seconds.',
+     `the two read as one sentence (got "${note}")`);
+  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+  await ctx.close();
+}
+
+// ── The Best tile is not a max across durations ───────────────
+// The same fixture the dashboard uses, and the same rule: 190 at 300s is the
+// biggest number in `bests` and the least played, so a tile showing it has
+// pooled measurements that are not comparable.
+console.log('[the Best tile is the best at the duration played most, not the biggest number]');
+{
+  const { ctx, p, errs } = await page({ publicProfile: PUBLIC_PROFILE, percentile: PERCENTILE });
+  const tiles = await p.evaluate(TILES);
+  ok(tiles[2][0] === '84', `Best is 84, the 120s best (got ${tiles[2][0]})`);
+  ok(tiles[2][0] !== '190', 'and specifically not 190, the 300s best');
+  ok(tiles[2][1] === 'Best · 120s',
+     `the label names the duration the number belongs to (got "${tiles[2][1]}")`);
+  ok(!(await p.textContent('#stat-strip')).includes('190'), '190 is nowhere in the strip');
+  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+  await ctx.close();
+}
+
+console.log('[a tie on games played is broken toward the longer duration]');
+{
+  const TIED = {
+    ...PUBLIC_PROFILE,
+    bests: { '120': 84, '300': 190 },
+    history: [
+      { d: '2026-07-19', score: 70, duration: 120 },
+      { d: '2026-07-20', score: 71, duration: 300 },
+      { d: '2026-07-21', score: 72, duration: 120 },
+      { d: '2026-07-22', score: 73, duration: 300 },
+    ],
+  };
+  const { ctx, p, errs } = await page({ publicProfile: TIED, percentile: PERCENTILE });
+  const tiles = await p.evaluate(TILES);
+  ok(tiles[2][0] === '190', `two games each -> the 300s best, 190 (got ${tiles[2][0]})`);
+  ok(tiles[2][1] === 'Best · 300s', `labelled 300s (got "${tiles[2][1]}")`);
+  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+  await ctx.close();
+}
+
+// ── Accuracy and the Personal Bests panel are gone ────────────
+console.log('[no accuracy tile, and no Personal Bests panel in the DOM]');
+{
+  const { ctx, p, errs } = await page({ publicProfile: PUBLIC_PROFILE, percentile: PERCENTILE });
+  const tiles = await p.evaluate(TILES);
+  ok(!tiles.some(t => /accuracy/i.test(t[1])), 'no tile is labelled Accuracy');
+  ok(!tiles.some(t => t[0].includes('%')), 'no tile shows a percentage');
+  const body = (await p.textContent('body')) || '';
+  ok(!/accuracy/i.test(body), 'the word "accuracy" appears nowhere on the public page');
+  ok(!body.includes('96.2'), "and neither does the payload's accuracy figure");
+  ok(await p.evaluate(() => document.getElementById('bests-panel') === null),
+     'no #bests-panel element exists at all');
+  ok(await p.evaluate(() => document.getElementById('best-row') === null),
+     'no #best-row element exists');
+  ok(await p.evaluate(() => document.querySelectorAll('.best-card').length === 0),
+     'not one best card was rendered');
+  ok(!/Personal Bests/i.test(body), 'the words "Personal Bests" appear nowhere');
+  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+  await ctx.close();
+}
+
+// The percentile is a second RPC that lands after the rest of the page. When
+// it never lands, the note must still be a sentence rather than a fragment
+// waiting for one.
+console.log('[no percentile -> the note is still a whole sentence]');
+{
+  const { ctx, p, errs } = await page({ publicProfile: PUBLIC_PROFILE, percentile: null });
+  const note = (await p.textContent('#stats-note')).replace(/\s+/g, ' ').trim();
+  ok(note === 'Averaging 75 across the last 3 games.', `the average alone (got "${note}")`);
+  ok(!note.includes('—'), 'with no dangling dash where the percentile would have been');
   ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
   await ctx.close();
 }
@@ -129,8 +201,8 @@ console.log('[panel order matches the dashboard, minus Recent Games]');
   const { ctx, p, errs } = await page({ publicProfile: PUBLIC_PROFILE, percentile: PERCENTILE });
   ok(await p.evaluate(ORDERED, ['stat-strip', 'chart-panel', 'ops-panel']),
      'stats → Score Over Time → By Operation, in document order');
-  ok(await p.evaluate(ORDERED, ['stat-strip', 'bests-panel', 'chart-panel']),
-     'and the bests panel sits between the strip and the chart');
+  ok(await p.evaluate(ORDERED, ['stat-strip', 'stats-note', 'chart-panel']),
+     'and the note sits between the strip and the chart, where the bests panel was');
   // Negative control: the same helper must refuse an order that is wrong,
   // or the two assertions above prove only that four elements exist.
   ok(!(await p.evaluate(ORDERED, ['ops-panel', 'chart-panel'])),
