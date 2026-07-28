@@ -71,6 +71,7 @@ run_sql "$SQLDIR_MIG/hardening.sql"
 run_sql "$SQLDIR_MIG/social.sql"
 [ -r "$SQLDIR_MIG/daily.sql" ] && run_sql "$SQLDIR_MIG/daily.sql"
 [ -r "$SQLDIR_MIG/duels.sql" ] && run_sql "$SQLDIR_MIG/duels.sql"
+[ -r "$SQLDIR_MIG/leagues.sql" ] && run_sql "$SQLDIR_MIG/leagues.sql"
 
 # These files are applied by hand in the Supabase SQL editor, so somebody will
 # eventually paste one twice. Re-applying here proves that is harmless.
@@ -78,6 +79,7 @@ echo "=== re-applying migrations (idempotency) ==="
 run_sql "$SQLDIR_MIG/social.sql"
 [ -r "$SQLDIR_MIG/daily.sql" ] && run_sql "$SQLDIR_MIG/daily.sql"
 [ -r "$SQLDIR_MIG/duels.sql" ] && run_sql "$SQLDIR_MIG/duels.sql"
+[ -r "$SQLDIR_MIG/leagues.sql" ] && run_sql "$SQLDIR_MIG/leagues.sql"
 
 echo "=== seeding ==="
 run_sql "$SQLDIR_TEST/01-seed.sql"
@@ -89,4 +91,5 @@ echo "=== contract tests ==="
 TESTS="-f '$SQLDIR_TEST/02-test.sql'"
 [ -r "$SQLDIR_MIG/daily.sql" ] && TESTS="$TESTS -f '$SQLDIR_TEST/03-daily-test.sql'"
 [ -r "$SQLDIR_MIG/duels.sql" ] && TESTS="$TESTS -f '$SQLDIR_TEST/04-duels-test.sql'"
+[ -r "$SQLDIR_MIG/leagues.sql" ] && TESTS="$TESTS -f '$SQLDIR_TEST/05-leagues-test.sql'"
 psql_run "-d $DB $TESTS" 2>&1 | sed 's/^psql.*NOTICE:  //'
