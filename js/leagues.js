@@ -231,7 +231,7 @@ function showLeagueSignedOut() {
       A league is a private leaderboard over Zetamac Daily: everyone in it gets
       the same questions on the same day, so the scores are directly
       comparable. Being 3rd of 6 behind people you know is the entire reason
-      anyone practises.
+      anyone practices.
     </p>
     <p>
       That only works with one attempt each, and one attempt can only be

@@ -757,9 +757,12 @@ async function boardRow(page, name) {
     await ctx.close();
   }
 
-  // The dashboard's compact panel: the same bare array, and the same escaping.
+  // The dashboard used to carry a compact copy of this list. It does not any
+  // more — the dashboard is the five-tile record, the chart, the operation
+  // bars and Recent Games, and nothing else. leagues.html owns every league
+  // state, and this is the guard against the panel quietly coming back.
   {
-    console.log('[dashboard leagues panel]');
+    console.log('[the dashboard no longer carries a leagues panel]');
     const XSS = `<img src=x onerror="window.__pwned=1">`;
     const mine = [
       { league_key: KEY, name: XSS, owner_username: 'hexadecimal', member_count: 4,
@@ -771,27 +774,14 @@ async function boardRow(page, name) {
     const { ctx, page, errors } = await newPage(browser, { session: SESSION, rpc });
     await page.goto(`${BASE}/dashboard.html`, { waitUntil: 'networkidle' });
     await page.waitForTimeout(600);
-    ok(await page.isVisible('#leagues-panel'), 'the dashboard panel appears for a member');
-    const body = (await page.textContent('#leagues-panel')) || '';
-    ok(body.includes('Maths Club'), 'BOTH leagues are listed from the bare array');
-    ok(body.includes(XSS), 'a hostile league name renders as literal text on the dashboard too');
-    ok(await page.evaluate(() => document.querySelectorAll('#leagues-panel img').length) === 0,
-       'and produces no live element there either');
-    ok(body.includes('4 members · you own it'), 'ownership and size are shown compactly');
+    ok(await page.evaluate(() => document.getElementById('leagues-panel') === null),
+       'no #leagues-panel element exists on the dashboard at all');
+    const body = (await page.textContent('body')) || '';
+    ok(!body.includes('Maths Club'), 'no league is listed there');
+    ok(!/Your Leagues/i.test(body), 'and the heading is gone with it');
+    ok(await page.evaluate(() => document.querySelectorAll('.dashboard-wrap img').length) === 0,
+       'a hostile league name still produces no live element on that page');
     ok(await page.evaluate(() => window.__pwned !== 1), 'nothing executed');
-    ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
-    await page.screenshot({ path: `${SHOTS}/leagues-dash-panel.png`, fullPage: true });
-    await ctx.close();
-  }
-
-  // …and stays out of the way when the migration is not applied.
-  {
-    console.log('[dashboard panel hidden without the migration]');
-    const { ctx, page, errors } = await newPage(browser, { session: SESSION, rpc: {} });
-    await page.goto(`${BASE}/dashboard.html`, { waitUntil: 'networkidle' });
-    await page.waitForTimeout(600);
-    ok(!(await page.isVisible('#leagues-panel')),
-       'an undeployed leagues migration hides the panel rather than showing an error');
     ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
     await ctx.close();
   }

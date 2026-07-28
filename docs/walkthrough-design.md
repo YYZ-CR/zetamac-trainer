@@ -41,6 +41,10 @@ covers a bump, a downgrade and a junk value alike without needing a version orde
 that nothing here defines. Bump it when the tour changes materially, never for a typo
 fix: a tour that reappears for no reason trains people to dismiss it unread.
 
+**Current version: `'2'`.** `'1'` was the original six steps. `'2'` added the welcome
+step at the front and the closing line on the last step — both of them things a `'1'`
+dismisser has not read, which is exactly what the constant is for.
+
 **Home page only, and not even all of it.** `index.html` — but not
 `index.html?key=…`, which is a shared configuration link. Someone landing on
 `/duel.html?d=…` came for a specific duel and someone following a config link came to
@@ -60,22 +64,38 @@ below for the rules, which are mostly rules about giving up gracefully.
 ## The steps
 
 Ordered by what is most different from the thing they already know, not by what is
-biggest. Six, because a seventh is where people start clicking Skip.
+biggest. **Seven**: a welcome, then the six features. Seven is the ceiling — an
+eighth is where people start clicking Skip.
 
-1. **You get told why.** Every question is timed, so a finished run gives a graph of
+1. **Welcome.** What this is, in one sentence, and then the two facts that come
+   before any feature matters: **playing needs no account** (press Start and go;
+   practice mode and accepting a duel work signed out too), and signing in is what
+   saves your run history, puts you on the daily and league boards and gives you a
+   profile page. Ends by pointing at Next.
+2. **You get told why.** Every question is timed, so a finished run gives a graph of
    your pace, a per-question breakdown, and the specific technique that would have
    saved the time — `84 ÷ 7` → `70 ÷ 7 = 10`, `14 ÷ 7 = 2`, `= 12`.
-2. **Practice what you are bad at.** Practice mode weights your weakest question
+3. **Practice what you are bad at.** Practice mode weights your weakest question
    types higher, so drilling goes where the time is actually lost.
-3. **Zetamac Daily.** One puzzle a day, the same questions for everyone, one
+4. **Zetamac Daily.** One puzzle a day, the same questions for everyone, one
    attempt. Nobody can claim they got easier problems.
-4. **Duels.** Send a link. You both answer the same sequence, neither sees a score
+5. **Duels.** Send a link. You both answer the same sequence, neither sees a score
    until both are done, and it ends on a graph of both paces. No account needed to
    accept one.
-5. **Private leagues.** An invite code and a board over the day's puzzle. Being 3rd
+6. **Private leagues.** An invite code and a board over the day's puzzle. Being 3rd
    of 6 behind people you know beats being 4,000th behind strangers.
-6. **A profile worth sharing.** `/@you`, a per-operation breakdown, a percentile, and
+7. **A profile worth sharing.** `/@you`, a per-operation breakdown, a percentile, and
    a share card rendered in whichever theme you use. Private until you say otherwise.
+   Closes with a quieter line saying the tour reopens from **How this works** at the
+   bottom of the home page, so closing it costs nothing.
+
+**Why those two facts sit where they do.** The sign-in point is on the welcome step
+because "do I have to sign up" is the question somebody asks before they read
+anything else, and answering it costs two lines rather than a step of its own. The
+"How this works" point is on the **last** step instead, because that is the moment
+the tour is about to disappear behind *Start playing* — and a welcome whose third
+paragraph explains how to get rid of the tour is a paragraph about the tour rather
+than about the product. Neither got a step of its own: seven is already the ceiling.
 
 The last step's primary action is **Start playing**, which dismisses. Not "Sign up" —
 the tour's job is to get somebody to their first run.
@@ -85,16 +105,19 @@ Each step names the element it is about, as a CSS selector on its entry in
 
 | Step | Target | Selector |
 |---|---|---|
-| 1 It tells you why | the Start button | `#start-btn` |
-| 2 Practise what you are worst at | the Practice button | `a[href="practice.html"]` |
-| 3 Zetamac Daily | the Daily button | `a[href="daily.html"]` |
-| 4 Duels | the Duel nav link | `#top-bar a[href="duel.html"]` |
-| 5 Private leagues | the Leagues nav link | `#top-bar a[href="leagues.html"]` |
-| 6 A profile worth sharing | the Dashboard nav link | `#top-bar a[href="dashboard.html"]` |
+| 1 Welcome | *none* — it is about the site, not a control | — |
+| 2 It tells you why | the Start button | `#start-btn` |
+| 3 Practice what you are worst at | the Practice button | `a[href="practice.html"]` |
+| 4 Zetamac Daily | the Daily button | `a[href="daily.html"]` |
+| 5 Duels | the Duel nav link | `#top-bar a[href="duel.html"]` |
+| 6 Private leagues | the Leagues nav link | `#top-bar a[href="leagues.html"]` |
+| 7 A profile worth sharing | the Dashboard nav link | `#top-bar a[href="dashboard.html"]` |
 
-Existing markup, deliberately: no ids were added to `index.html` for this. Steps 4-6
+Existing markup, deliberately: no ids were added to `index.html` for this. Steps 5-7
 are qualified with `#top-bar` because the same hrefs also appear elsewhere on the
-page. `target` is optional — see below.
+page. `target` is optional, and step 1 is the case that exercises it: it renders
+through the centred fallback below, which is the same path a step whose selector
+never resolves takes.
 
 ## The spotlight
 
@@ -145,7 +168,7 @@ assertion in the test:
   where the element was rather than where it will be.
 - Measurement happens after two `requestAnimationFrame`s, so the scroll and any
   reflow it caused have settled.
-- The nav is built by `js/auth.js` after a session lookup, so on a cold load steps 4-6
+- The nav is built by `js/auth.js` after a session lookup, so on a cold load steps 5-7
   have no target at the instant the tour opens. `tourResolve()` retries for
   `TOUR_RESOLVE_MS` and then gives up. A resolve that lands after the reader has
   already pressed Next is discarded by a token, or the hole would jump onto the
@@ -194,7 +217,7 @@ the way every other design doc in this folder pins a shape.
 | `tour-counter` | the counter, rendered `n / total` |
 | `tour-back` / `tour-next` | step controls; `tour-next` reads "Start playing" on the last step |
 | `tour-skip` / `tour-close` | the two explicit dismissals |
-| `tour-link` | the footer "How this works" link, present on every load |
+| `tour-link` | the footer "How this works" link, present on every load. It lives on `index.html` only, because `js/tour.js` does; the other pages carry the same footer minus that link, plus the two policy links |
 | `tour-hole` | the spotlight. **Present only for a step with a live, on-screen target**, and absent from the DOM otherwise — its presence is the assertion that a hole was drawn |
 | `tour-caret` | the panel's pointer, a child of the panel. **Present only when it points at a hole**, with `.tour-caret--up` / `--down` / `--left` / `--right` for which way |
 
@@ -215,9 +238,10 @@ The tour's `z-index` sits above the log-in modal's, which is on the same page.
    on, driven by a persisted `localStorage`, not by a page variable.
 3. Each of the five dismissal routes marks it seen and, on reload, stays gone.
 4. Next / Back walk the steps, the counter matches, and the step count equals the
-   length of the step array.
-5. It does not appear on `dashboard.html`, `daily.html`, `duel.html`, `leagues.html`
-   or `practice.html`, nor on `index.html?key=…`.
+   length of the step array **and that length is seven**. Both, deliberately: the
+   first alone would pass for any number of steps.
+5. It does not appear on `dashboard.html`, `daily.html`, `duel.html`, `leagues.html`,
+   `practice.html`, `privacy.html` or `terms.html`, nor on `index.html?key=…`.
 6. The footer link re-opens it after it has been dismissed.
 7. A stored value that is not the current `TOUR_VERSION` shows it again.
 8. No uncaught page errors, in both themes.
@@ -237,6 +261,27 @@ The tour's `z-index` sits above the log-in modal's, which is on the same page.
     genuine page scroll it still matches. The scroll test asserts `scrollY > 0`
     first: at a viewport tall enough to fit this page, `scrollBy()` is a no-op and
     the assertion would prove nothing.
+14. The **welcome step**: first, targetless, no hole, no caret, genuinely centred,
+    and its copy says playing needs no account and what signing in is for — asserted
+    on meaning, not on length. The "How this works" line is on the **last** step and
+    not on this one, and both halves of that are asserted so the two cannot silently
+    swap places. Screenshotted in both themes.
+15. **The step → target mapping**, written out literally for all seven pairs. Both
+    sides are named in the test rather than read out of `TOUR_STEPS`, because
+    inserting a step at the front shifts every pair by one and a test that derives
+    both sides from the same array cannot see that happen.
+16. **The bump to `'2'`** brings the tour back for somebody storing `'1'`, lands them
+    on the welcome step, overwrites `'1'` on dismissal, and does not return again.
+17. **The footer's policy pages.** `index.html`'s footer links to `privacy.html` and
+    `terms.html` with "How this works" still beside them; both pages are navigated to
+    for real in both themes and must render their heading, the shared top bar, the
+    theme's own `--c-page-bg` (not the browser default), real copy, and no uncaught
+    page errors. Their own footers link home and across but never to themselves.
+    A final block asserts the claims that have to be true of *this* site — no
+    analytics, jsDelivr seeing an IP, millisecond timings, the `localStorage` keys by
+    name, opt-in profiles, and a deletion section agreeing with
+    `docs/account-deletion.md` on league succession and on which duels go — so a
+    later rewrite towards boilerplate fails rather than passes.
 
 Run it with `python3 -m http.server`, never `npx serve` — serve's clean-URLs default
 strips the query string that section 5 depends on.

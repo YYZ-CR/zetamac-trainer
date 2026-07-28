@@ -32,11 +32,18 @@
 // Bump it when the tour materially changes — a new step, a step that now
 // describes something different. Do NOT bump it for a typo fix: a tour that
 // reappears for no reason trains people to dismiss it unread.
-const TOUR_VERSION = '1';
+//
+// '2': a welcome step was added at the front, and the last step now says where
+// the tour can be reopened from. Both change what the tour tells you, so
+// somebody who dismissed '1' has not read either of them.
+const TOUR_VERSION = '2';
 const TOUR_KEY     = 'zt_tour_seen';
 
 // Ordered by what is most different from the thing they already know, not by
-// what is biggest. Six, because a seventh is where people start clicking Skip.
+// what is biggest. Seven: six features, plus a welcome in front of them that
+// answers the two questions a first-time visitor has before any of the
+// features matter — do I have to sign up, and can I get rid of this. Seven is
+// the ceiling; an eighth is where people start clicking Skip.
 //
 // `target` is a CSS selector for the thing on the page the step is talking
 // about. It is OPTIONAL: a step without one — or with one that does not resolve
@@ -45,6 +52,24 @@ const TOUR_KEY     = 'zt_tour_seen';
 // header js/auth.js builds after a session lookup, so they are frequently not
 // there yet at the instant the tour opens; tourResolve() waits for them.
 const TOUR_STEPS = [
+  {
+    // Deliberately NO target. This step is about the site, not about a control
+    // on it, so it renders through the centred fallback in tourLayout() — the
+    // same path a step whose selector never resolves falls back to.
+    //
+    // The sign-in sentence is here rather than on a step of its own because
+    // "do I have to sign up" is the question somebody asks before they read
+    // anything else, and answering it costs two lines rather than a step.
+    title: 'Welcome',
+    html: `
+      <p>The arithmetic drill you already know &mdash; same timed sprint, same
+         look &mdash; with the part that was missing. Press <strong>Next</strong>
+         for the thirty-second version of what is here.</p>
+      <p><strong>You do not need an account to play.</strong> Press Start and go;
+         practice mode and accepting somebody&rsquo;s duel work signed out too.
+         Signing in is what saves your run history, puts you on the daily and
+         league boards, and gives you a profile page.</p>`,
+  },
   {
     title: 'It tells you why',
     target: '#start-btn',
@@ -56,7 +81,7 @@ const TOUR_STEPS = [
          14 &divide; 7 = 2, <strong>= 12</strong></p>`,
   },
   {
-    title: 'Practise what you are worst at',
+    title: 'Practice what you are worst at',
     target: 'a[href="practice.html"]',
     html: `
       <p>Practice mode weights your weakest question types higher, so drilling goes
@@ -98,7 +123,10 @@ const TOUR_STEPS = [
          (+&nbsp;1.42s &middot; &minus;&nbsp;1.66s &middot; &times;&nbsp;1.98s &middot;
          &divide;&nbsp;2.31s), a percentile, and a share card drawn in whichever theme
          you are using.</p>
-      <p>It stays private until you turn it on in Settings.</p>`,
+      <p>It stays private until you turn it on in Settings.</p>
+      <p class="tour-footnote">That is the tour. <strong>How this works</strong>,
+         at the bottom of the home page, opens it again &mdash; so closing it
+         costs nothing.</p>`,
   },
 ];
 

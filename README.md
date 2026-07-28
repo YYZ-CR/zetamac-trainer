@@ -34,13 +34,22 @@ server itself observed, because awarding the point to whoever's packet arrived
 first would make it a contest of who has the better connection.
 
 **Private leagues** — an invite code, a named group, and a board over the day's
-puzzle. Being 3rd of 6 behind people you know is a better reason to practise than
+puzzle. Being 3rd of 6 behind people you know is a better reason to practice than
 being 4,000th behind strangers.
 
-**Public profiles** at `/@username`, with a per-operation breakdown (`+ 1.42s ·
-− 1.66s · × 1.98s · ÷ 2.31s`) and a percentile. Private by default.
+**Your dashboard** opens on a five-tile record of everything you have done — total
+games, questions answered, accuracy, days practiced and current day streak — over your
+personal bests, a score-over-time chart, a per-operation breakdown and a paged list of
+recent games.
 
-**A share card** rendered client-side to a canvas, in whichever theme you are using.
+**Public profiles** at `/@username` are the same page for somebody else to read: the
+same five tiles, the same bests, the same chart and the same per-operation breakdown
+(`+ 1.42s · − 1.66s · × 1.98s · ÷ 2.31s`), plus a percentile. Private by default.
+**Recent games are the dashboard's alone** — `get_public_profile` returns no
+per-session rows, and a public page listing them would be a cross-user data exposure.
+
+**A share card** rendered client-side to a canvas, in whichever theme you are using,
+offered at the end of a run.
 
 **Settings** at `/settings.html` — username, profile visibility, theme and account in
 one place. The public/private toggle lives here rather than on the dashboard: the
@@ -73,15 +82,20 @@ longest-standing remaining member, duels you created go with you, duels you only
 played in stay and show you as a deleted account, and your username is released.
 `docs/account-deletion.md` is the contract, and `supabase/account.sql` implements it.
 
-**A first-run walkthrough.** A first visit to the home page opens a six-step tour of
-everything above — the analysis, practice mode, the daily, duels, leagues and the
-profile — because all of it sits *behind* a run the visitor has not done yet.
+**A first-run walkthrough.** A first visit to the home page opens a seven-step tour:
+a welcome, then the analysis, practice mode, the daily, duels, leagues and the
+profile — because all of it sits *behind* a run the visitor has not done yet. The
+welcome step answers the two questions that come before any feature — **playing needs
+no account**, and signing in is what saves your history, puts you on the boards and
+gives you a profile — and the last step says the tour reopens from "How this works",
+so closing it costs nothing.
 
-Each step **spotlights the control it is describing**: the rest of the page darkens,
-the target is outlined, and the panel sits beside it with a caret pointing at it. A
-step whose target is missing, hidden or off-screen falls back to a plain centred
-panel rather than ringing empty space — the nav is built from the session, so that
-case is real rather than theoretical.
+Each step after the welcome **spotlights the control it is describing**: the rest of
+the page darkens, the target is outlined, and the panel sits beside it with a caret
+pointing at it. A step whose target is missing, hidden or off-screen falls back to a
+plain centered panel rather than ringing empty space — the nav is built from the
+session, so that case is real rather than theoretical. The welcome step names no
+target at all and uses that same centered layout deliberately.
 
 It is shown once and closes five ways (Esc, ×, Skip, the backdrop, or finishing), every one
 of which counts as seen, and it is offered again from "How this works" in the footer.
@@ -91,8 +105,17 @@ device, which is the right trade when most first-time visitors have no account t
 hang it on. `docs/walkthrough-design.md` is the contract, and the step list is one
 array at the top of `js/tour.js`.
 
+**A privacy policy and terms of service** at `/privacy.html` and `/terms.html`,
+linked from the footer of every page that has one. They are written against what this
+site actually does rather than from a template: the exact columns stored, the
+`localStorage` keys and what each is for, the three third parties that see a request
+(Supabase, the host, and jsDelivr — which sees an IP on every page load), the fact
+that there is no analytics of any kind, and a deletion section that agrees line for
+line with `docs/account-deletion.md`. Both carry a `[contact email]` placeholder that
+has to be filled in before they are true.
+
 Two themes: the original Zetamac light palette, reproduced value for value, and a
-Monkeytype-flavoured dark one.
+Monkeytype-flavored dark one.
 
 ## Running it locally
 
@@ -168,7 +191,12 @@ npm run test:browser           # every browser suite, one after another
 The browser suites need a server on port 8099 (`npm run dev`) and Playwright's
 Chromium (`npm install && npx playwright install chromium`). Run one on its own with
 `node test/browser/duel.mjs`; set `ZT_CHROMIUM=<path>` to point at a different
-Chromium build.
+Chromium build, and `ZT_BASE=<url>` to serve from a different port.
+
+`test/browser/dashboard.mjs` and `test/browser/profile.mjs` are a pair: they render the
+same stubbed payload through both pages and assert the same numbers out of each, so a
+change that moves one and not the other fails. `profile.mjs` also asserts, positively,
+that the public page never reads `game_sessions` and has no per-game table in it.
 
 All three run on every push, as three jobs in `.github/workflows/ci.yml`. The SQL job
 brings up its own `postgres:16` service, so nothing there touches a real project.
@@ -190,7 +218,7 @@ seat in a full league, and two steal-mode players answering the same question at
 once. Each ends with a **negative control** — the same race with the guard removed —
 because a race test that has never failed proves nothing.
 
-Steal mode's live behaviour over Supabase Realtime is **not** covered by any of this:
+Steal mode's live behavior over Supabase Realtime is **not** covered by any of this:
 the browser suite stubs the channel, and two real clients over a real socket is a
 manual check against the deployed project.
 
@@ -204,7 +232,10 @@ modules, no bundler, no runtime dependencies. Supabase and Chart.js come from a 
 
 Script order in the HTML is load-bearing: `theme.js` in `<head>` (it must run before
 first paint), then supabase → chart.js → `util.js` → `config.js` → `db.js` →
-`auth.js` → the page script last.
+`auth.js` → the page script last. `dashboard.html` and `profile.html` load one more,
+`js/stats.js`, between `auth.js` and their page script: the stat strip, the best cards
+and the operation bars are the same markup on both, and one copy is what stops the two
+pages disagreeing about the same account.
 
 ### Security
 
@@ -241,7 +272,7 @@ real project, in the order of the table above — plus the demo video below and 
 known gaps that file lists (`config_key` is still a 32-bit content hash, and
 background-tab timer drift has never been reproduced in headless Chromium).
 
-## Licence
+## License
 
 MIT. See `LICENSE`.
 

@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy — Arithmetic Trainer</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="js/theme.js"></script>
+</head>
+<body class="legal-page">
+
+  <div class="top-bar" id="top-bar"></div>
+
+  <div class="legal-wrap">
+
+    <div class="legal-head">
+      <h1>Privacy Policy</h1>
+      <p class="legal-updated">Last updated 28 July 2026</p>
+    </div>
+
+    <p class="legal-lede">
+      This is a small, free arithmetic trainer. It has no analytics, no tracking
+      pixels, no advertising and no third-party trackers of any kind &mdash; there
+      is no Google Analytics, Plausible, Umami, PostHog, Fathom or Sentry on any
+      page. What follows is the whole list of what is stored, where it goes, and
+      who else necessarily sees a request.
+    </p>
+
+    <h2>Playing without an account</h2>
+    <p>
+      You can play the timed game, use practice mode and accept somebody&rsquo;s
+      duel link without signing in. In that case nothing about you is stored
+      against a person: the run is kept in your own browser, and the row the
+      server holds for it has no owner.
+    </p>
+    <p>
+      Zetamac Daily, private leagues, creating a duel and having a profile page
+      all need an account, because each of them has to be able to tell one player
+      from another.
+    </p>
+
+    <h2>If you make an account</h2>
+    <p>
+      Authentication runs on <a href="https://supabase.com" target="_blank" rel="noopener">Supabase</a>.
+      An account is an <strong>email address and a password</strong>, and that is
+      the only personal detail asked for. The password is handled by Supabase and
+      is never seen by this site&rsquo;s own code. Email confirmation may be
+      switched on, in which case Supabase sends you a confirmation email; your
+      address is used for that, for password resets, and for nothing else. There
+      is no mailing list.
+    </p>
+    <p>Stored against your account:</p>
+    <ul>
+      <li><strong>Your username</strong>, and the date you last changed it.</li>
+      <li><strong>Whether your profile is public.</strong> Off by default.</li>
+      <li>
+        <strong>Every game you finish</strong> &mdash; the score, the duration, the
+        configuration you played, and the full question list: each question as it
+        was displayed, the answer, whether you fumbled it, what you typed when you
+        did, and <strong>how long it took you, to the millisecond</strong>. That
+        per-question timing is the point of the site, and it is the most detailed
+        thing here by a distance.
+      </li>
+      <li><strong>Daily attempts</strong> &mdash; the date, when you started and
+        submitted, your score, and the answers that were accepted.</li>
+      <li><strong>Duel runs</strong> &mdash; the same shape, plus which side you
+        played and whether you were signed in or a guest.</li>
+      <li><strong>League membership</strong> &mdash; which leagues you are in, which
+        you own, and when you joined.</li>
+    </ul>
+
+    <h2>What other people can see</h2>
+    <p>
+      <strong>Your profile page is private until you turn it on</strong>, in
+      Settings. Until then <code>/@yourname</code> shows nothing to anybody but
+      you. Turned on, it shows your username, the date you joined, your best
+      scores, how many games and questions you have played, your accuracy, a
+      per-operation breakdown of your average time, a percentile against other
+      players, your recent scores and your streak. It never shows your email
+      address, and it never shows an individual question.
+    </p>
+    <p>
+      Separately from that: if you play the daily, a league board or a duel, the
+      other people in it see your <strong>username and your score</strong>. That is
+      what a leaderboard is. There is no way to appear on one anonymously.
+    </p>
+    <p>
+      A username is public wherever it appears, and it is not tied to your email
+      address anywhere a visitor can reach.
+    </p>
+
+    <h2>What is kept in your browser</h2>
+    <p>
+      The site uses <code>localStorage</code>, not cookies, and every key it writes
+      is functional rather than analytical. Nothing here is read by anyone else, and
+      none of it leaves your device except the game data you choose to save:
+    </p>
+    <ul>
+      <li><code>zt_theme</code> &mdash; which of the two themes you picked.</li>
+      <li><code>zt_tour_seen</code> &mdash; that you have seen the walkthrough, so
+        it does not open again.</li>
+      <li><code>pending_sessions</code>, <code>session_&hellip;</code>,
+        <code>zt_last_session</code>, <code>zt_pending_game</code>,
+        <code>zt_pending_session</code> &mdash; finished and in-flight runs, so a
+        game survives a refresh and so a run you played signed out can be claimed
+        if you sign in later.</li>
+      <li><code>config_&hellip;</code> &mdash; game configurations you have used or
+        followed a link to.</li>
+      <li><code>practice_&hellip;</code> &mdash; recent practice runs, which is how
+        practice mode knows what you are worst at while signed out.</li>
+      <li><code>zt_daily_draft_&hellip;</code>, <code>zt_duel_draft_&hellip;</code>,
+        <code>zt_duel_result_&hellip;</code> &mdash; answers already given in a run
+        in progress, and a finished duel result, so closing the tab mid-run does
+        not lose it.</li>
+      <li><code>duel_guest_&hellip;</code> &mdash; a random token that identifies
+        your side of a duel you accepted without an account. It is not an
+        identifier for you; it is an identifier for that one side of that one duel.</li>
+    </ul>
+    <p>
+      If you are signed in, the Supabase client also stores your login session in
+      <code>localStorage</code> under a key beginning <code>sb-</code>. Clearing
+      site data signs you out and loses any run that had not been saved to an
+      account.
+    </p>
+
+    <h2>Who else sees a request</h2>
+    <p>
+      Three third parties are unavoidably involved in loading a page, and each of
+      them therefore sees your IP address and the usual request headers:
+    </p>
+    <ul>
+      <li><strong>Supabase</strong> &mdash; the database and the authentication
+        service. Everything described under <em>If you make an account</em> is
+        stored there.</li>
+      <li><strong>Vercel</strong> &mdash; the host serving the pages.</li>
+      <li><strong>jsDelivr</strong> &mdash; the CDN that serves the Supabase client
+        library and Chart.js. <strong>It sees an IP address on every page
+        load</strong>, before you have done anything at all. That is a real
+        disclosure and most policies would not mention it; it is here because it is
+        true. Nothing about your account or your scores is sent to it.</li>
+    </ul>
+    <p>
+      Each of them has its own privacy policy, and their logs are theirs rather than
+      this site&rsquo;s. No data is sold, and none is shared with anyone else.
+    </p>
+
+    <h2>Deleting your account</h2>
+    <p>
+      Deletion is <strong>self-service</strong>: Settings, at the bottom, in the
+      Danger zone. You confirm by typing your own username (or the literal
+      <code>DELETE</code> if you never set one), and it happens immediately and in
+      one transaction. It <strong>cannot be undone</strong>.
+    </p>
+    <p>What is deleted:</p>
+    <ul>
+      <li>Every game session of yours, including their per-question timings. They
+        are deleted rather than left ownerless, so your old runs stop counting
+        toward everyone else&rsquo;s percentile.</li>
+      <li>Every daily attempt. You come off every daily leaderboard, including past
+        days.</li>
+      <li>Your league memberships.</li>
+      <li><strong>Duels you created, together with both players&rsquo; runs in
+        them.</strong> This costs your opponent their result, and it is stated here
+        rather than buried: a duel is the creator&rsquo;s object and it is reachable
+        only by its own link.</li>
+      <li>Your profile row, which releases your username for anyone else to take.</li>
+      <li>Your login, last of all &mdash; and with it Supabase&rsquo;s own record of
+        your identities, sessions and refresh tokens.</li>
+    </ul>
+    <p>What survives, and why:</p>
+    <ul>
+      <li><strong>Duels you played as the opponent.</strong> The creator&rsquo;s
+        result is theirs and does not depend on you still having an account. Your
+        run keeps its score and loses its owner, so you appear there as a deleted
+        account rather than vanishing mid-comparison. If you had claimed a duel but
+        never finished it, that side is released instead and the creator&rsquo;s
+        link works again.</li>
+      <li><strong>Leagues you own that still have members.</strong> Ownership is
+        handed to the longest-standing remaining member, rather than the league
+        disappearing and taking everyone else&rsquo;s board with it. A league whose
+        last member leaves is deleted.</li>
+      <li><strong>Game configurations.</strong> The rows describing an operation
+        mix and a duration are shared, keyed by their own contents, and name
+        nobody &mdash; so they are not deleted.</li>
+      <li><strong>Your browser&rsquo;s <code>localStorage</code>.</strong> Deleting
+        the account signs you out but does not reach into your device. Clear site
+        data if you want the local copies gone too.</li>
+    </ul>
+    <p>
+      The full ordered contract is <code>docs/account-deletion.md</code> in the
+      source, and it is what the code is built against.
+    </p>
+
+    <h2>Children</h2>
+    <p>
+      This is not aimed at children and asks for nothing beyond an email address.
+      If a child has made an account and you would like it removed, deleting it
+      needs no request &mdash; but write to the address below if you would rather
+      it were handled for you.
+    </p>
+
+    <h2>Changes</h2>
+    <p>
+      If what is stored changes, this page changes with it, and the date at the top
+      moves. There is no notification mechanism, because there is no mailing list.
+    </p>
+
+    <h2>Getting in touch</h2>
+    <p>
+      Questions about any of the above, or a request for a copy of what is stored
+      about you: <strong>[contact email]</strong>.
+    </p>
+
+  </div>
+
+  <footer class="site-footer">
+    <a href="index.html">Home</a>
+    <span class="footer-sep" aria-hidden="true">&middot;</span>
+    <span class="nav-current" aria-current="page">Privacy Policy</span>
+    <span class="footer-sep" aria-hidden="true">&middot;</span>
+    <a href="terms.html">Terms of Service</a>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/util.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/db.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/legal.js"></script>
+</body>
+</html>

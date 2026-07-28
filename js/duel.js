@@ -342,7 +342,7 @@ function showDuelCreate(user) {
       <label class="duel-mode-option">
         <input type="radio" name="duel-mode" value="classic" id="duel-mode-classic" checked>
         <span class="duel-mode-name">Classic</span>
-        <span class="duel-mode-note">You each play the same questions whenever you like, at your own pace, and compare scores afterwards.</span>
+        <span class="duel-mode-note">You each play the same questions whenever you like, at your own pace, and compare scores afterward.</span>
       </label>
       <label class="duel-mode-option">
         <input type="radio" name="duel-mode" value="steal" id="duel-mode-steal">
@@ -1746,7 +1746,7 @@ function renderStealRoom(d) {
         A steal duel needs both of you here at the same time. If they can't
         make it, this one can become a classic duel instead — the questions are
         already generated, and a classic duel needs nobody to be awake: you
-        each play whenever you like and compare afterwards.
+        each play whenever you like and compare afterward.
       </p>
       <div class="duel-notice-actions">
         <button class="btn" id="steal-convert-btn">Convert to a classic duel</button>

@@ -23,7 +23,7 @@ Verification currently in the repo:
 ```bash
 npm test                                    # unit + the username-rule parity check
 npm run test:sql                            # 8 SQL contract suites
-npm run test:browser                        # 8 browser suites, ~1250 assertions
+npm run test:browser                        # 9 browser suites
 supabase/test/race-duel-claim.sh            # concurrent duel-slot claim
 supabase/test/race-league-cap.sh            # concurrent league-cap race
 supabase/test/race-steal-point.sh           # concurrent steal claims, with a control
@@ -76,10 +76,11 @@ every file is idempotent and that is the supported way to deploy a change.
 ## 2. ~~First-run walkthrough~~ — BUILT
 
 `js/tour.js`, contract in `docs/walkthrough-design.md`, tested by
-`test/browser/tour.mjs` (120 assertions). Six steps in one array, a modal on
+`test/browser/tour.mjs` (393 assertions). **Seven** steps in one array — a welcome,
+then the six features — a modal on
 `index.html` only — but never `index.html?key=…`, which is a shared configuration
 link somebody followed to play that config — `localStorage['zt_tour_seen']` holding
-`TOUR_VERSION`, five
+`TOUR_VERSION` (now `'2'`), five
 dismissal routes that all mark it seen, and a "How this works" link in the footer
 that re-opens it.
 
@@ -87,11 +88,15 @@ Three things to keep true rather than rediscover:
 
 - **The step list is `TOUR_STEPS`, one array at the top of the file.** A new feature
   means one more object there. `tour.mjs` asserts the rendered step count equals the
-  array's length *and* that the length is six, so a seventh step is a decision
-  somebody makes deliberately — six is where people start clicking Skip.
+  array's length *and* that the length is seven, so an eighth step is a decision
+  somebody makes deliberately — seven is the ceiling, and past it people start
+  clicking Skip. The step → target pairs are also asserted **literally**, because
+  inserting a step at the front shifts every one of them by one.
 - **Bump `TOUR_VERSION` when the tour materially changes, never for a typo.** A tour
   that reappears for no reason trains people to dismiss it unread. Steal mode was
-  folded into the duels step rather than added as a seventh, for the same reason.
+  folded into the duels step rather than added as a step of its own, for the same
+  reason. `'1'` → `'2'` was the welcome step plus the closing line: both are things
+  a `'1'` dismisser has not read.
 - **The seen check runs before anything is built, not after.** A returning visitor
   gets no element at all. `tour.mjs` proves it with a `MutationObserver` installed at
   `document_start`, so a tour that renders and then hides itself would fail — and
@@ -186,7 +191,69 @@ length.
       hold next to somebody else's without knowing the questions — is closer to the
       mechanic that demonstrably travels. Cheap to try: the curve is already drawn.
 
-## 6. Known gaps, none blocking
+## 5b. Privacy policy and terms — BUILT, one placeholder left
+
+`privacy.html` and `terms.html`, linked from the footer of every page that has one,
+styled by the appended block at the end of `css/style.css`, and driven by `js/legal.js`
+(which exists only to build the shared top bar). Covered by sections 5 and 17 of
+`test/browser/tour.mjs` and by `test/browser/nav.mjs`.
+
+- [ ] **Fill in `[contact email]`.** It appears once on each page — "Getting in touch"
+      on both — and is deliberately written as a visible placeholder rather than a
+      guess. `tour.mjs` asserts the marker is present, so **the two assertions
+      `privacy: the contact placeholder…` and `terms: the contact placeholder…` must
+      be inverted or deleted in the same commit that fills them in**, or the suite
+      goes red.
+- [ ] **Add the footer to `dashboard.html` and `profile.html`.** They are the only two
+      pages with a top bar and no footer; they were owned by another session when this
+      landed. Copy the six-line block from `daily.html` verbatim.
+
+The content is written against what this site actually does and is asserted as such:
+no analytics of any kind, the three third parties that see a request (Supabase, the
+host, jsDelivr — which sees an IP on every page load), the `localStorage` keys by
+name, opt-in public profiles, and a deletion section that agrees with
+`docs/account-deletion.md` line for line. **If `account.sql` ever changes what
+survives a deletion, `privacy.html` changes in the same commit** — the test asserts
+the league-succession rule and the duel rule by name, so it will tell you.
+
+---
+
+## 6. The dashboard and the public profile are one design
+
+Both pages render the same four things in the same order — a five-tile record strip
+(total games, questions, accuracy, days practiced, day streak), personal bests, score
+over time, and a per-operation breakdown — from `js/stats.js`. The dashboard adds
+Recent Games below that; the public page stops.
+
+Four things to keep true rather than rediscover:
+
+- **`js/stats.js` is the single copy.** Adding a tile means editing one file, and both
+  pages get it. `test/browser/dashboard.mjs` and `test/browser/profile.mjs` feed the
+  same stubbed payload through both pages and assert the same numbers out of each.
+- **Recent Games never goes on the public profile.** `get_public_profile` returns a
+  fixed, minimal projection with no per-session rows in it, and widening it to add them
+  is the cross-user exposure the security posture exists to prevent. `profile.mjs`
+  asserts the absence positively, including that the page never touches
+  `game_sessions`.
+- **The dashboard prefers `get_public_profile` and falls back to computing the same
+  shape locally** (`recordFromSessions` in `js/dashboard.js`) when the account has no
+  username yet, or when `social.sql` is not applied. The fallback covers the loaded
+  session window rather than all time, and the note under the strip says so. If the two
+  ever disagree about a figure, the SQL is right and the fallback is the copy to fix.
+- **The dashboard no longer holds the public-profile link or the leagues list.** The
+  link and the public/private toggle live in `settings.html`; leagues live in
+  `leagues.html`. Both panels were removed on request, and `leagues.mjs` now guards
+  against the leagues one reappearing.
+
+- [ ] **The public profile no longer offers a Share Image.** It went with the panel it
+      sat in. `js/sharecard.js` is still loaded by `results.html`, so the card itself is
+      alive, but `shareCardDataFromProfile()` in that file is now unreferenced — delete
+      it, or give the button a home again, when §5's "lead with the pace curve"
+      question is settled.
+
+---
+
+## 7. Known gaps, none blocking
 
 - [x] ~~Dead code in `js/db.js`~~ — the `isUsernameAvailable` fallback is gone. It
       was worse than dead: post-hardening it answered "available" for every name on

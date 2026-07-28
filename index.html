@@ -91,8 +91,15 @@
     </div>
   </div>
 
+  <!-- "How this works" re-opens the walkthrough and only exists here, because
+       js/tour.js is only loaded here. The other pages carry the same footer
+       minus that link rather than an href="#" that does nothing. -->
   <footer class="site-footer">
     <a href="#" id="tour-link">How this works</a>
+    <span class="footer-sep" aria-hidden="true">&middot;</span>
+    <a href="privacy.html">Privacy Policy</a>
+    <span class="footer-sep" aria-hidden="true">&middot;</span>
+    <a href="terms.html">Terms of Service</a>
   </footer>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>

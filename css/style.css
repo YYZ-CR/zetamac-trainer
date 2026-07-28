@@ -642,6 +642,39 @@ body.dashboard-page {
   margin-bottom: 22px;
 }
 
+/* The five-tile record strip at the top of the dashboard and of a public
+   profile. A grid rather than a flex row, because the five tiles are one
+   object and must line up as one: with flex they take their natural widths and
+   "Questions" ends up half the width of "Days Practiced", which reads as five
+   unrelated boxes. Same markup on both pages — js/stats.js renders it. */
+.stat-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 22px;
+}
+
+/* The tiles are as wide as the grid says, so the flex row's floor is dropped
+   and the padding tightened — a fifth of 800px does not fit 20px of side
+   padding and "DAYS PRACTICED" on one line. */
+.stat-strip .stat-card {
+  min-width: 0;
+  padding: 16px 14px;
+}
+
+.stat-strip .stat-value {
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 700px) {
+  .stat-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 440px) {
+  .stat-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 .stat-card {
   background: var(--c-surface);
   border: 1px solid var(--c-border);
@@ -1420,21 +1453,6 @@ body.profile-page {
 
 .share-card-status.is-error {
   color: var(--c-danger);
-}
-
-/* Profile page: the button sits inside the Personal Bests panel, under the
-   percentile line, so the card is offered next to the numbers it contains. */
-.share-card-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-  margin-top: 16px;
-}
-
-.share-card-actions .share-card-status {
-  margin-top: 0;
-  flex: 1 1 240px;
 }
 
 /* ============ ZETAMAC DAILY ============ */
@@ -2645,50 +2663,6 @@ body.leagues-page {
   border-color: var(--c-danger);
 }
 
-/* ── The dashboard's compact leagues panel ── */
-
-.dash-league-list {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-}
-
-.dash-league-item {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--c-rule);
-  font-size: 14px;
-}
-
-.dash-league-item:last-child {
-  border-bottom: none;
-}
-
-.dash-league-name {
-  color: var(--c-link);
-  overflow-wrap: anywhere;
-}
-
-.dash-league-meta {
-  font-size: 12px;
-  color: var(--c-ink-soft);
-}
-
-.dash-league-empty {
-  font-size: 13px;
-  line-height: 1.6;
-  color: var(--c-ink-soft);
-}
-
-.dash-league-more {
-  margin-top: 12px;
-  font-size: 13px;
-}
-
 /* ── Username claim (dashboard) ─────────────────────────────── */
 .claim-note {
   color: var(--c-ink-soft);
@@ -3217,4 +3191,180 @@ body.settings-page {
 @media (max-width: 520px) {
   .tour-modal { padding: 20px 18px 14px; min-height: 0; }
   .tour-controls { flex-wrap: wrap; }
+}
+
+/* ============ APPENDED: FOOTER LINKS, TOUR FOOTNOTE, LEGAL PAGES ============
+   Kept as one block at the end of the file rather than folded into the rules
+   above, because another agent is working in this stylesheet's neighbours.
+   Every colour is a --c-* token; nothing new was added to the theme blocks,
+   because nothing here needed a colour the two themes did not already define. */
+
+/* The separator between the footer's links. aria-hidden in the markup: it is
+   punctuation, not a word anybody needs read out. */
+.footer-sep {
+  color: var(--c-ink-dim);
+  margin: 0 6px;
+}
+
+/* The current page in the footer, so privacy.html does not link to itself.
+   .nav-current is otherwise scoped to .top-bar. */
+.site-footer .nav-current {
+  color: var(--c-ink-dim);
+  cursor: default;
+}
+
+/* The last tour step's closing line: quieter than the copy above it, because
+   it is about the tour rather than about the product. */
+.tour-footnote {
+  font-size: 12.5px;
+  color: var(--c-ink-faint);
+}
+
+/* ── privacy.html and terms.html ──────────────────────────────
+   Prose pages, so the only job here is a readable measure and a rhythm that
+   matches the rest of the site rather than inventing a second one. */
+
+/* Every other page carries the palette on its own body class; without this
+   one these two render on the browser's default white in the dark theme. */
+body.legal-page {
+  background: var(--c-page-bg);
+  min-height: 100vh;
+}
+
+.legal-wrap {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 26px 20px 10px;
+}
+
+.legal-head {
+  border-bottom: 1px solid var(--c-border-soft);
+  padding-bottom: 14px;
+  margin-bottom: 20px;
+}
+
+.legal-wrap h1 {
+  font-size: 26px;
+  color: var(--c-ink-max);
+  margin-bottom: 6px;
+}
+
+.legal-updated {
+  font-size: 12px;
+  color: var(--c-ink-faint);
+}
+
+.legal-lede {
+  font-size: 14.5px;
+  line-height: 1.65;
+  color: var(--c-ink-strong);
+  margin-bottom: 8px;
+}
+
+.legal-wrap h2 {
+  font-size: 16px;
+  color: var(--c-ink-max);
+  margin: 28px 0 10px;
+}
+
+.legal-wrap p {
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--c-ink-body);
+  margin-bottom: 12px;
+}
+
+.legal-wrap ul {
+  margin: 0 0 14px 20px;
+}
+
+.legal-wrap li {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--c-ink-body);
+  margin-bottom: 8px;
+}
+
+.legal-wrap strong {
+  color: var(--c-ink-strong);
+}
+
+.legal-wrap code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 12.5px;
+  color: var(--c-ink-strong);
+  background: var(--c-rule);
+  padding: 1px 4px;
+}
+
+@media (max-width: 520px) {
+  .legal-wrap { padding: 18px 15px 6px; }
+  .legal-wrap h1 { font-size: 22px; }
+}
+
+/* ============ APPENDED: THE HEADER AT PHONE WIDTHS ============
+   Added as one block at the end of the file rather than folded into the TOP
+   BAR rules near the top, because another agent is working in this
+   stylesheet. No new colour is introduced, so neither theme block changes.
+
+   The bug this fixes: `.top-bar` was `display:flex; justify-content:flex-end`
+   with no wrapping. Measured here, the row needs **430px** signed in (423
+   signed out) in the Zetamac theme and **516px** (508) in the dark theme,
+   whose body font is monospace and materially wider. Below that the two
+   <button> links shrink and clip their own labels — at 406px "Log out" was
+   rendering 21.7px wide — and below ~394px the leading items are pushed off
+   the LEFT edge, where nothing can scroll them back. On the reported 406px
+   phone the row began "y | Duel": Play, the link back to the game, was half a
+   word and unreachable. It also broke the walkthrough — js/tour.js treats a
+   target whose centre is outside the viewport as absent, so the Duel step fell
+   back to a centred panel on every phone.
+
+   Breakpoint: 700px. Derived from the widest measurement, not from a round
+   number — the dark theme's 516px plus ~35% headroom for a wider system
+   monospace, for iOS text-size adjustment, and for one more nav item later.
+   Both themes are then comfortably clear of the single-row layout everywhere
+   it still applies. Between about 520px and 700px the wrapped rules produce
+   one centred row rather than two, so the change there is only the tap
+   target, which is the right thing on a small tablet anyway.
+
+   Wrapping rather than a menu button: no JS, no open/closed state, no focus
+   trap and nothing to get wrong, on a header of seven items sitting on a page
+   whose whole point is a game. The theme toggle and the auth link wrap inline
+   as ordinary items rather than taking a row of their own — they are the last
+   two in source order, so they fall to the end naturally. */
+@media (max-width: 700px) {
+  .top-bar {
+    flex-wrap: wrap;
+    /* Centred rather than still right-aligned: a wrapped row that is flush
+       right leaves a ragged gap on the left of the first line, which reads as
+       the overflow bug it replaces. */
+    justify-content: center;
+    /* The 44px tap targets supply all the spacing this needs; an extra gap
+       on top of them makes the header taller for nothing. */
+    gap: 0;
+    padding: 2px 6px 0;
+  }
+
+  /* Punctuation for a single row, clutter once it wraps — and a "|" left
+     dangling at the end of a wrapped line reads as a missing item. They are
+     real elements, so display:none removes them from layout entirely. */
+  .top-bar .sep {
+    display: none;
+  }
+
+  /* 44px is the usual guideline and it fits here: two wrapped rows come to
+     88px, about an eighth of a phone viewport, and the header is ordinary
+     document content that scrolls away rather than a sticky bar — so it costs
+     the top of the screen once, not permanently. 13px text with no padding at
+     all was a 15px-tall target. */
+  .top-bar a,
+  .top-bar .nav-current,
+  .top-bar .link-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    padding: 0 10px;
+    font-size: 14px;
+  }
 }

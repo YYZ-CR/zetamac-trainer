@@ -234,7 +234,7 @@ function showDailyIntro(status, errorText) {
 
     <p class="daily-warn">
       Pressing Start spends today's attempt. The questions do not exist for you
-      until you do, and they do not go back in the box afterwards.
+      until you do, and they do not go back in the box afterward.
     </p>
 
     <div class="daily-start-row">

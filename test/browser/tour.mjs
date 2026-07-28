@@ -23,6 +23,12 @@
 // rects out of the live DOM and compares them to each other — never against a
 // number copied from the CSS, which would pass just as happily if the hole were
 // pinned to the wrong element at the right size.
+//
+// Sections 14-17 cover the welcome step added at the front of the tour and the
+// two policy pages the footer now links to. The step→target pairs in 15 are
+// named literally rather than read out of TOUR_STEPS: inserting a step at the
+// front shifts every mapping by one, and a test that derives both sides of the
+// pair from the same array cannot see that happen.
 import { chromium } from 'playwright';
 import fs from 'fs';
 
@@ -161,10 +167,16 @@ async function goToStep(page, n) {
     ok(typeof HOLE_PAD === 'number' && HOLE_PAD > 0,
        `TOUR_HOLE_PAD is a positive number (${HOLE_PAD}) — the spotlight's breathing room`);
     console.log(`[step array] TOUR_VERSION=${V}, ${STEPS.length} steps: ${STEPS.join(' | ')}`);
-    ok(Array.isArray(STEPS) && STEPS.length === 6,
-       `the step array holds exactly six steps (got ${STEPS.length}) — a seventh is a decision, not an accident`);
+    ok(Array.isArray(STEPS) && STEPS.length === 7,
+       `the step array holds exactly seven steps (got ${STEPS.length}) — an eighth is a decision, not an accident`);
     ok(STEPS.every(t => typeof t === 'string' && t.length > 0), 'every step has a title');
     ok(typeof V === 'string' && V.length > 0, 'TOUR_VERSION is a non-empty string');
+    // The welcome step is about the site rather than about a control on it, so
+    // it must carry no target at all — that is what puts it on the centred
+    // fallback path section 14 asserts.
+    ok(TARGETS[0] === null, `step 1 names no target (got ${TARGETS[0] ?? 'null'})`);
+    ok(TARGETS.slice(1).every(t => typeof t === 'string' && t.length > 0),
+       'every step after the welcome still names a target');
     await ctx.close();
   }
 
@@ -326,7 +338,8 @@ async function goToStep(page, n) {
   // ── 5. index.html only ───────────────────────────────────────
   {
     console.log('[5. other pages]');
-    for (const pg of ['dashboard.html', 'daily.html', 'duel.html', 'leagues.html', 'practice.html']) {
+    for (const pg of ['dashboard.html', 'daily.html', 'duel.html', 'leagues.html', 'practice.html',
+                      'privacy.html', 'terms.html']) {
       const ctx = await newContext(browser);
       const { page, errors } = await open(ctx, '/' + pg);
       ok(!(await shown(page)), `${pg}: no tour`);
@@ -501,9 +514,12 @@ async function goToStep(page, n) {
     console.log('[10. a step with no target]');
     const ctx = await newContext(browser);
     const { page, errors } = await open(ctx);
-    // Take the target away from step 1 and re-render it: the data model has to
-    // allow a step with none, and that step is the pre-spotlight behaviour.
-    await page.evaluate(() => { delete TOUR_STEPS[0].target; tourGo(0); });
+    // Step 2 is the first step that names a target. Taking it away and
+    // re-rendering proves the data model still allows a step with none, and
+    // that such a step is exactly the pre-spotlight behaviour. (Step 1 is now
+    // naturally targetless — section 14 asserts that one; this one has to be
+    // forced, or the assertion would only ever exercise the welcome step.)
+    await page.evaluate(() => { tourGo(1); delete TOUR_STEPS[1].target; tourGo(1); });
     await page.waitForTimeout(400);
     ok(await shown(page), 'the tour is still up');
     ok(!(await page.evaluate(() => !!document.getElementById('tour-hole'))),
@@ -533,8 +549,14 @@ async function goToStep(page, n) {
     console.log('[11. an unresolvable target]');
     const ctx = await newContext(browser);
     const { page, errors } = await open(ctx);
-    const sel = TARGETS.find(t => t);
-    ok(!!sel, 'at least one step names a target');
+    // The FIRST step that names one, whichever index that is. It is index 1 now
+    // that a targetless welcome step sits in front, and deriving it rather than
+    // hardcoding 0 is what stopped this section silently testing nothing when
+    // the step was inserted.
+    const si  = TARGETS.findIndex(t => t);
+    const sel = TARGETS[si];
+    ok(si >= 0 && !!sel, `at least one step names a target (step ${si + 1}: ${sel})`);
+    ok(!!TARGETS[si + 1], 'and the step after it names one too, so the follow-on assertion has teeth');
 
     await page.click('#tour-close');
     await page.waitForTimeout(120);
@@ -542,11 +564,14 @@ async function goToStep(page, n) {
     ok((await rectOf(page, sel)) === null, `${sel} is gone from the page`);
 
     await page.click('#tour-link');
+    await page.waitForTimeout(200);
+    ok(await shown(page), 'the tour still opens with that target missing');
+    ok((await heading(page)).trim() === STEPS[0], 'on step 1');
+    for (let i = 0; i < si; i++) await page.click('#tour-next');
     // Longer than the resolve window: the point is that it gives up and stays
     // centred rather than retrying forever or drawing a hole around nothing.
     await page.waitForTimeout(1200);
-    ok(await shown(page), 'the tour still opens with its target missing');
-    ok((await heading(page)).trim() === STEPS[0], 'on step 1');
+    ok((await heading(page)).trim() === STEPS[si], `walked to step ${si + 1}, whose target is gone`);
     ok(!(await page.evaluate(() => !!document.getElementById('tour-hole'))),
        'no hole is drawn around the element that is not there');
     ok(!(await page.evaluate(() => !!document.getElementById('tour-caret'))),
@@ -557,11 +582,11 @@ async function goToStep(page, n) {
     // And the step after it, whose target is still there, still spotlights.
     await page.click('#tour-next');
     await page.waitForTimeout(300);
-    if (TARGETS[1]) {
-      const t = await rectOf(page, TARGETS[1]);
+    {
+      const t = await rectOf(page, TARGETS[si + 1]);
       const h = await rectOf(page, '#tour-hole');
       ok(holeMatches(h, t, HOLE_PAD),
-         `a missing target on step 1 does not break step 2's spotlight (${fmt(h)} vs ${fmt(t)})`);
+         `a missing target on step ${si + 1} does not break step ${si + 2}'s spotlight (${fmt(h)} vs ${fmt(t)})`);
     }
     ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
     await ctx.close();
@@ -638,6 +663,258 @@ async function goToStep(page, n) {
        `after a scroll the hole is still on its target (${fmt(h2)} vs ${fmt(t2)})`);
     ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
     await ctx.close();
+  }
+
+  // ── 14. The welcome step ─────────────────────────────────────
+  // First, targetless, centred, and carrying the two facts a first-time
+  // visitor needs before any feature matters: that playing needs no account,
+  // and what signing in is actually for.
+  {
+    console.log('[14. the welcome step]');
+    for (const theme of ['zetamac', 'dark']) {
+      const ctx = await newContext(browser, { theme });
+      const { page, errors } = await open(ctx);
+
+      ok(await shown(page), `${theme}: the tour opens`);
+      ok((await counter(page)).replace(/\s+/g, '') === `1/7`,
+         `${theme}: the counter reads 1 / 7`);
+      ok(/welcome/i.test((await heading(page)).trim()),
+         `${theme}: step 1 is a welcome ("${(await heading(page)).trim()}")`);
+
+      // No target means no hole and no caret — the centred fallback, which is
+      // the path this step deliberately takes.
+      ok(!(await page.evaluate(() => !!document.getElementById('tour-hole'))),
+         `${theme}: the welcome step draws NO hole`);
+      ok(!(await page.evaluate(() => !!document.getElementById('tour-caret'))),
+         `${theme}: and no caret`);
+      ok(!(await page.evaluate(() =>
+            document.querySelector('.tour-modal').classList.contains('tour-modal--anchored'))),
+         `${theme}: and the panel is not anchored`);
+      const centred = await page.evaluate(() => {
+        const r = document.querySelector('.tour-modal').getBoundingClientRect();
+        const vw = document.documentElement.clientWidth, vh = document.documentElement.clientHeight;
+        return { dx: Math.abs((r.left + r.right) / 2 - vw / 2),
+                 dy: Math.abs((r.top + r.bottom) / 2 - vh / 2) };
+      });
+      ok(centred.dx < 3 && centred.dy < 3,
+         `${theme}: and it is genuinely centred (off by ${Math.round(centred.dx)}, ${Math.round(centred.dy)})`);
+
+      // The copy. Asserted on meaning, not on length: a welcome step that said
+      // "welcome" and nothing else would satisfy any size check.
+      const body = (await page.textContent('#tour-body')).replace(/\s+/g, ' ');
+      ok(/do not need an account|don.t need an account|no account/i.test(body),
+         `${theme}: the welcome step says playing needs no account`);
+      ok(/press start|start and go/i.test(body),
+         `${theme}: and tells them what to do instead`);
+      ok(/signing in|sign in/i.test(body) && /history/i.test(body),
+         `${theme}: and says signing in is what saves your history`);
+      ok(/board/i.test(body) && /profile/i.test(body),
+         `${theme}: and names the boards and the profile as the rest of it`);
+      ok(/next/i.test(body), `${theme}: and points at Next`);
+
+      await page.screenshot({ path: `${SHOTS}/tour-welcome-${theme}.png` });
+
+      // The "How this works" line lives on the LAST step, not this one: the
+      // welcome step's job is to get somebody to press Next, and a third
+      // paragraph about the tour itself is not about the product.
+      ok(!/how this works/i.test(body),
+         `${theme}: the welcome step does not also carry the "How this works" line`);
+      for (let i = 1; i < STEPS.length; i++) await page.click('#tour-next');
+      await page.waitForTimeout(200);
+      const lastBody = (await page.textContent('#tour-body')).replace(/\s+/g, ' ');
+      ok(/how this works/i.test(lastBody),
+         `${theme}: the last step says the tour reopens from "How this works"`);
+      ok(/home page|footer|bottom/i.test(lastBody),
+         `${theme}: and says where that link is`);
+      await page.screenshot({ path: `${SHOTS}/tour-last-${theme}.png` });
+
+      ok(errors.length === 0, `${theme}: no uncaught page errors (${errors[0] ?? ''})`);
+      await ctx.close();
+    }
+  }
+
+  // ── 15. The mapping did not shift ────────────────────────────
+  // Inserting a step at the front moves every step→target pair down by one.
+  // Both sides are written out literally here; deriving them from TOUR_STEPS
+  // would make the assertion true by construction and blind to exactly that.
+  {
+    console.log('[15. step → target pairs]');
+    const EXPECT = [
+      [1, null,                                 'Welcome'],
+      [2, '#start-btn',                         'It tells you why'],
+      [3, 'a[href="practice.html"]',            'Practice'],
+      [4, 'a[href="daily.html"]',               'Zetamac Daily'],
+      [5, '#top-bar a[href="duel.html"]',       'Duels'],
+      [6, '#top-bar a[href="leagues.html"]',    'Private leagues'],
+      [7, '#top-bar a[href="dashboard.html"]',  'A profile worth sharing'],
+    ];
+    ok(EXPECT.length === STEPS.length,
+       `the expected mapping covers all ${STEPS.length} steps`);
+
+    const ctx = await newContext(browser);
+    const { page, errors } = await open(ctx);
+    for (const [n, sel, titleFragment] of EXPECT) {
+      if (n > 1) { await page.click('#tour-next'); await page.waitForTimeout(250); }
+      ok((await counter(page)).replace(/\s+/g, '') === `${n}/${STEPS.length}`,
+         `step ${n}: the counter agrees`);
+      ok((await heading(page)).toLowerCase().includes(titleFragment.toLowerCase()),
+         `step ${n} is "${titleFragment}" (got "${(await heading(page)).trim()}")`);
+      ok(TARGETS[n - 1] === sel,
+         `step ${n}'s declared target is ${sel ?? 'none'} (got ${TARGETS[n - 1] ?? 'none'})`);
+      if (!sel) {
+        ok(!(await page.evaluate(() => !!document.getElementById('tour-hole'))),
+           `step ${n} draws no hole`);
+        continue;
+      }
+      const t = await rectOf(page, sel);
+      const h = await rectOf(page, '#tour-hole');
+      ok(holeMatches(h, t, HOLE_PAD),
+         `step ${n}'s hole is on ${sel} — hole ${fmt(h)} vs target ${fmt(t)}`);
+    }
+    ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
+    await ctx.close();
+  }
+
+  // ── 16. The version bump brings it back for a '1' dismisser ──
+  // The whole reason TOUR_VERSION exists. Someone who read and dismissed the
+  // six-step tour has not read the welcome step or the closing line, so they
+  // must see it again — and once they dismiss THIS one, it stays gone.
+  {
+    console.log('[16. the bump to 2]');
+    const ctx = await newContext(browser);
+    const probe = await ctx.newPage();
+    await probe.goto(`${BASE}/index.html`, { waitUntil: 'networkidle' });
+    const V = await probe.evaluate(() => TOUR_VERSION);
+    await probe.close();
+    await ctx.close();
+    ok(V === '2', `TOUR_VERSION is "2" (got "${V}")`);
+
+    const ctx1 = await newContext(browser, { seen: '1' });
+    const { page, errors } = await open(ctx1);
+    ok(await shown(page), 'somebody who dismissed version "1" is shown the tour again');
+    ok((await heading(page)).trim() === STEPS[0], 'and lands on the new welcome step');
+    await page.click('#tour-skip');
+    await page.waitForTimeout(150);
+    ok((await stored(page)) === '2', 'dismissing overwrites "1" with "2"');
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForTimeout(350);
+    ok(!(await shown(page)), 'and it does not come back a third time');
+    ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
+    await ctx1.close();
+  }
+
+  // ── 17. The footer's policy pages ────────────────────────────
+  // Two links and two pages. Navigated to for real rather than fetched, so a
+  // page that 200s but throws on load fails here.
+  {
+    console.log('[17. privacy and terms]');
+    const ctx = await newContext(browser);
+    const { page, errors } = await open(ctx);
+    await page.click('#tour-skip');
+    await page.waitForTimeout(150);
+
+    const links = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('.site-footer a')).map(a => ({
+        href: a.getAttribute('href'), text: (a.textContent || '').trim() })));
+    ok(links.some(l => l.href === 'privacy.html' && /privacy policy/i.test(l.text)),
+       `index.html's footer links to privacy.html (${JSON.stringify(links)})`);
+    ok(links.some(l => l.href === 'terms.html' && /terms of service/i.test(l.text)),
+       'index.html\'s footer links to terms.html');
+    ok(links.some(l => l.href === '#' && /how this works/i.test(l.text)),
+       'and "How this works" is still there beside them');
+    ok(errors.length === 0, `index: no uncaught page errors (${errors[0] ?? ''})`);
+    await ctx.close();
+
+    const PAGES = [
+      ['privacy.html', 'Privacy Policy'],
+      ['terms.html',   'Terms of Service'],
+    ];
+    for (const theme of ['zetamac', 'dark']) {
+      for (const [file, h1] of PAGES) {
+        const c = await newContext(browser, { theme });
+        const { page: p, errors: e } = await open(c, '/' + file);
+
+        ok((await p.textContent('h1')).trim() === h1, `${theme} ${file}: <h1> is "${h1}"`);
+        ok((await p.title()).includes(h1), `${theme} ${file}: the document title says so too`);
+
+        // The shared top bar, built by js/auth.js like everywhere else.
+        const bar = ((await p.textContent('#top-bar')) || '').replace(/\s+/g, ' ').trim();
+        for (const label of ['Play', 'Duel', 'Leagues', 'Dashboard', 'Log in']) {
+          ok(bar.includes(label), `${theme} ${file}: the top bar has ${label} (${bar})`);
+        }
+
+        // Real ink, in this theme. A page that renders white-on-white would
+        // satisfy any "the heading exists" check.
+        const ink = await p.evaluate(() => {
+          const w = document.querySelector('.legal-wrap');
+          const cs = getComputedStyle(w);
+          return { text: (w.innerText || '').replace(/\s+/g, ' ').trim(),
+                   fg: cs.color, bg: getComputedStyle(document.body).backgroundColor,
+                   w: w.getBoundingClientRect().width };
+        });
+        ok(ink.text.length > 1500, `${theme} ${file}: real copy (${ink.text.length} chars)`);
+        ok(ink.fg !== ink.bg, `${theme} ${file}: text colour differs from the page (${ink.fg} on ${ink.bg})`);
+        ok(ink.w > 200, `${theme} ${file}: the column has real width (${Math.round(ink.w)}px)`);
+        // Every other page carries the palette on its body class. Without it
+        // these two render dark text on the browser's default white in the
+        // dark theme, which is a real bug this check caught once already.
+        ok(!/rgba\(0, 0, 0, 0\)/.test(ink.bg),
+           `${theme} ${file}: the body has the theme's own background, not the browser default (${ink.bg})`);
+        ok(ink.bg === (theme === 'dark' ? 'rgb(50, 52, 55)' : 'rgb(212, 212, 212)'),
+           `${theme} ${file}: and it is this theme's --c-page-bg (${ink.bg})`);
+
+        // The footer is on these pages too, so the third link is reachable
+        // from either of them.
+        const fl = await p.evaluate(() =>
+          Array.from(document.querySelectorAll('.site-footer a')).map(a => a.getAttribute('href')));
+        ok(fl.includes('index.html'), `${theme} ${file}: its footer links home`);
+        ok(fl.includes(file === 'privacy.html' ? 'terms.html' : 'privacy.html'),
+           `${theme} ${file}: and across to the other policy`);
+        ok(!fl.includes(file), `${theme} ${file}: and does not link to itself`);
+
+        await p.screenshot({ path: `${SHOTS}/${file.replace('.html', '')}-${theme}.png`, fullPage: true });
+        ok(e.length === 0, `${theme} ${file}: no uncaught page errors (${e[0] ?? ''})`);
+        await c.close();
+      }
+    }
+
+    // The claims that have to be true of THIS site, asserted so a later
+    // boilerplate rewrite cannot quietly drop them.
+    const c2 = await newContext(browser);
+    const { page: pp } = await open(c2, '/privacy.html');
+    const priv = (await pp.textContent('.legal-wrap')).replace(/\s+/g, ' ');
+    ok(/no analytics/i.test(priv) && /no advertising/i.test(priv),
+       'privacy: states there are no analytics and no advertising');
+    ok(/jsDelivr/i.test(priv) && /IP address/i.test(priv),
+       'privacy: names jsDelivr as seeing an IP on page load');
+    ok(/Supabase/i.test(priv) && /Vercel/i.test(priv),
+       'privacy: names Supabase and the host');
+    ok(/millisecond/i.test(priv), 'privacy: says per-question timings are stored to the millisecond');
+    ok(/localStorage/i.test(priv) && /zt_tour_seen/i.test(priv) && /duel_guest_/i.test(priv),
+       'privacy: lists the localStorage keys by name');
+    ok(/private until you turn it on|off by default/i.test(priv),
+       'privacy: says a public profile is opt-in');
+    ok(/longest-standing/i.test(priv),
+       'privacy: deletion section matches docs/account-deletion.md on league succession');
+    ok(/Duels you created/i.test(priv) && /deleted account/i.test(priv),
+       'privacy: and on which duels go and which survive');
+    ok(/\[contact email\]/.test(priv), 'privacy: the contact placeholder is marked for the owner to fill in');
+    await c2.close();
+
+    const c3 = await newContext(browser);
+    const { page: tp } = await open(c3, '/terms.html');
+    const terms = (await tp.textContent('.legal-wrap')).replace(/\s+/g, ' ');
+    ok(/not affiliated with/i.test(terms) && /zetamac/i.test(terms),
+       'terms: says this is not affiliated with Zetamac');
+    ok(/as is/i.test(terms) && /no warranty/i.test(terms), 'terms: no warranty');
+    ok(/uptime/i.test(terms), 'terms: no uptime promise');
+    ok(/beta/i.test(terms) && /reset/i.test(terms), 'terms: scores may be reset while in beta');
+    ok(/MIT/.test(terms), 'terms: names the licence the source is under');
+    ok(/\[contact email\]/.test(terms), 'terms: the contact placeholder is marked too');
+    // No invented legal furniture — the brief was explicit about this.
+    ok(!/\bInc\.|\bLLC\b|\bLtd\b|governed by the laws|jurisdiction of/i.test(terms),
+       'terms: no invented company, jurisdiction or governing-law clause');
+    await c3.close();
   }
 
   await browser.close();

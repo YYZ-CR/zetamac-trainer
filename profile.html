@@ -38,17 +38,20 @@
         No games recorded yet — nothing to show here until the first one is played.
       </p>
 
+      <!-- Same structure as dashboard.html, in the same order, rendered by the
+           same functions in js/stats.js: strip → bests → score over time → by
+           operation. The dashboard's Recent Games list has no counterpart
+           here on purpose — get_public_profile returns no per-session rows,
+           and publishing them would be a cross-user data exposure. -->
+      <div class="stat-strip" id="stat-strip" style="display:none"></div>
+
       <div class="panel" id="bests-panel" style="display:none">
         <div class="panel-head">
           <h2>Personal Bests</h2>
+          <span class="panel-note" id="bests-note"></span>
         </div>
         <div class="best-row" id="best-row"></div>
         <p class="percentile-line" id="percentile-line" style="display:none"></p>
-        <!-- Shown by js/profile.js only once there is a best to put on it. -->
-        <div class="share-card-actions" id="share-card-actions" style="display:none">
-          <button class="btn" id="share-card-btn">Share Image</button>
-          <p class="share-card-status" id="share-card-status" role="status" aria-live="polite"></p>
-        </div>
       </div>
 
       <div class="panel" id="chart-panel" style="display:none">
@@ -68,11 +71,15 @@
         <div class="op-bars" id="op-bars"></div>
       </div>
 
-      <div class="stats-row" id="totals-row" style="display:none"></div>
-
     </div>
 
   </div>
+
+  <footer class="site-footer">
+    <a href="privacy.html">Privacy Policy</a>
+    <span class="footer-sep" aria-hidden="true">&middot;</span>
+    <a href="terms.html">Terms of Service</a>
+  </footer>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
@@ -80,7 +87,9 @@
   <script src="js/config.js"></script>
   <script src="js/db.js"></script>
   <script src="js/auth.js"></script>
-  <script src="js/sharecard.js"></script>
+  <!-- Shared with dashboard.html: the stat strip, the best cards and the
+       operation bars are the same markup on both pages. -->
+  <script src="js/stats.js"></script>
   <script src="js/profile.js"></script>
 </body>
 </html>

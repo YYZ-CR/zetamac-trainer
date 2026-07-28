@@ -47,52 +47,21 @@
       <div class="auth-error" id="claim-error" role="alert"></div>
     </div>
 
-    <!-- Shown when logged in -->
-    <div class="stats-row" id="stats-row" style="display:none">
-      <div class="stat-card">
-        <div class="stat-value" id="stat-best">—</div>
-        <div class="stat-label">Personal Best</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value" id="stat-avg">—</div>
-        <div class="stat-label">Avg (Last 10)</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value" id="stat-games">—</div>
-        <div class="stat-label">Total Games</div>
-      </div>
-    </div>
+    <!-- Shown when logged in. The same five tiles, in the same order, as the
+         top of the public profile page — js/stats.js renders both, so the two
+         pages cannot drift into showing different records of the same account.
+         The old Best / Average / Games row is gone: Total Games was
+         duplicated by the strip, and the two remaining figures moved into the
+         Personal Bests panel below, where the other scores are. -->
+    <div class="stat-strip" id="stat-strip" style="display:none"></div>
     <p class="stats-note" id="stats-note" style="display:none"></p>
 
-    <!-- Shown only for a signed-in user who already has a profile row -->
-    <div class="panel" id="profile-panel" style="display:none">
+    <div class="panel" id="bests-panel" style="display:none">
       <div class="panel-head">
-        <h2>Public Profile</h2>
-        <span class="panel-note" id="profile-visibility-badge"></span>
+        <h2>Personal Bests</h2>
+        <span class="panel-note" id="bests-note"></span>
       </div>
-
-      <div class="profile-link-row">
-        <a class="profile-link" id="profile-link" href="profile.html"></a>
-        <button class="btn" id="copy-profile-link-btn">Copy link</button>
-      </div>
-
-      <!-- The public/private toggle used to be here. It moved to
-           settings.html, next to the username the link is made of, so that
-           every control that changes the account lives in one place and the
-           dashboard is only about what you have scored. What stays is the
-           link and the badge saying which state it is in — those are facts
-           about your profile, not controls. -->
-      <p class="profile-visibility-note" id="profile-visibility-note"></p>
-    </div>
-
-    <!-- Private leagues, compact. Hidden entirely when supabase/leagues.sql is
-         not applied — an undeployed feature is not an error worth showing. -->
-    <div class="panel" id="leagues-panel" style="display:none">
-      <div class="panel-head">
-        <h2>Your Leagues</h2>
-        <span class="panel-note" id="leagues-panel-note"></span>
-      </div>
-      <div id="leagues-panel-body"></div>
+      <div class="best-row" id="best-row"></div>
     </div>
 
     <div class="panel" id="chart-panel" style="display:none">
@@ -107,6 +76,15 @@
       <div class="chart-container">
         <canvas id="score-chart"></canvas>
       </div>
+    </div>
+
+    <!-- Beneath Score Over Time and above Recent Games on both pages. -->
+    <div class="panel" id="ops-panel" style="display:none">
+      <div class="panel-head">
+        <h2>By Operation</h2>
+        <span class="panel-note">Average time per question, most recent 200 games</span>
+      </div>
+      <div class="op-bars" id="op-bars"></div>
     </div>
 
     <div class="panel" id="games-panel" style="display:none">
@@ -144,12 +122,21 @@
 
   </div>
 
+  <footer class="site-footer">
+    <a href="privacy.html">Privacy Policy</a>
+    <span class="footer-sep" aria-hidden="true">&middot;</span>
+    <a href="terms.html">Terms of Service</a>
+  </footer>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <script src="js/util.js"></script>
   <script src="js/config.js"></script>
   <script src="js/db.js"></script>
   <script src="js/auth.js"></script>
+  <!-- Shared with profile.html: the stat strip, the best cards and the
+       operation bars are the same markup on both pages. -->
+  <script src="js/stats.js"></script>
   <script src="js/dashboard.js"></script>
 </body>
 </html>

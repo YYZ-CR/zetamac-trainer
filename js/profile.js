@@ -13,19 +13,19 @@
 // and by far the most played, so it is the one comparison worth making.
 const PERCENTILE_DURATION = 120;
 
-const PROFILE_DURATIONS = [60, 120, 180, 300];
-const OP_ORDER  = ['addition', 'subtraction', 'multiplication', 'division'];
-const OP_SYMBOL = { addition: '+', subtraction: '−', multiplication: '×', division: '÷' };
+// How many recent games the bests panel averages over, matching the dashboard.
+const PROFILE_AVG_WINDOW = 10;
+
+// STAT_DURATIONS, STAT_OP_ORDER, numberOrNull, formatCount, formatPercent,
+// formatSeconds, renderStatStrip, renderBestCards and renderOpBars come from
+// js/stats.js, which dashboard.html loads too. This page and the dashboard
+// show the same record of the same account, so they render it with the same
+// code rather than with two copies that drift.
 
 // Kept so the chart can be rebuilt when the theme changes — Chart.js resolves
 // colours once, at construction.
 let profileChart   = null;
 let profileHistory = [];
-
-// Held for the share card, which is built on demand in a click handler and
-// reads whatever renderPercentile() resolved to. Null means the population was
-// too thin to say anything — see percentilePercent() in js/util.js.
-let profilePercentilePct = null;
 
 // Which profile to show. Three URL shapes reach this page:
 //
@@ -74,7 +74,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     showNotice(`
       <strong>No profile requested.</strong>
       <p>Profile links look like <code>profile.html?u=username</code>.</p>
-      <p><a href="dashboard.html">Go to your dashboard</a> to find and publish your own.</p>
+      <p><a href="settings.html">Go to Settings</a> to find and publish your own.</p>
     `);
     return;
   }
@@ -178,45 +178,13 @@ async function renderProfile(profile) {
     return;
   }
 
-  renderBests(profile.bests);
-  renderTotals(profile);
-  renderOps(profile.ops);
+  // Same order as the dashboard: strip → bests → score over time → by
+  // operation. Recent Games is the dashboard's alone.
+  renderStatStrip(document.getElementById('stat-strip'), profile);
+  renderBests(profile);
   renderHistoryChart(profile.history);
+  renderOps(profile.ops);
   await renderPercentile(profile.bests);
-  renderShareCardButton(profile);
-}
-
-// Which run length the shared image should be about. 120s is the standard
-// Zetamac length and the only one a percentile is computed for, so it wins
-// whenever it has been played; otherwise the shortest length that has.
-function shareDurationFor(bests) {
-  const source = bests && typeof bests === 'object' ? bests : {};
-  const has = d => numberOrNull(source[String(d)] ?? source[d]) !== null;
-  if (has(PERCENTILE_DURATION)) return PERCENTILE_DURATION;
-  return PROFILE_DURATIONS.find(has) ?? null;
-}
-
-// The button only appears once there is a score to put on the card, and only
-// if js/sharecard.js actually loaded — a button that silently does nothing is
-// worse than no button.
-function renderShareCardButton(profile) {
-  const wrap = document.getElementById('share-card-actions');
-  if (!wrap || typeof wireShareCardButton !== 'function') return;
-
-  const duration = shareDurationFor(profile.bests);
-  if (duration === null) return;
-
-  wrap.style.display = 'flex';
-  wireShareCardButton(
-    document.getElementById('share-card-btn'),
-    document.getElementById('share-card-status'),
-    () => shareCardDataFromProfile(profile, {
-      duration,
-      // The percentile is only ever computed at PERCENTILE_DURATION, so it
-      // must not be attached to a card about any other length.
-      percentile: duration === PERCENTILE_DURATION ? profilePercentilePct : null,
-    })
-  );
 }
 
 function memberSinceText(iso) {
@@ -233,7 +201,7 @@ function renderOwnerBanner() {
     Only you can see it — anyone else opening this link is told it doesn't exist.
     <span class="banner-actions">
       <button class="btn" id="publish-btn">Make it public</button>
-      <a href="dashboard.html">Manage on your dashboard</a>
+      <a href="settings.html">Manage in Settings</a>
     </span>
     <span class="banner-status" id="publish-status"></span>
   `;
@@ -252,31 +220,21 @@ function renderOwnerBanner() {
       window.location.reload();
     } else {
       btn.disabled = false;
-      status.textContent = "Couldn't publish — try again from the dashboard.";
+      status.textContent = "Couldn't publish — try again from Settings.";
     }
   });
 }
 
 // ── Personal bests ────────────────────────────────────────────
 
-function renderBests(bests) {
-  const source = bests && typeof bests === 'object' ? bests : {};
-  const row    = document.getElementById('best-row');
+function renderBests(profile) {
+  if (!renderBestCards(document.getElementById('best-row'), profile.bests)) return;
 
-  // Only durations actually played: an empty card for a duration nobody has
-  // touched reads as a zero, which is worse than an absent card.
-  const cards = PROFILE_DURATIONS
-    .map(d => ({ d, score: numberOrNull(source[String(d)] ?? source[d]) }))
-    .filter(x => x.score !== null);
+  // history arrives oldest-first, so the last entries are the recent games.
+  const recent = Array.isArray(profile.history) ? [...profile.history].reverse() : [];
+  const note   = document.getElementById('bests-note');
+  if (note) note.textContent = bestsNoteText(recent.map(h => h && h.score), PROFILE_AVG_WINDOW);
 
-  if (!cards.length) return;
-
-  row.innerHTML = cards.map(({ d, score }) => `
-    <div class="best-card">
-      <div class="best-score">${escapeHtml(score)}</div>
-      <div class="best-duration">${escapeHtml(d)}s</div>
-    </div>
-  `).join('');
   show('bests-panel');
 }
 
@@ -299,77 +257,15 @@ async function renderPercentile(bests) {
   const pct = percentilePercent(res);
   if (pct === null) return;
 
-  // Same figure the share card puts on the image.
-  profilePercentilePct = pct;
-
   const el = document.getElementById('percentile-line');
   el.innerHTML = `Faster than <strong>${escapeHtml(pct)}%</strong> of players at ${escapeHtml(PERCENTILE_DURATION)} seconds.`;
   el.style.display = 'block';
 }
 
-// ── Totals ────────────────────────────────────────────────────
-
-function renderTotals(profile) {
-  const cards = [
-    { value: formatCount(profile.total_games),     label: 'Total Games' },
-    { value: formatCount(profile.total_questions), label: 'Questions' },
-    { value: formatPercent(profile.accuracy),      label: 'Accuracy' },
-    { value: formatCount(profile.days_practiced),  label: 'Days Practiced' },
-    { value: formatCount(profile.streak),          label: 'Day Streak' },
-  ];
-
-  document.getElementById('totals-row').innerHTML = cards.map(c => `
-    <div class="stat-card">
-      <div class="stat-value">${escapeHtml(c.value)}</div>
-      <div class="stat-label">${escapeHtml(c.label)}</div>
-    </div>
-  `).join('');
-  show('totals-row', 'flex');
-}
-
 // ── Per-operation breakdown ───────────────────────────────────
 
 function renderOps(ops) {
-  const source = ops && typeof ops === 'object' ? ops : {};
-
-  const rows = OP_ORDER
-    .map(name => ({ name, stat: source[name] }))
-    .filter(r => r.stat && numberOrNull(r.stat.avg_ms) !== null)
-    .map(r => ({
-      name:     r.name,
-      avgMs:    Number(r.stat.avg_ms),
-      count:    numberOrNull(r.stat.count),
-      accuracy: numberOrNull(r.stat.accuracy),
-    }));
-
-  if (!rows.length) return;
-
-  // Bars are scaled against the slowest operation, so the shape of the chart
-  // answers the question people actually have: which one is dragging?
-  const maxMs = Math.max(...rows.map(r => r.avgMs), 1);
-
-  document.getElementById('op-bars').innerHTML = rows.map(r => {
-    const width = Math.max(4, Math.round((r.avgMs / maxMs) * 100));
-    const meta  = [
-      r.accuracy !== null ? `${formatPercent(r.accuracy)} correct` : null,
-      r.count !== null ? `${formatCount(r.count)} questions` : null,
-    ].filter(Boolean).join(' · ');
-
-    return `
-      <div class="op-bar-row">
-        <div class="op-bar-label">
-          <span class="op-bar-symbol">${escapeHtml(OP_SYMBOL[r.name] || '')}</span>
-          <span class="op-bar-name">${escapeHtml(r.name)}</span>
-        </div>
-        <div class="op-bar-track">
-          <div class="op-bar-fill" style="width:${escapeHtml(width)}%"></div>
-        </div>
-        <div class="op-bar-value">${escapeHtml(formatSeconds(r.avgMs))}</div>
-        <div class="op-bar-meta">${escapeHtml(meta)}</div>
-      </div>
-    `;
-  }).join('');
-  show('ops-panel');
+  if (renderOpBars(document.getElementById('op-bars'), ops)) show('ops-panel');
 }
 
 // ── Score over time ───────────────────────────────────────────
@@ -453,30 +349,8 @@ function drawHistoryChart() {
 }
 
 // ── Formatting ────────────────────────────────────────────────
-
-function numberOrNull(v) {
-  if (v === null || v === undefined || v === '') return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
-function formatCount(v) {
-  const n = numberOrNull(v);
-  return n === null ? '—' : n.toLocaleString('en-US');
-}
-
-function formatPercent(v) {
-  const n = numberOrNull(v);
-  if (n === null) return '—';
-  // The contract gives fractions (0.962); tolerate a percentage just in case.
-  const frac = n > 1 ? n / 100 : n;
-  return `${Math.round(frac * 1000) / 10}%`;
-}
-
-function formatSeconds(ms) {
-  const n = numberOrNull(ms);
-  return n === null ? '—' : `${(n / 1000).toFixed(2)}s`;
-}
+// numberOrNull, formatCount, formatPercent and formatSeconds live in
+// js/stats.js — the dashboard needs the same four.
 
 function formatHistoryDate(d) {
   if (!d) return '';

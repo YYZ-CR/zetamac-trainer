@@ -45,15 +45,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   // until now there was nowhere to set it. This is that place.
   if (!profile?.username) renderUsernameClaim(user);
 
-  // Before the empty-state return below: a user with no games still has a
-  // profile to publish, and the link is how anyone finds it.
-  renderProfilePanel(profile);
-
-  // Same reason — somebody with no games can still be in a league, and the
-  // league is a reason to go and play one. Not awaited: a slow or absent
-  // leagues migration must not hold up the rest of the dashboard.
-  renderDashboardLeagues();
-
   if (sessions.length === 0) {
     document.getElementById('games-panel').style.display = 'block';
     document.getElementById('games-tbody').innerHTML =
@@ -61,27 +52,53 @@ document.addEventListener('DOMContentLoaded', async () => {
     return;
   }
 
-  // ── Stats ─────────────────────────────────────────────────
-  const scores = sessions.map(s => s.score);
-  const best   = Math.max(...scores);
-  const avg10  = Math.round(scores.slice(0, 10).reduce((a, b) => a + b, 0) / Math.min(10, scores.length));
+  // ── The record: strip, bests, operations ──────────────────
+  // Preferred source is get_public_profile, the same payload profile.html
+  // renders — its figures are all-time and computed by the database, and one
+  // source for both pages is what stops your dashboard and your public page
+  // disagreeing about how many games you have played.
+  //
+  // It needs a username to look the profile up by, and it needs
+  // supabase/social.sql to be applied. Neither is guaranteed: registration
+  // with email confirmation can leave an account with no profile row at all,
+  // and migrations here are applied by hand. So the same shape is computed
+  // from the sessions already in memory when the call cannot be made or comes
+  // back empty — a strip of five em-dashes would be a failed load pretending
+  // to be a record.
+  let record = null;
+  if (profile?.username && typeof getPublicProfile === 'function') {
+    try {
+      record = await getPublicProfile(profile.username);
+    } catch (e) {
+      console.warn('getPublicProfile failed on the dashboard:', e);
+    }
+  }
+  const fromServer = !!record;
+  if (!record) record = recordFromSessions(sessions, trueTotal);
 
-  document.getElementById('stat-best').textContent  = best;
-  document.getElementById('stat-avg').textContent   = avg10;
-  document.getElementById('stat-games').textContent = trueTotal;
-  document.getElementById('stats-row').style.display = 'flex';
+  renderStatStrip(document.getElementById('stat-strip'), record);
 
-  // Be explicit when the other figures only cover the loaded window, instead
-  // of quietly presenting them as all-time.
+  if (renderBestCards(document.getElementById('best-row'), record.bests)) {
+    const note = document.getElementById('bests-note');
+    if (note) note.textContent = bestsNoteText(sessions.map(s => s.score), DASH_AVG_WINDOW);
+    document.getElementById('bests-panel').style.display = 'block';
+  }
+
+  // Be explicit about what the figures actually cover instead of quietly
+  // presenting a window as all time.
   const note = document.getElementById('stats-note');
   if (note) {
-    if (truncated) {
-      note.textContent =
-        `Personal best, the chart and the table cover your most recent ${sessions.length} games of ${trueTotal}.`;
-      note.style.display = 'block';
-    } else {
-      note.style.display = 'none';
+    const parts = [];
+    if (!fromServer) {
+      parts.push('These figures are computed from the games loaded on this page.');
     }
+    if (truncated) {
+      parts.push(
+        `The chart and the table cover your most recent ${sessions.length} games of ${trueTotal}.`
+      );
+    }
+    note.textContent = parts.join(' ');
+    note.style.display = parts.length ? 'block' : 'none';
   }
 
   // ── Chart ─────────────────────────────────────────────────
@@ -137,6 +154,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     redrawChart();
   });
 
+  // ── By operation ──────────────────────────────────────────
+  // Between the chart and the table, in the same place as on the public page.
+  if (renderOpBars(document.getElementById('op-bars'), record.ops)) {
+    document.getElementById('ops-panel').style.display = 'block';
+  }
+
   // ── Recent games ──────────────────────────────────────────
   document.getElementById('games-panel').style.display = 'block';
   let currentPage = 0;
@@ -174,151 +197,130 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderPage();
 });
 
-// ── Public profile link ───────────────────────────────────────
-// The dashboard shows the profile link and whether anyone else can open it.
-// It no longer PUBLISHES anything: the public/private toggle moved to
-// settings.html, beside the username the link is made of. Two pages offering
-// the same switch is two pages that can disagree about its state.
+// ── The record, computed locally ──────────────────────────────
+// The fallback for the strip, the best cards and the operation bars when
+// get_public_profile cannot be reached — no username yet, or
+// supabase/social.sql not applied on this deployment. It returns the same
+// shape that function does, so nothing downstream has to know which source it
+// got. See docs/social-api.md for the contract.
 //
-// It needs a profile row to have anything to say: a signed-in user without one
-// has no username, so there is no URL to show.
+// Two honest differences from the server's version, both stated in the note
+// under the strip: every figure except total_games covers the sessions this
+// page loaded rather than all time, and the days are the caller's own UTC
+// days derived from created_at.
 
-function renderProfilePanel(profile) {
-  const panel = document.getElementById('profile-panel');
-  if (!panel || !profile || !profile.username) return;
+const DASH_AVG_WINDOW = 10;   // games behind "Avg last 10"
+const DASH_OPS_WINDOW = 200;  // sessions the operation bars average over
 
-  const username = String(profile.username);
+function recordFromSessions(sessions, totalGames) {
+  let questions = 0;
+  let mistakes  = 0;
+  const bests = {};
+  const days  = new Set();
 
-  // vercel.json rewrites /@name to profile.html?u=name, so /@name is the form
-  // worth showing — but the href must be the real query-string URL, or the
-  // link is broken everywhere except production (there are no rewrites under
-  // a plain static server).
-  const href = 'profile.html?u=' + encodeURIComponent(username);
-  const link = document.getElementById('profile-link');
-  link.setAttribute('href', href);
-  // textContent, not innerHTML: the username is user-controlled.
-  link.textContent = '/@' + username;
+  for (const s of sessions) {
+    const qs = Array.isArray(s.questions) ? s.questions : [];
+    questions += qs.length;
+    for (const q of qs) {
+      // Total by construction, exactly as the SQL is: anything that is not
+      // literal true — false, absent, the wrong type — is not a mistake.
+      if (q && q.hadMistake === true) mistakes++;
+    }
 
-  // Absolute, because the copied form is going somewhere else entirely.
-  const absoluteUrl = new URL(href, window.location.href).toString();
+    const duration = numberOrNull(s.duration_seconds);
+    const score    = numberOrNull(s.score);
+    if (duration !== null && score !== null) {
+      const key = String(duration);
+      if (!(key in bests) || score > bests[key]) bests[key] = score;
+    }
 
-  const badge = document.getElementById('profile-visibility-badge');
-  const note  = document.getElementById('profile-visibility-note');
-
-  // profiles.is_public arrives with social.sql. Until that migration is
-  // applied the column is simply absent from the row, and `undefined` would
-  // read as "private" for a profile that cannot be published at all. Offer
-  // the link, and say which of the three states it is in.
-  const hasVisibility = Object.prototype.hasOwnProperty.call(profile, 'is_public');
-  const isPublic = hasVisibility && !!profile.is_public;
-
-  // A static string, so innerHTML here carries nothing user-controlled — the
-  // username above it goes through textContent, and must keep doing so.
-  const settingsLink = '<a href="settings.html">Settings</a>';
-
-  if (!hasVisibility) {
-    badge.textContent = 'Unavailable';
-    note.textContent  =
-      'Publishing is unavailable on this deployment — the database is missing the ' +
-      'visibility column. Your profile stays private, and only you can open this link.';
-  } else {
-    badge.textContent = isPublic ? 'Public' : 'Private';
-    note.innerHTML = isPublic
-      ? 'Anyone with this link can see your stats. Make it private again in ' +
-        settingsLink + '.'
-      : 'This link only works for you while your profile is private — everyone else ' +
-        'opening it is told the profile does not exist. Publish it in ' +
-        settingsLink + '.';
+    const day = utcDayOf(s.created_at);
+    if (day) days.add(day);
   }
 
-  const copyBtn = document.getElementById('copy-profile-link-btn');
-  copyBtn.addEventListener('click', () => {
-    const done = () => {
-      copyBtn.textContent = 'Copied!';
-      setTimeout(() => { copyBtn.textContent = 'Copy link'; }, 2000);
-    };
-    // navigator.clipboard is undefined outside a secure context, so this has
-    // to survive the property being missing as well as the promise rejecting
-    // — over plain http the unguarded call throws instead of failing.
-    let p = null;
-    try { p = navigator.clipboard?.writeText(absoluteUrl); } catch (_) { p = null; }
-    if (p && typeof p.then === 'function') {
-      p.then(done).catch(() => { prompt('Copy this link:', absoluteUrl); });
-    } else {
-      prompt('Copy this link:', absoluteUrl);
-    }
-  });
-
-  panel.style.display = 'block';
+  return {
+    total_games:     totalGames,
+    total_questions: questions,
+    // 0/0 is not 1.0, it is unknown. A flattering 100% would be a lie.
+    accuracy:        questions > 0 ? 1 - mistakes / questions : null,
+    days_practiced:  days.size,
+    streak:          streakFromDays(days),
+    bests,
+    ops:             opsFromSessions(sessions),
+  };
 }
 
-// ── Private leagues, compactly ────────────────────────────────
-// A list of doors, nothing more: names, sizes, and a link to leagues.html,
-// which owns every other league state. The boards themselves are not rendered
-// here — one board is a table, and five would be the whole dashboard.
-//
-// The panel stays hidden when getMyLeagues() fails. supabase/leagues.sql is
-// applied by hand, so "leagues are not deployed on this project" is a normal
-// state for this page to be in, and it is not an error the owner of the
-// dashboard can do anything about.
+// "YYYY-MM-DD" in UTC, matching get_public_profile, which counts UTC calendar
+// days. Doing this in local time would put a late-evening game in tomorrow for
+// half the world and disagree with the public page for the same account.
+function utcDayOf(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+}
 
-const DASH_LEAGUE_LIMIT = 5;
+// The run of consecutive days ending today or yesterday. Yesterday counts
+// because somebody mid-streak has not necessarily played yet today and should
+// not be told the streak is over — the same rule the SQL applies.
+function streakFromDays(days) {
+  if (!days.size) return 0;
 
-async function renderDashboardLeagues() {
-  const panel = document.getElementById('leagues-panel');
-  const body  = document.getElementById('leagues-panel-body');
-  const note  = document.getElementById('leagues-panel-note');
-  if (!panel || !body || typeof getMyLeagues !== 'function') return;
+  const today     = new Date();
+  const todayUtc  = today.toISOString().slice(0, 10);
+  const yesterday = new Date(Date.UTC(
+    today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - 1
+  )).toISOString().slice(0, 10);
 
-  let leagues = null;
-  try {
-    leagues = await getMyLeagues();
-  } catch (e) {
-    console.warn('renderDashboardLeagues:', e);
-    return;
+  let cursor;
+  if (days.has(todayUtc))          cursor = todayUtc;
+  else if (days.has(yesterday))    cursor = yesterday;
+  else                             return 0;
+
+  let streak = 0;
+  while (days.has(cursor)) {
+    streak++;
+    const d = new Date(cursor + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() - 1);
+    cursor = d.toISOString().slice(0, 10);
+  }
+  return streak;
+}
+
+// Per-operation averages over the most recent DASH_OPS_WINDOW sessions —
+// the same bound get_public_profile uses, so the two pages average over the
+// same window rather than one of them quietly covering more history.
+// getUserSessions returns newest-first, so the slice is the recent end.
+function opsFromSessions(sessions) {
+  const acc = {};
+
+  for (const s of sessions.slice(0, DASH_OPS_WINDOW)) {
+    const qs = Array.isArray(s.questions) ? s.questions : [];
+    for (const q of qs) {
+      if (!q || typeof q !== 'object') continue;
+      // Whitelisted, like the SQL: `operation` is written by the client and
+      // an unknown value must be dropped rather than rendered as a row.
+      if (!STAT_OP_ORDER.includes(q.operation)) continue;
+
+      const a = acc[q.operation] || (acc[q.operation] = { n: 0, mistakes: 0, timed: 0, ms: 0 });
+      a.n++;
+      if (q.hadMistake === true) a.mistakes++;
+      const ms = numberOrNull(q.timeMs);
+      if (ms !== null) { a.ms += ms; a.timed++; }
+    }
   }
 
-  // null is a failed call; [] is "in no leagues" and has its own copy.
-  if (leagues === null) return;
-
-  if (!leagues.length) {
-    if (note) note.textContent = '';
-    body.innerHTML = `
-      <p class="dash-league-empty">
-        You're not in a league yet. A league is a private leaderboard over the
-        daily — same questions, same day — for people you actually know.
-      </p>
-      <p class="dash-league-more"><a href="leagues.html">Create one or join with a code</a></p>
-    `;
-    panel.style.display = 'block';
-    return;
+  const ops = {};
+  for (const [name, a] of Object.entries(acc)) {
+    // No timed question means no average, and a bar with no length is worse
+    // than an absent row.
+    if (!a.timed) continue;
+    ops[name] = {
+      avg_ms:   Math.round(a.ms / a.timed),
+      count:    a.n,
+      accuracy: 1 - a.mistakes / a.n,
+    };
   }
-
-  if (note) note.textContent = leagues.length === 1 ? '1 league' : leagues.length + ' leagues';
-
-  const shown = leagues.slice(0, DASH_LEAGUE_LIMIT);
-  const items = shown.map(l => {
-    const key   = String(l.league_key ?? '');
-    const name  = String(l.name ?? 'Untitled league');
-    const n     = Number(l.member_count);
-    const count = Number.isFinite(n) ? (n === 1 ? '1 member' : n + ' members') : '';
-    const owner = l.is_owner === true ? ' · you own it' : '';
-    // League names are user-controlled — one person names a thing that
-    // everybody else's dashboard then renders.
-    return `
-      <li class="dash-league-item">
-        <a class="dash-league-name" href="leagues.html?l=${escapeHtml(encodeURIComponent(key))}">${escapeHtml(name)}</a>
-        <span class="dash-league-meta">${escapeHtml(count + owner)}</span>
-      </li>
-    `;
-  }).join('');
-
-  const more = leagues.length > shown.length
-    ? `<p class="dash-league-more"><a href="leagues.html">All ${escapeHtml(leagues.length)} leagues</a></p>`
-    : `<p class="dash-league-more"><a href="leagues.html">Manage your leagues</a></p>`;
-
-  body.innerHTML = `<ul class="dash-league-list">${items}</ul>${more}`;
-  panel.style.display = 'block';
+  return ops;
 }
 
 // ── Chart ─────────────────────────────────────────────────────

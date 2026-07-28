@@ -102,7 +102,7 @@
             <input type="radio" name="zt-theme" value="dark" id="theme-dark">
             <span>
               <strong>Dark</strong>
-              <em>A Monkeytype-flavoured dark palette.</em>
+              <em>A Monkeytype-flavored dark palette.</em>
             </span>
           </label>
         </div>
@@ -171,7 +171,7 @@
             </li>
             <li>
               your username is released, and anybody else can claim it
-              afterwards.
+              afterward.
             </li>
             <li>
               <strong class="danger-strong">this cannot be undone.</strong>
@@ -198,6 +198,16 @@
     </div>
 
   </div>
+
+
+  <!-- Same footer as the home page, minus "How this works": js/tour.js is only
+       loaded on index.html, so a tour link here would be an href="#" that does
+       nothing. The two policy links have to be reachable from every page. -->
+  <footer class="site-footer">
+    <a href="privacy.html">Privacy Policy</a>
+    <span class="footer-sep" aria-hidden="true">&middot;</span>
+    <a href="terms.html">Terms of Service</a>
+  </footer>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/util.js"></script>

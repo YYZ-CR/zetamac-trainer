@@ -4,7 +4,7 @@ import { chromium } from 'playwright';
 // Dashboard — so exactly one appeared depending on the page, which reads as
 // links randomly disappearing. This is the regression guard for that.
 const EXE=process.env.ZT_CHROMIUM;
-const PAGES=['index.html','dashboard.html','daily.html','duel.html','leagues.html','practice.html','profile.html?u=x','results.html'];
+const PAGES=['index.html','dashboard.html','daily.html','duel.html','leagues.html','practice.html','profile.html?u=x','results.html','settings.html','privacy.html','terms.html'];
 const SUPA=(signedIn)=>`(function(){window.supabase={createClient:()=>({
  auth:{getSession:async()=>({data:{session:${signedIn?"{user:{id:'u1',email:'a@b.c'}}":'null'}},error:null}),
    getUser:async()=>({data:{user:${signedIn?"{id:'u1',email:'a@b.c'}":'null'}}}),
