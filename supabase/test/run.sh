@@ -72,6 +72,10 @@ run_sql "$SQLDIR_MIG/social.sql"
 [ -r "$SQLDIR_MIG/daily.sql" ] && run_sql "$SQLDIR_MIG/daily.sql"
 [ -r "$SQLDIR_MIG/duels.sql" ] && run_sql "$SQLDIR_MIG/duels.sql"
 [ -r "$SQLDIR_MIG/leagues.sql" ] && run_sql "$SQLDIR_MIG/leagues.sql"
+# Last: it revokes the client's column grants on profiles and replaces
+# username_available, so re-applying hardening.sql after it would undo half
+# of that. Deployment order is the README's table, and this mirrors it.
+[ -r "$SQLDIR_MIG/settings.sql" ] && run_sql "$SQLDIR_MIG/settings.sql"
 
 # These files are applied by hand in the Supabase SQL editor, so somebody will
 # eventually paste one twice. Re-applying here proves that is harmless.
@@ -80,6 +84,7 @@ run_sql "$SQLDIR_MIG/social.sql"
 [ -r "$SQLDIR_MIG/daily.sql" ] && run_sql "$SQLDIR_MIG/daily.sql"
 [ -r "$SQLDIR_MIG/duels.sql" ] && run_sql "$SQLDIR_MIG/duels.sql"
 [ -r "$SQLDIR_MIG/leagues.sql" ] && run_sql "$SQLDIR_MIG/leagues.sql"
+[ -r "$SQLDIR_MIG/settings.sql" ] && run_sql "$SQLDIR_MIG/settings.sql"
 
 echo "=== seeding ==="
 run_sql "$SQLDIR_TEST/01-seed.sql"
@@ -92,4 +97,5 @@ TESTS="-f '$SQLDIR_TEST/02-test.sql'"
 [ -r "$SQLDIR_MIG/daily.sql" ] && TESTS="$TESTS -f '$SQLDIR_TEST/03-daily-test.sql'"
 [ -r "$SQLDIR_MIG/duels.sql" ] && TESTS="$TESTS -f '$SQLDIR_TEST/04-duels-test.sql'"
 [ -r "$SQLDIR_MIG/leagues.sql" ] && TESTS="$TESTS -f '$SQLDIR_TEST/05-leagues-test.sql'"
+[ -r "$SQLDIR_MIG/settings.sql" ] && TESTS="$TESTS -f '$SQLDIR_TEST/06-settings-test.sql'"
 psql_run "-d $DB $TESTS" 2>&1 | sed 's/^psql.*NOTICE:  //'

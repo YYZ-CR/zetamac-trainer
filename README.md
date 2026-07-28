@@ -35,6 +35,12 @@ being 4,000th behind strangers.
 
 **A share card** rendered client-side to a canvas, in whichever theme you are using.
 
+**Settings** — username, profile visibility, theme and account in one place.
+Usernames are 3–20 characters of `A-Za-z0-9_-`, cannot collide with an existing name
+by case alone, and can be changed **once every 30 days** — the first time you set one
+is free. The client cannot write `profiles.username` at all; `set_username` is the
+only path, enforced by column-level grants rather than by a policy.
+
 If an account ends up without a username — registration can leave it that way when
 email confirmation is enabled — the dashboard offers a way to claim one, since a
 username is what every leaderboard, league and duel names you by.
@@ -71,8 +77,15 @@ Apply these **by hand** in the Supabase SQL editor, in this order:
 | `supabase/daily.sql` | Zetamac Daily, server-authoritative scoring |
 | `supabase/duels.sql` | duels — **depends on `daily.sql`** for the question generator |
 | `supabase/leagues.sql` | private leagues |
+| `supabase/settings.sql` | `set_username`, rename cooldown, column-level grants |
 
-Order matters only for `duels.sql`, which calls functions defined in `daily.sql`.
+Two ordering constraints, both real:
+
+- `duels.sql` calls functions defined in `daily.sql`, so daily comes first.
+- **`settings.sql` must be last.** It revokes the client's column grants on
+  `profiles` and replaces `username_available`. Re-running `hardening.sql` after it
+  would hand those grants back and undo half of it. If you ever re-apply an earlier
+  file, re-apply `settings.sql` afterwards.
 
 **Every file is idempotent, and re-running one is the supported way to deploy a
 change.** The test suite applies each migration twice on every run to guarantee that,
@@ -94,6 +107,7 @@ ZT_CHROMIUM=<path> node test/browser/duel.mjs
 ZT_CHROMIUM=<path> node test/browser/leagues.mjs
 ZT_CHROMIUM=<path> node test/browser/dashboard.mjs
 ZT_CHROMIUM=<path> node test/browser/nav.mjs
+ZT_CHROMIUM=<path> node test/browser/settings.mjs
 ```
 
 `supabase/test/` rebuilds a throwaway database from the migration files and asserts

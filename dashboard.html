@@ -76,13 +76,13 @@
         <button class="btn" id="copy-profile-link-btn">Copy link</button>
       </div>
 
-      <label class="profile-public-toggle">
-        <input type="checkbox" id="profile-public-check">
-        <span>Make my profile public</span>
-      </label>
-
+      <!-- The public/private toggle used to be here. It moved to
+           settings.html, next to the username the link is made of, so that
+           every control that changes the account lives in one place and the
+           dashboard is only about what you have scored. What stays is the
+           link and the badge saying which state it is in — those are facts
+           about your profile, not controls. -->
       <p class="profile-visibility-note" id="profile-visibility-note"></p>
-      <p class="profile-visibility-status" id="profile-visibility-status" role="status" aria-live="polite"></p>
     </div>
 
     <!-- Private leagues, compact. Hidden entirely when supabase/leagues.sql is

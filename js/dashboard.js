@@ -174,10 +174,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderPage();
 });
 
-// ── Public profile controls ───────────────────────────────────
-// The dashboard is where a profile is published, unpublished and shared. It
-// needs a profile row to have anything to say: a signed-in user without one
-// has no username, so there is no URL to show and nothing to publish.
+// ── Public profile link ───────────────────────────────────────
+// The dashboard shows the profile link and whether anyone else can open it.
+// It no longer PUBLISHES anything: the public/private toggle moved to
+// settings.html, beside the username the link is made of. Two pages offering
+// the same switch is two pages that can disagree about its state.
+//
+// It needs a profile row to have anything to say: a signed-in user without one
+// has no username, so there is no URL to show.
 
 function renderProfilePanel(profile) {
   const panel = document.getElementById('profile-panel');
@@ -198,72 +202,34 @@ function renderProfilePanel(profile) {
   // Absolute, because the copied form is going somewhere else entirely.
   const absoluteUrl = new URL(href, window.location.href).toString();
 
-  const check  = document.getElementById('profile-public-check');
-  const badge  = document.getElementById('profile-visibility-badge');
-  const note   = document.getElementById('profile-visibility-note');
-  const status = document.getElementById('profile-visibility-status');
+  const badge = document.getElementById('profile-visibility-badge');
+  const note  = document.getElementById('profile-visibility-note');
 
   // profiles.is_public arrives with social.sql. Until that migration is
   // applied the column is simply absent from the row, and `undefined` would
-  // read as "private" from a control that could never make it public. Offer
-  // the link, disable the toggle, and say which of the two it is.
+  // read as "private" for a profile that cannot be published at all. Offer
+  // the link, and say which of the three states it is in.
   const hasVisibility = Object.prototype.hasOwnProperty.call(profile, 'is_public');
-  let isPublic = hasVisibility && !!profile.is_public;
+  const isPublic = hasVisibility && !!profile.is_public;
 
-  check.checked  = isPublic;
-  check.disabled = !hasVisibility;
+  // A static string, so innerHTML here carries nothing user-controlled — the
+  // username above it goes through textContent, and must keep doing so.
+  const settingsLink = '<a href="settings.html">Settings</a>';
 
-  function describe() {
-    if (!hasVisibility) {
-      badge.textContent = 'Unavailable';
-      note.textContent  =
-        'Publishing is unavailable on this deployment — the database is missing the ' +
-        'visibility column. Your profile stays private, and only you can open this link.';
-      return;
-    }
+  if (!hasVisibility) {
+    badge.textContent = 'Unavailable';
+    note.textContent  =
+      'Publishing is unavailable on this deployment — the database is missing the ' +
+      'visibility column. Your profile stays private, and only you can open this link.';
+  } else {
     badge.textContent = isPublic ? 'Public' : 'Private';
-    note.textContent  = isPublic
-      ? 'Anyone with this link can see your stats.'
+    note.innerHTML = isPublic
+      ? 'Anyone with this link can see your stats. Make it private again in ' +
+        settingsLink + '.'
       : 'This link only works for you while your profile is private — everyone else ' +
-        'opening it is told the profile does not exist.';
+        'opening it is told the profile does not exist. Publish it in ' +
+        settingsLink + '.';
   }
-  describe();
-
-  function setStatus(text, kind) {
-    status.textContent = text;
-    status.className = 'profile-visibility-status' + (kind ? ' is-' + kind : '');
-  }
-
-  check.addEventListener('change', async () => {
-    if (!hasVisibility) return;
-
-    const wanted   = check.checked;
-    const previous = isPublic;
-
-    // Disabled for the whole round trip: a fast double-click would otherwise
-    // put two updates in flight and let whichever landed last decide the
-    // database, while the checkbox showed whichever was clicked last.
-    check.disabled = true;
-    setStatus(wanted ? 'Publishing…' : 'Making private…', 'pending');
-
-    const ok = typeof setProfileVisibility === 'function'
-      ? await setProfileVisibility(wanted)
-      : false;
-
-    check.disabled = false;
-
-    if (ok) {
-      isPublic = wanted;
-      setStatus(wanted
-        ? 'Your profile is now public.'
-        : 'Your profile is now private.', 'ok');
-    } else {
-      // Never leave the box claiming a state the database does not have.
-      check.checked = previous;
-      setStatus(`Couldn't save that — your profile is still ${previous ? 'public' : 'private'}. Try again.`, 'error');
-    }
-    describe();
-  });
 
   const copyBtn = document.getElementById('copy-profile-link-btn');
   copyBtn.addEventListener('click', () => {

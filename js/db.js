@@ -854,3 +854,112 @@ async function getLeagueBoard(key, scope) {
     p_scope: (s === 'week' || s === 'best') ? s : 'today',
   });
 }
+
+// ── Usernames ────────────────────────────────────────────────
+// supabase/settings.sql revoked UPDATE (username) from `authenticated` at the
+// column level, so the plain `.from('profiles').update({username})` that used
+// to work — from this file or from anybody's browser console — is now denied
+// by the database. set_username is the only way in, and it is where the rules
+// live: 3–20 characters, [A-Za-z0-9_-] only, no case collisions, and 30 days
+// between changes with the first one free.
+//
+// Unlike every other RPC in this file, set_username RETURNS its refusals
+// rather than raising them, because each one is something the person typing
+// can fix and because the payload has to carry next_change_allowed_at
+// alongside the reason. So there is no error-code sniffing here — only the
+// transport failures below have to be invented.
+
+// One sentence per refusal code the database can return, plus the two this
+// client invents when the call never got an answer. The cooldown line is
+// deliberately vague: js/settings.js replaces it with the actual date, which
+// it has and this file does not.
+const USERNAME_REFUSALS = {
+  username_requires_account:
+    'You need to be logged in to set a username.',
+  username_empty:
+    'Type a username first.',
+  username_too_short:
+    'Usernames are at least 3 characters.',
+  username_too_long:
+    'Usernames are at most 20 characters.',
+  username_invalid_chars:
+    'Usernames can only use letters, numbers, hyphens and underscores — no spaces, ' +
+    'accents or other alphabets.',
+  username_taken:
+    'That name is already taken. Names are compared without case, so "Alex" and ' +
+    '"alex" count as the same name.',
+  username_cooldown:
+    'You changed your username too recently.',
+  username_missing:
+    'Username changes are not available on this deployment yet.',
+  username_unavailable:
+    "Couldn't reach the server. Try again in a moment.",
+};
+
+// How long the database makes a user wait between changes. It is
+// username_cooldown_days() in supabase/settings.sql that decides; this copy
+// exists only so the page can say "changeable again on …" from the
+// username_changed_at it already read, without a second round trip. The server
+// is authoritative — every refusal below comes from it, never from this number.
+const USERNAME_COOLDOWN_DAYS = 30;
+
+// Set or change the signed-in user's username. Works for an account that has
+// no profiles row yet (it inserts one) and for one that does (it updates).
+//
+// ALWAYS returns { ok, username, next_change_allowed_at, error } and never
+// throws:
+//
+//   ok                     — whether the name is now what was asked for.
+//   username               — the name in effect AFTER the call. On a refusal
+//                            that is the name they still have, or null if they
+//                            have none, so a page can re-render from this
+//                            payload alone.
+//   next_change_allowed_at — ISO timestamp of when the next change becomes
+//                            possible, or null when one is possible now.
+//   error                  — null on success, otherwise a key of
+//                            USERNAME_REFUSALS.
+//
+// Setting the name you already have is a success and does not start a new
+// cooldown, so a double-tapped Save costs nothing.
+async function setUsername(username) {
+  const fail = (code) => ({
+    ok: false,
+    username: null,
+    next_change_allowed_at: null,
+    error: code,
+  });
+
+  if (!dbReady()) return fail('username_unavailable');
+
+  try {
+    const { data, error } = await supabaseClient.rpc('set_username', {
+      p_username: String(username ?? ''),
+    });
+
+    if (error) {
+      // Every refusal arrives in `data`, so an `error` here means the call
+      // itself did not happen: the migration is not applied, or the network
+      // is gone. PostgREST reports an absent function as PGRST202.
+      const blob = [error.message, error.details, error.hint, error.code]
+        .filter(v => typeof v === 'string')
+        .join(' ');
+      console.warn('set_username:', error.message);
+      return fail(/PGRST202|schema cache|does not exist|could not find the function/i.test(blob)
+        ? 'username_missing'
+        : 'username_unavailable');
+    }
+
+    const row = unwrapRpc(data);
+    if (!row || typeof row !== 'object') return fail('username_unavailable');
+
+    return {
+      ok: row.ok === true,
+      username: row.username ?? null,
+      next_change_allowed_at: row.next_change_allowed_at ?? null,
+      error: row.ok === true ? null : (row.error || 'username_unavailable'),
+    };
+  } catch (e) {
+    console.warn('set_username threw:', e);
+    return fail('username_unavailable');
+  }
+}
