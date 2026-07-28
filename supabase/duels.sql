@@ -483,10 +483,33 @@ DECLARE
   v_reveal   BOOLEAN;
   v_role     TEXT;
   v_outcome  JSONB;
+  v_c_name   TEXT;
+  v_o_name   TEXT;
 BEGIN
   SELECT * INTO v_d FROM public.duels WHERE id = p_duel_id;
   IF NOT FOUND THEN
     RETURN NULL;
+  END IF;
+
+  -- Who is playing. Without this the invite reads "somebody sent you this
+  -- duel", which is a poor thing to receive from a friend.
+  --
+  -- Deliberately NOT gated on profiles.is_public: that flag governs whether
+  -- the public profile PAGE is browsable, not whether someone who was handed
+  -- this duel's link may know who handed it to them. Anyone holding the key
+  -- was invited by its creator. It looks like an oversight otherwise, hence
+  -- this note.
+  --
+  -- A guest opponent has no profile and stays NULL; the client renders that
+  -- as "Guest" rather than inventing a name. LEFT JOIN semantics via a plain
+  -- scalar subquery, so a missing profile row yields NULL instead of
+  -- dropping the payload.
+  SELECT p.username INTO v_c_name
+    FROM public.profiles p WHERE p.id = v_d.creator_id;
+
+  IF v_d.opponent_id IS NOT NULL THEN
+    SELECT p.username INTO v_o_name
+      FROM public.profiles p WHERE p.id = v_d.opponent_id;
   END IF;
 
   SELECT * INTO v_c FROM public.duel_runs
@@ -564,6 +587,8 @@ BEGIN
                            THEN to_char(v_c.submitted_at AT TIME ZONE 'UTC',
                                         'YYYY-MM-DD"T"HH24:MI:SS"Z"') END,
       'score',        CASE WHEN v_reveal AND v_c_result THEN v_c.score END,
+      -- A name, not a score: it is not behind the reveal gate.
+      'username',     v_c_name,
       'is_you',       v_role = 'creator'),
     'opponent',         jsonb_build_object(
       'played',       v_o_found,
@@ -572,6 +597,8 @@ BEGIN
                            THEN to_char(v_o.submitted_at AT TIME ZONE 'UTC',
                                         'YYYY-MM-DD"T"HH24:MI:SS"Z"') END,
       'score',        CASE WHEN v_reveal AND v_o_result THEN v_o.score END,
+      -- NULL for a guest, who has no profile to name.
+      'username',     v_o_name,
       'is_you',       v_role = 'opponent')
   );
 END;

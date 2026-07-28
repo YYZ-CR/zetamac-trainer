@@ -50,6 +50,19 @@ BEGIN
     'get_duel_by_key NEVER returns questions');
   PERFORM pg_temp.ok(v::TEXT NOT LIKE '%@example.test%', 'no email leaks into the duel view');
 
+  -- Who challenged you. An invite that says "somebody sent you this duel" is
+  -- a poor thing to receive from a friend.
+  PERFORM pg_temp.ok(v->'creator'->>'username' = 'hexadecimal',
+    'the duel names its creator');
+  PERFORM pg_temp.ok(v->'opponent'->>'username' IS NULL,
+    'an unclaimed opponent side has no name');
+  -- A name is not a score, so it is NOT behind the reveal gate: the payload
+  -- names the creator while the duel is still unfinished.
+  PERFORM pg_temp.ok((v->>'scores_revealed')::BOOLEAN IS FALSE
+                 AND v->'creator'->>'username' IS NOT NULL,
+    'the creator is named before any score is revealed');
+  PERFORM pg_temp.ok(NOT (v->'creator' ? 'user_id'), 'naming a side leaks no user_id');
+
   -- The creator starts. They take `creator` and only `creator`.
   r := public.start_duel_run(k, NULL);
   PERFORM pg_temp.ok(r->>'side' = 'creator', 'the creator takes the creator side');
@@ -134,6 +147,15 @@ BEGIN
   -- The same token resumes rather than being treated as someone new.
   r := public.start_duel_run(k, 'guest-aaa');
   PERFORM pg_temp.ok(r->>'side' = 'opponent', 'the same guest token resumes');
+
+  -- A guest has no profile, so the side stays nameless rather than inventing
+  -- one. The client renders this as "Guest".
+  PERFORM pg_temp.ok(
+    public.get_duel_by_key(k, 'guest-aaa')->'opponent'->>'username' IS NULL,
+    'a guest opponent is nameless, not fabricated');
+  PERFORM pg_temp.ok(
+    public.get_duel_by_key(k, 'guest-aaa')->'creator'->>'username' = 'hexadecimal',
+    'a guest can still see who challenged them');
   SELECT COUNT(*) INTO n FROM public.duel_runs
    WHERE duel_id = (SELECT id FROM public.duels WHERE duel_key = k);
   PERFORM pg_temp.ok(n = 2, 'resuming created no extra run');
