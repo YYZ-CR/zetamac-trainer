@@ -92,8 +92,19 @@ user ids, no session keys, no dates that could identify a run.
 ### 1. Today's Daily
 
 Rank on today's puzzle. This is the most defensible board on the site: one puzzle,
-the same questions for everyone, one attempt. `get_daily_leaderboard` already exists
-and already does this — the change is presentational.
+the same questions for everyone, one attempt.
+
+**It is not a projection of `get_daily_leaderboard`.** An earlier draft said it was,
+and that turned out to make the three tabs of one page behave differently:
+`get_daily_leaderboard` uses `RANK()` and shares a rank between tied players, while
+the other two boards number with `ROW_NUMBER()` and break ties on the earlier
+submission. Two players on 8100 came back as `rank 1, rank 1` on one tab and
+`rank 1, rank 2` on the next.
+
+So this board computes its own ranking, by the same three rules as the others: the
+unnamed dropped first, `ROW_NUMBER()`, ties to the earlier `submitted_at`.
+`get_daily_leaderboard` keeps its own behaviour for its own caller — the daily page —
+and its suite still pins the shared ranks there. One page, one ranking rule.
 
 ### 2. Today's Best
 
@@ -121,10 +132,21 @@ leaderboard, and it is the one page worth landing a stranger on.
 - `p_limit` is clamped to a sane maximum server-side. A client asking for 100,000
   rows gets the maximum, not a timeout.
 - Returns `{scope, duration_seconds, generated_at, rows: [{rank, username, score}]}`.
+- `p_limit` maxes at **100**, the same ceiling `get_daily_leaderboard` uses. A client
+  can plan for that number.
 - **Never returns `user_id`, an email, a session key, a `questions` payload, or a
   row for a player with no username.** A player without a username has no name to
   show and is skipped rather than rendered as "—", which would otherwise be a row of
   anonymous placeholders at the top of a public page.
+- **The unnamed are dropped before ranking and before the limit, on every scope.**
+  Dropping them afterwards leaves a public board that opens at rank 2 with a hole in
+  it and returns fewer rows than were asked for while named players are still
+  waiting — which reads as broken software rather than as a thin board. An account
+  can reach the daily with no username: `start_daily` needs only `auth.uid()`, and
+  nothing creates a `profiles` row automatically.
+- **Every scope filters on `duration_seconds = 120`, including `daily`.** The payload
+  states 120; a board that says so without checking would mislabel a day published at
+  another duration, and `daily_puzzles.duration_seconds` is a real column.
 - A player whose profile is **private is still on the board.** The board shows a
   username and a score, which is what a leaderboard is; `is_public` governs whether
   the *profile page* is readable, and the row's name links there only when it is.
