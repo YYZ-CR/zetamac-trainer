@@ -2658,3 +2658,90 @@ body.settings-page {
   color: var(--c-ink);
   overflow-wrap: anywhere;
 }
+
+/* ── Danger zone ── */
+/* It has to look like the end of the page and not like a fifth setting. The
+   gap above it is the separation: everything up to here is reversible, and
+   nothing below it is. No new colours — --c-danger and --c-mistake-bg are the
+   two red tokens this stylesheet already defines in both themes, and a
+   hardcoded hex here would look correct in exactly one of them. */
+.panel-danger {
+  border-color: var(--c-danger);
+  margin-top: 40px;
+}
+
+.panel-danger h2 {
+  color: var(--c-danger);
+}
+
+.panel-danger .panel-note {
+  color: var(--c-danger);
+}
+
+/* Everything revealed by "Delete account", tinted with the same wash the
+   results table uses for a question you got wrong. */
+.danger-zone {
+  margin-top: 16px;
+  padding: 14px 16px;
+  background: var(--c-mistake-bg);
+  border: 1px solid var(--c-danger);
+}
+
+.danger-lead {
+  font-size: 13px;
+  font-weight: bold;
+  color: var(--c-ink);
+  margin-bottom: 8px;
+}
+
+/* The consequences, before the field rather than after it. The marker and the
+   indent are both restated because the reset at the top of this file zeroes
+   every element's padding, and every other list on the site turns the bullets
+   off — this is the one place they earn their keep. */
+.danger-list {
+  list-style: disc;
+  padding-left: 20px;
+  margin-bottom: 16px;
+}
+
+.danger-list li {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--c-ink-body);
+  margin-bottom: 6px;
+}
+
+.danger-strong {
+  color: var(--c-danger);
+  font-weight: bold;
+}
+
+.danger-prompt {
+  display: block;
+  font-size: 13px;
+  color: var(--c-ink);
+  margin-bottom: 8px;
+  /* The username can be 20 characters and this panel must not be able to grow
+     wider than the page on a phone. */
+  overflow-wrap: anywhere;
+}
+
+/* The field carries the surface colour of the panel it sits in rather than the
+   tint behind it, so it still reads as somewhere to type. */
+.danger-zone .auth-field {
+  background: var(--c-surface);
+  border-color: var(--c-danger);
+}
+
+.settings-page .btn-danger:disabled {
+  color: var(--c-ink-dim);
+  border-color: var(--c-border-soft);
+  background: none;
+  cursor: not-allowed;
+}
+
+.settings-page .btn-danger:disabled:hover {
+  color: var(--c-ink-dim);
+  background: none;
+  border-color: var(--c-border-soft);
+}

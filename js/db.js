@@ -963,3 +963,87 @@ async function setUsername(username) {
     return fail('username_unavailable');
   }
 }
+
+// ── Deleting an account ──────────────────────────────────────
+// supabase/account.sql's delete_account is the only way an account leaves this
+// site. It takes no id — the account deleted is always auth.uid() — and it
+// settles every row that mentions the caller by hand rather than letting the
+// foreign keys cascade, because two of those cascades are actively destructive
+// (a league owner would take the whole league with them, and orphaned
+// game_sessions would keep feeding everybody else's percentile).
+// docs/account-deletion.md states the fate of every row and is the contract
+// both sides are built against.
+//
+// Like set_username, and unlike the duel and league RPCs, it RETURNS its one
+// refusal rather than raising it: a confirmation that does not match is
+// something the person typing can fix, not a programming error. So the only
+// codes invented here are the transport failures.
+
+// One sentence per outcome that is not success. Every one of them has to leave
+// the reader certain about whether the account still exists — an ambiguous
+// message after a failed delete is the worst copy on the site, because the
+// obvious response to it is to try again.
+const ACCOUNT_REFUSALS = {
+  confirm_mismatch:
+    "That didn't match, so nothing was deleted. Type it exactly as shown above.",
+  account_requires_account:
+    'You are not signed in, so nothing was deleted. Log in and try again.',
+  account_missing:
+    'Account deletion is not available on this deployment yet. Your account has ' +
+    'NOT been deleted.',
+  account_unavailable:
+    "Couldn't reach the server, so your account has NOT been deleted. Nothing was " +
+    'changed — try again in a moment.',
+};
+
+// Delete the signed-in user's account. `confirmText` must be their username,
+// or the literal DELETE for an account that has none; the database compares it
+// case-insensitively after trimming and refuses anything else.
+//
+// ALWAYS returns an object and never throws:
+//
+//   { ok: true, leagues_left, leagues_deleted, leagues_transferred,
+//     duels_deleted, duel_slots_released, daily_attempts_deleted,
+//     sessions_deleted }
+//   { ok: false, error }   — a key of ACCOUNT_REFUSALS.
+//
+// The caller must sign out immediately on ok:true. The account row is gone but
+// the access token this browser is holding stays valid until it expires, so a
+// page that only redirects leaves a live session behind.
+async function deleteAccount(confirmText) {
+  const fail = (code) => ({ ok: false, error: code });
+
+  if (!dbReady()) return fail('account_unavailable');
+
+  try {
+    const { data, error } = await supabaseClient.rpc('delete_account', {
+      p_confirm: String(confirmText ?? ''),
+    });
+
+    if (error) {
+      // The refusal arrives in `data`, so an `error` here means the call never
+      // happened: the migration is not applied, or the network is gone.
+      // PostgREST reports an absent function as PGRST202.
+      const blob = [error.message, error.details, error.hint, error.code]
+        .filter(v => typeof v === 'string')
+        .join(' ');
+      console.warn('delete_account:', error.message);
+      return fail(/PGRST202|schema cache|does not exist|could not find the function/i.test(blob)
+        ? 'account_missing'
+        : 'account_unavailable');
+    }
+
+    const row = unwrapRpc(data);
+    if (!row || typeof row !== 'object') return fail('account_unavailable');
+
+    if (row.ok === true) return Object.assign({}, row, { ok: true, error: null });
+
+    // An unrecognised code is still a refusal, and the account still exists —
+    // account_unavailable is the sentence that says so.
+    const code = row.error && ACCOUNT_REFUSALS[row.error] ? row.error : 'account_unavailable';
+    return fail(code);
+  } catch (e) {
+    console.warn('delete_account threw:', e);
+    return fail('account_unavailable');
+  }
+}

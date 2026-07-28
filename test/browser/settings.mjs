@@ -34,9 +34,12 @@ const longDate = (ms) => new Date(ms).toLocaleDateString('en-US', {
 });
 
 // ── The stub ────────────────────────────────────────────────────
-// cfg: { user, profile, setUsername, updateFails }
-//   setUsername — the JSONB set_username would return, or {__error:'…'} to
-//                 make the RPC itself fail (migration not applied).
+// cfg: { user, profile, setUsername, deleteAccount, updateFails }
+//   setUsername   — the JSONB set_username would return, or {__error:'…'} to
+//                   make the RPC itself fail (migration not applied).
+//   deleteAccount — the JSONB delete_account would return, or {__error:'…'}
+//                   for a PostgREST error, or {__throw:'…'} to make the call
+//                   itself throw the way a dead network does.
 const SUPA = (cfg) => `(function(){
 const CFG = ${JSON.stringify(cfg)};
 const REC = '__calls';
@@ -86,6 +89,12 @@ window.supabase = { createClient: () => ({
       if (r && r.__error) return { data: null, error: { message: r.__error } };
       return { data: r || null, error: null };
     }
+    if (n === 'delete_account') {
+      const r = CFG.deleteAccount;
+      if (r && r.__throw) throw new Error(r.__throw);
+      if (r && r.__error) return { data: null, error: { message: r.__error } };
+      return { data: r || null, error: null };
+    }
     return { data: null, error: { message: 'no fn' } };
   },
 })};
@@ -119,6 +128,19 @@ const shot = (p, name, theme) =>
   p.screenshot({ path: `${SHOTS}/settings-${name}-${theme}.png`, fullPage: true });
 
 const USER = { id: 'u1', email: 'yang@example.test' };
+
+// The Danger zone is collapsed until it is asked for, so every assertion about
+// it starts here. The wait is for the reveal, which is synchronous — 150ms is
+// slack, not a race.
+async function openDanger(p) {
+  await p.click('#danger-open-btn');
+  await p.waitForTimeout(150);
+}
+
+// textContent across a block of hand-wrapped HTML arrives full of newlines and
+// indentation. Every copy assertion below is on the sentence, not the source
+// formatting.
+const flat = (s) => String(s).replace(/\s+/g, ' ').trim();
 
 // Every block below runs once per theme.
 for (const theme of ['zetamac', 'dark']) {
@@ -453,6 +475,21 @@ for (const theme of ['zetamac', 'dark']) {
        'profile.html?u=' + encodeURIComponent(NASTY),
        'the href is percent-encoded, not interpolated raw');
 
+    // The Danger zone prints the username back as the string to type, which is
+    // the second place on this page that puts it into innerHTML.
+    await openDanger(p);
+    ok((await p.evaluate(() => window.__xss)) === undefined,
+       'the Danger zone did not execute it either');
+    ok((await p.$('#danger-prompt img')) === null,
+       'the confirmation prompt did not become an element');
+    ok(flat(await p.textContent('#danger-prompt')) ===
+       'To confirm, type ' + flat(NASTY) + ' in the box below.',
+       'it asks for the name verbatim, as text');
+    await p.fill('#danger-input', NASTY);
+    await p.waitForTimeout(80);
+    ok(await p.isEnabled('#danger-delete-btn'),
+       'and typing it out still confirms — escaping is for rendering, not comparing');
+
     ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
     await shot(p, 'hostile-username', theme);
     await ctx.close();
@@ -517,6 +554,332 @@ for (const theme of ['zetamac', 'dark']) {
     ok(calls.some(([k]) => k === 'signOut'), 'Log out signs out');
     ok(/\/index\.html$/.test(p.url()),
        'and leaves for the home page rather than sitting on a dead settings page');
+
+    ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+    await ctx.close();
+  }
+
+  // ── Danger zone: collapsed, and what it says when opened ──────
+  console.log('[danger zone stays shut until it is asked for]');
+  {
+    const { ctx, p, errs } = await open({
+      user: USER,
+      profile: { id: 'u1', username: 'yang_z', is_public: false, username_changed_at: null },
+    }, theme);
+
+    ok(await p.isVisible('#danger-panel'), 'the Danger zone panel is on the page');
+    ok(!(await p.isVisible('#danger-zone')),
+       'but nothing destructive is shown until it is opened');
+    ok(!(await p.isVisible('#danger-input')), 'no confirmation field is offered yet');
+    ok(!(await p.isEnabled('#danger-delete-btn')),
+       'and the delete button is disabled on load');
+
+    // Last on the page: everything above it can be undone, and it cannot.
+    ok(await p.evaluate(() => {
+         const panels = [...document.querySelectorAll('#settings-signed-in > .panel')];
+         return panels[panels.length - 1].id === 'danger-panel';
+       }),
+       'it is the last panel on the page');
+
+    await openDanger(p);
+    ok(await p.isVisible('#danger-zone'), 'clicking "Delete account" opens it');
+    ok(!(await p.isVisible('#danger-open-btn')),
+       'and the button that opened it is gone, so there is one delete control, not two');
+    ok(!(await p.isEnabled('#danger-delete-btn')),
+       'the delete button is still disabled with an empty field');
+
+    const said = flat(await p.textContent('#danger-zone'));
+    ok(said.includes('every score you have saved is deleted'),
+       'it says the scores go');
+    ok(said.includes('every Zetamac Daily attempt'),
+       'it says the daily attempts go');
+    ok(said.includes('including past days'),
+       'it says past daily leaderboards too, not just today');
+    ok(said.includes('you leave every league you are in'),
+       'it says leagues are left');
+    ok(said.includes('handed to its longest-standing remaining member'),
+       'it names who an owned league goes to');
+    ok(said.includes('if you were its only member, the league is deleted with you'),
+       'and what happens when there is nobody to hand it to');
+    ok(said.includes('duels you created are deleted'),
+       'it says duels you created go');
+    ok(said.includes('your username is released'),
+       'it says the username is freed');
+    ok(said.includes('this cannot be undone'),
+       'it says it cannot be undone');
+
+    // The consequences are read on the way to the field, not after it.
+    ok(await p.evaluate(() => {
+         const list  = document.querySelector('#danger-zone .danger-list');
+         const field = document.getElementById('danger-input');
+         return !!(list.compareDocumentPosition(field) & Node.DOCUMENT_POSITION_FOLLOWING);
+       }),
+       'the consequences come before the confirmation field');
+
+    ok(flat(await p.textContent('#danger-prompt')) ===
+       'To confirm, type yang_z in the box below.',
+       'the page states the exact string to type');
+
+    // Cancel puts it back, so an accidental open is not a dead end.
+    await p.click('#danger-cancel-btn');
+    await p.waitForTimeout(150);
+    ok(!(await p.isVisible('#danger-zone')), 'Cancel closes it again');
+    ok(await p.isVisible('#danger-open-btn'), 'and brings back the opening button');
+
+    ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+    await shot(p, 'danger-closed', theme);
+    await ctx.close();
+  }
+
+  // ── Danger zone: the confirmation gate ────────────────────────
+  console.log('[the delete button follows the confirmation field exactly]');
+  {
+    const { ctx, p, errs } = await open({
+      user: USER,
+      profile: { id: 'u1', username: 'yang_z', is_public: false, username_changed_at: null },
+    }, theme);
+    await openDanger(p);
+
+    const typed = async (v) => {
+      await p.fill('#danger-input', v);
+      await p.waitForTimeout(80);
+      return p.isEnabled('#danger-delete-btn');
+    };
+
+    ok((await typed('yang')) === false, 'a prefix of the username does not confirm');
+    ok((await typed('yang_z2')) === false, 'the username with something after it does not');
+    ok((await typed('DELETE')) === false,
+       'DELETE does not confirm an account that HAS a username');
+    ok((await typed('')) === false, 'an empty field does not');
+    ok((await typed('yang_z')) === true, 'the username exactly does');
+    ok((await typed('  yang_z  ')) === true,
+       'surrounding whitespace is trimmed, as the server trims it');
+    ok((await typed('YANG_Z')) === true,
+       'and case is folded, as the server folds it');
+    ok((await typed('  YaNg_Z ')) === true, 'both at once');
+    ok((await typed('yang')) === false,
+       'and it goes back to disabled when the match is broken again');
+
+    // Nothing has been sent while all of that was typed.
+    const calls = await p.evaluate(() => window.__calls());
+    ok(!calls.some(([k, v]) => k === 'rpc' && v[0] === 'delete_account'),
+       'nothing was sent while the field was being typed into');
+    ok(!calls.some(([k]) => k === 'signOut'), 'and nothing signed anybody out');
+
+    await p.fill('#danger-input', 'yang_z');
+    await p.waitForTimeout(80);
+    ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+    await shot(p, 'danger-open', theme);
+    await ctx.close();
+  }
+
+  // ── Danger zone: a delete that works ──────────────────────────
+  // The assertion that matters here is the pair: signed out AND gone. A delete
+  // that navigates without signing out leaves this browser holding a valid JWT
+  // for an account that no longer exists.
+  console.log('[a successful delete signs out and leaves]');
+  {
+    const { ctx, p, errs } = await open({
+      user: USER,
+      profile: { id: 'u1', username: 'yang_z', is_public: false, username_changed_at: null },
+      deleteAccount: { ok: true, leagues_left: 3, leagues_deleted: 1,
+                       leagues_transferred: 1, duels_deleted: 4,
+                       duel_slots_released: 1, daily_attempts_deleted: 12,
+                       sessions_deleted: 240 },
+    }, theme);
+    await openDanger(p);
+
+    await p.fill('#danger-input', '  YANG_Z  ');
+    await p.waitForTimeout(80);
+    ok(await p.isEnabled('#danger-delete-btn'), 'the button is armed');
+    await p.click('#danger-delete-btn');
+    await p.waitForTimeout(600);
+
+    const calls = await p.evaluate(() => window.__calls());
+    const rpc   = calls.find(([k, v]) => k === 'rpc' && v[0] === 'delete_account');
+    ok(!!rpc, 'it calls delete_account');
+    ok(rpc && rpc[1][1].p_confirm === 'YANG_Z',
+       'it sends the typed confirmation, trimmed');
+    ok(rpc && !('p_user' in rpc[1][1]) && !('p_id' in rpc[1][1]),
+       'and sends no id — the account deleted is the caller, decided server-side');
+
+    ok(calls.some(([k]) => k === 'signOut'), 'it signs out');
+    ok(calls.findIndex(([k]) => k === 'signOut') >
+       calls.findIndex(([k, v]) => k === 'rpc' && v[0] === 'delete_account'),
+       'and does it after the delete, not instead of it');
+    ok(/\/index\.html$/.test(p.url()),
+       'and the page leaves for the home page');
+
+    ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+    await ctx.close();
+  }
+
+  // ── Danger zone: the server disagrees about the confirmation ──
+  // Reachable in real life: the username changed in another tab, so the string
+  // this page is asking for is no longer the one the database will accept.
+  console.log('[confirm_mismatch stays put and says so]');
+  {
+    const { ctx, p, errs } = await open({
+      user: USER,
+      profile: { id: 'u1', username: 'yang_z', is_public: false, username_changed_at: null },
+      deleteAccount: { ok: false, error: 'confirm_mismatch' },
+    }, theme);
+    await openDanger(p);
+
+    await p.fill('#danger-input', 'yang_z');
+    await p.waitForTimeout(80);
+    await p.click('#danger-delete-btn');
+    await p.waitForTimeout(400);
+
+    ok((await p.textContent('#danger-error')) ===
+       "That didn't match, so nothing was deleted. Type it exactly as shown above.",
+       'it says nothing was deleted and what to do about it');
+    ok(/\/settings\.html$/.test(p.url()), 'the page has not gone anywhere');
+    const calls = await p.evaluate(() => window.__calls());
+    ok(!calls.some(([k]) => k === 'signOut'),
+       'and nobody was signed out of an account that still exists');
+    ok(await p.isVisible('#danger-zone'), 'the zone is still open');
+    ok(await p.isEnabled('#danger-input'), 'the field is usable again');
+    ok(await p.isEnabled('#danger-delete-btn'), 'and the button can be tried again');
+    ok((await p.inputValue('#danger-input')) === 'yang_z',
+       'what was typed is still there');
+    ok((await p.textContent('#danger-status')) === '',
+       'and nothing claims the delete is in progress');
+
+    ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+    await shot(p, 'danger-mismatch', theme);
+    await ctx.close();
+  }
+
+  // ── Danger zone: the server says there is no caller ───────────
+  console.log('[a session the server does not recognise deletes nothing]');
+  {
+    const { ctx, p, errs } = await open({
+      user: USER,
+      profile: { id: 'u1', username: 'yang_z', is_public: false, username_changed_at: null },
+      deleteAccount: { ok: false, error: 'account_requires_account' },
+    }, theme);
+    await openDanger(p);
+
+    await p.fill('#danger-input', 'yang_z');
+    await p.waitForTimeout(80);
+    await p.click('#danger-delete-btn');
+    await p.waitForTimeout(400);
+
+    ok((await p.textContent('#danger-error')) ===
+       'You are not signed in, so nothing was deleted. Log in and try again.',
+       'it says nothing was deleted');
+    ok(/\/settings\.html$/.test(p.url()), 'the page has not gone anywhere');
+    const calls = await p.evaluate(() => window.__calls());
+    ok(!calls.some(([k]) => k === 'signOut'), 'and nobody was signed out');
+
+    ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+    await ctx.close();
+  }
+
+  // ── Danger zone: the call never lands ─────────────────────────
+  console.log('[a failed call says the account was NOT deleted]');
+  {
+    for (const [label, cfgDelete, expected] of [
+      ['thrown', { __throw: 'Failed to fetch' },
+       "Couldn't reach the server, so your account has NOT been deleted. Nothing was " +
+       'changed — try again in a moment.'],
+      ['migration missing',
+       { __error: 'Could not find the function public.delete_account in the schema cache' },
+       'Account deletion is not available on this deployment yet. Your account has ' +
+       'NOT been deleted.'],
+    ]) {
+      const { ctx, p, errs } = await open({
+        user: USER,
+        profile: { id: 'u1', username: 'yang_z', is_public: false, username_changed_at: null },
+        deleteAccount: cfgDelete,
+      }, theme);
+      await openDanger(p);
+
+      await p.fill('#danger-input', 'yang_z');
+      await p.waitForTimeout(80);
+      await p.click('#danger-delete-btn');
+      await p.waitForTimeout(400);
+
+      const said = await p.textContent('#danger-error');
+      ok(said === expected, `${label}: it says ${expected}`);
+      ok(/NOT been deleted/.test(said),
+         `${label}: the copy is unambiguous that the account survives`);
+      ok(/\/settings\.html$/.test(p.url()), `${label}: the page has not gone anywhere`);
+      const calls = await p.evaluate(() => window.__calls());
+      ok(!calls.some(([k]) => k === 'signOut'),
+         `${label}: nobody was signed out`);
+      ok(await p.isEnabled('#danger-delete-btn'),
+         `${label}: the delete can be retried`);
+      ok((await p.textContent('#danger-delete-btn')) === 'Delete my account',
+         `${label}: the button stops saying it is deleting`);
+
+      ok(errs.length === 0, `${label}: no uncaught errors (` + (errs[0] ?? '') + ')');
+      await ctx.close();
+    }
+  }
+
+  // ── Danger zone: an account with no username ──────────────────
+  console.log('[an account with no username confirms with DELETE]');
+  {
+    const { ctx, p, errs } = await open({
+      user: USER, profile: null,
+      deleteAccount: { ok: true, leagues_left: 0, leagues_deleted: 0,
+                       leagues_transferred: 0, duels_deleted: 0,
+                       duel_slots_released: 0, daily_attempts_deleted: 0,
+                       sessions_deleted: 7 },
+    }, theme);
+    await openDanger(p);
+
+    ok(flat(await p.textContent('#danger-prompt')) ===
+       'To confirm, type DELETE in the box below.',
+       'it asks for the literal DELETE');
+
+    await p.fill('#danger-input', 'yang_z');
+    await p.waitForTimeout(80);
+    ok(!(await p.isEnabled('#danger-delete-btn')),
+       'a name this account does not have confirms nothing');
+
+    await p.fill('#danger-input', ' delete ');
+    await p.waitForTimeout(80);
+    ok(await p.isEnabled('#danger-delete-btn'),
+       'DELETE confirms it, trimmed and case-folded like everything else');
+
+    await p.click('#danger-delete-btn');
+    await p.waitForTimeout(600);
+    const calls = await p.evaluate(() => window.__calls());
+    const rpc = calls.find(([k, v]) => k === 'rpc' && v[0] === 'delete_account');
+    ok(rpc && rpc[1][1].p_confirm === 'delete', 'it sends what was typed, trimmed');
+    ok(calls.some(([k]) => k === 'signOut'), 'it signs out');
+    ok(/\/index\.html$/.test(p.url()), 'and leaves for the home page');
+
+    ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+    await ctx.close();
+  }
+
+  // ── Danger zone: claiming a name moves the string to type ─────
+  console.log('[the confirmation string follows the username]');
+  {
+    const { ctx, p, errs } = await open({
+      user: USER, profile: null,
+      setUsername: { ok: true, username: 'yang_z', error: null,
+                     next_change_allowed_at: null },
+    }, theme);
+    await openDanger(p);
+
+    await p.fill('#danger-input', 'DELETE');
+    await p.waitForTimeout(80);
+    ok(await p.isEnabled('#danger-delete-btn'), 'DELETE confirms while there is no name');
+
+    await p.fill('#username-input', 'yang_z');
+    await p.click('#username-save-btn');
+    await p.waitForTimeout(400);
+
+    ok(flat(await p.textContent('#danger-prompt')) ===
+       'To confirm, type yang_z in the box below.',
+       'claiming a username changes the string the Danger zone asks for');
+    ok(!(await p.isEnabled('#danger-delete-btn')),
+       'and what was already typed no longer confirms anything');
 
     ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
     await ctx.close();
