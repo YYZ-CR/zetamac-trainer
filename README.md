@@ -75,8 +75,15 @@ played in stay and show you as a deleted account, and your username is released.
 
 **A first-run walkthrough.** A first visit to the home page opens a six-step tour of
 everything above — the analysis, practice mode, the daily, duels, leagues and the
-profile — because all of it sits *behind* a run the visitor has not done yet. It is
-shown once and closes five ways (Esc, ×, Skip, the backdrop, or finishing), every one
+profile — because all of it sits *behind* a run the visitor has not done yet.
+
+Each step **spotlights the control it is describing**: the rest of the page darkens,
+the target is outlined, and the panel sits beside it with a caret pointing at it. A
+step whose target is missing, hidden or off-screen falls back to a plain centred
+panel rather than ringing empty space — the nav is built from the session, so that
+case is real rather than theoretical.
+
+It is shown once and closes five ways (Esc, ×, Skip, the backdrop, or finishing), every one
 of which counts as seen, and it is offered again from "How this works" in the footer.
 "Seen it" is a `localStorage` key holding the tour's version, so bumping that version
 shows a materially changed tour again; the cost is that it reappears on a second

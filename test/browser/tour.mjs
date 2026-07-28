@@ -15,7 +15,14 @@
 //   #tour-counter   "N / M"
 //   #tour-back  #tour-next  #tour-skip  #tour-close   the controls
 //   #tour-link      the footer "How this works" link, which re-opens it
+//   #tour-hole      the spotlight, present ONLY for a step with a live target
+//   #tour-caret     the panel's pointer, present ONLY when it points at one
 //   localStorage['zt_tour_seen'] === TOUR_VERSION means seen
+//
+// Sections 9-13 cover the spotlight. Every geometric assertion there reads both
+// rects out of the live DOM and compares them to each other — never against a
+// number copied from the CSS, which would pass just as happily if the hole were
+// pinned to the wrong element at the right size.
 import { chromium } from 'playwright';
 import fs from 'fs';
 
@@ -69,8 +76,11 @@ const WATCH = `(() => {
   obs.observe(document.documentElement || document, { childList: true, subtree: true });
 })();`;
 
-async function newContext(browser, { theme = 'dark', seen = undefined } = {}) {
-  const ctx = await browser.newContext({ viewport: { width: 1100, height: 900 } });
+const DESKTOP = { width: 1100, height: 900 };
+const MOBILE  = { width: 390,  height: 844 };
+
+async function newContext(browser, { theme = 'dark', seen = undefined, viewport = DESKTOP } = {}) {
+  const ctx = await browser.newContext({ viewport });
   await ctx.route('**/cdn.jsdelivr.net/**', r =>
     r.fulfill({ status: 200, contentType: 'application/javascript', body: CDN }));
   // Seeded once, on the FIRST navigation only. An init script runs on every
@@ -103,17 +113,53 @@ const stored  = page => page.evaluate(k => localStorage.getItem(k), KEY);
 const counter = page => page.textContent('#tour-counter');
 const heading = page => page.textContent('#tour-heading');
 
+// Live geometry, read at the moment of the assertion. Rounded to a tenth so a
+// sub-pixel layout difference does not read as a failure while a genuine
+// mis-anchoring of even two pixels still does.
+const rectOf = (page, sel) => page.evaluate(s => {
+  const el = document.querySelector(s);
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  const n = v => Math.round(v * 10) / 10;
+  return { x: n(r.left), y: n(r.top), w: n(r.width), h: n(r.height) };
+}, sel);
+
+// The spotlight has to sit on the target, not merely be the right size. Both
+// rects come from the DOM; only the padding comes from the page's own constant.
+function holeMatches(hole, target, pad, tol = 2) {
+  if (!hole || !target) return false;
+  return Math.abs(hole.x - (target.x - pad))        <= tol &&
+         Math.abs(hole.y - (target.y - pad))        <= tol &&
+         Math.abs(hole.w - (target.w + pad * 2))    <= tol &&
+         Math.abs(hole.h - (target.h + pad * 2))    <= tol;
+}
+
+const fmt = r => r ? `${r.x},${r.y} ${r.w}x${r.h}` : 'none';
+
+// Walk to a step from wherever the tour currently is. Steps are only reachable
+// by pressing Next, which is also what a person does, so the spotlight is being
+// asserted against the same code path they exercise.
+async function goToStep(page, n) {
+  for (let i = 1; i < n; i++) await page.click('#tour-next');
+  await page.waitForTimeout(250);   // scroll + the two settle frames
+}
+
 (async () => {
   fs.mkdirSync(SHOTS, { recursive: true });
   const browser = await chromium.launch(EXE ? { executablePath: EXE } : {});
 
   // The step array is the source of truth for everything below.
-  let STEPS = [];
+  let STEPS = [], TARGETS = [], HOLE_PAD = 0;
   {
     const ctx = await newContext(browser);
     const { page } = await open(ctx);
-    STEPS   = await page.evaluate(() => TOUR_STEPS.map(s => s.title));
-    const V = await page.evaluate(() => TOUR_VERSION);
+    STEPS    = await page.evaluate(() => TOUR_STEPS.map(s => s.title));
+    TARGETS  = await page.evaluate(() => TOUR_STEPS.map(s => s.target || null));
+    HOLE_PAD = await page.evaluate(() => TOUR_HOLE_PAD);
+    const V  = await page.evaluate(() => TOUR_VERSION);
+    console.log(`[targets] ${TARGETS.map((t, i) => `${i + 1}:${t ?? '(none)'}`).join('  ')}`);
+    ok(typeof HOLE_PAD === 'number' && HOLE_PAD > 0,
+       `TOUR_HOLE_PAD is a positive number (${HOLE_PAD}) — the spotlight's breathing room`);
     console.log(`[step array] TOUR_VERSION=${V}, ${STEPS.length} steps: ${STEPS.join(' | ')}`);
     ok(Array.isArray(STEPS) && STEPS.length === 6,
        `the step array holds exactly six steps (got ${STEPS.length}) — a seventh is a decision, not an accident`);
@@ -404,6 +450,194 @@ const heading = page => page.textContent('#tour-heading');
     ok(tourBlock.length > 0, 'the stylesheet has tour rules');
     const hexes = (tourBlock.match(/#[0-9a-fA-F]{3,8}\b/g) || []).filter(h => !/^#tour/.test(h));
     ok(hexes.length === 0, `no hardcoded hex in the tour's CSS (found ${hexes.join(', ')})`);
+  }
+
+  // ── 9. The hole sits on the target it is describing ──────────
+  // Both rects out of the live DOM. A hole of the right size in the wrong place
+  // is the failure mode this whole section exists for, so every assertion
+  // compares position as well as size.
+  {
+    console.log('[9. the spotlight lands on its target]');
+    for (const theme of ['zetamac', 'dark']) {
+      const ctx = await newContext(browser, { theme });
+      const { page, errors } = await open(ctx);
+
+      let previous = null;
+      for (let i = 0; i < STEPS.length; i++) {
+        if (i > 0) { await page.click('#tour-next'); await page.waitForTimeout(250); }
+        const sel = TARGETS[i];
+        if (!sel) continue;
+        const target = await rectOf(page, sel);
+        const hole   = await rectOf(page, '#tour-hole');
+        ok(target !== null, `${theme}: step ${i + 1}'s target resolves (${sel})`);
+        ok(hole !== null, `${theme}: step ${i + 1} draws a hole`);
+        ok(holeMatches(hole, target, HOLE_PAD),
+           `${theme}: step ${i + 1}'s hole is on ${sel} — hole ${fmt(hole)} vs target ${fmt(target)}`);
+        // Requirement 2: Next moves it. Without this, a hole that never updated
+        // would satisfy the match above on step 1 and silently fail thereafter.
+        if (previous) ok(Math.abs(hole.x - previous.x) > 2 || Math.abs(hole.y - previous.y) > 2,
+                         `${theme}: step ${i + 1}'s hole moved off step ${i}'s target`);
+        previous = hole;
+      }
+
+      // The hole is decoration: it must not eat the click that dismisses.
+      const pe = await page.evaluate(() =>
+        getComputedStyle(document.getElementById('tour-hole')).pointerEvents);
+      ok(pe === 'none', `${theme}: the hole is pointer-events:none (${pe})`);
+      const holeRect = await rectOf(page, '#tour-hole');
+      await page.mouse.click(Math.round(holeRect.x + holeRect.w / 2),
+                             Math.round(holeRect.y + holeRect.h / 2));
+      await page.waitForTimeout(150);
+      ok(!(await shown(page)), `${theme}: a click on the lit target still dismisses the tour`);
+      ok((await stored(page)) === (await page.evaluate(() => TOUR_VERSION)),
+         `${theme}: and that dismissal marks it seen like any other`);
+      ok(errors.length === 0, `${theme}: no uncaught page errors (${errors[0] ?? ''})`);
+      await ctx.close();
+    }
+  }
+
+  // ── 10. A step with no target is the old centred layout ──────
+  {
+    console.log('[10. a step with no target]');
+    const ctx = await newContext(browser);
+    const { page, errors } = await open(ctx);
+    // Take the target away from step 1 and re-render it: the data model has to
+    // allow a step with none, and that step is the pre-spotlight behaviour.
+    await page.evaluate(() => { delete TOUR_STEPS[0].target; tourGo(0); });
+    await page.waitForTimeout(400);
+    ok(await shown(page), 'the tour is still up');
+    ok(!(await page.evaluate(() => !!document.getElementById('tour-hole'))),
+       'a step with no target renders NO hole element at all');
+    ok(!(await page.evaluate(() => !!document.getElementById('tour-caret'))),
+       'and no caret');
+    ok(!(await page.evaluate(() =>
+          document.querySelector('.tour-modal').classList.contains('tour-modal--anchored'))),
+       'and the panel is not anchored — it is the centred layout');
+    const centred = await page.evaluate(() => {
+      const r = document.querySelector('.tour-modal').getBoundingClientRect();
+      const vw = document.documentElement.clientWidth, vh = document.documentElement.clientHeight;
+      return { dx: Math.abs((r.left + r.right) / 2 - vw / 2),
+               dy: Math.abs((r.top + r.bottom) / 2 - vh / 2) };
+    });
+    ok(centred.dx < 3 && centred.dy < 3,
+       `and it really is centred (off by ${Math.round(centred.dx)}, ${Math.round(centred.dy)})`);
+    ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
+    await ctx.close();
+  }
+
+  // ── 11. A target that cannot be resolved ─────────────────────
+  // The nav is built by js/auth.js off a session lookup, so "the target is not
+  // there" is the normal case for a fraction of a second and a permanent one if
+  // the markup ever moves. Forced here by deleting the element first.
+  {
+    console.log('[11. an unresolvable target]');
+    const ctx = await newContext(browser);
+    const { page, errors } = await open(ctx);
+    const sel = TARGETS.find(t => t);
+    ok(!!sel, 'at least one step names a target');
+
+    await page.click('#tour-close');
+    await page.waitForTimeout(120);
+    await page.evaluate(s => { const el = document.querySelector(s); if (el) el.remove(); }, sel);
+    ok((await rectOf(page, sel)) === null, `${sel} is gone from the page`);
+
+    await page.click('#tour-link');
+    // Longer than the resolve window: the point is that it gives up and stays
+    // centred rather than retrying forever or drawing a hole around nothing.
+    await page.waitForTimeout(1200);
+    ok(await shown(page), 'the tour still opens with its target missing');
+    ok((await heading(page)).trim() === STEPS[0], 'on step 1');
+    ok(!(await page.evaluate(() => !!document.getElementById('tour-hole'))),
+       'no hole is drawn around the element that is not there');
+    ok(!(await page.evaluate(() => !!document.getElementById('tour-caret'))),
+       'and no caret is drawn pointing at it');
+    ok(!(await page.evaluate(() =>
+          document.querySelector('.tour-modal').classList.contains('tour-modal--anchored'))),
+       'the panel falls back to centred');
+    // And the step after it, whose target is still there, still spotlights.
+    await page.click('#tour-next');
+    await page.waitForTimeout(300);
+    if (TARGETS[1]) {
+      const t = await rectOf(page, TARGETS[1]);
+      const h = await rectOf(page, '#tour-hole');
+      ok(holeMatches(h, t, HOLE_PAD),
+         `a missing target on step 1 does not break step 2's spotlight (${fmt(h)} vs ${fmt(t)})`);
+    }
+    ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
+    await ctx.close();
+  }
+
+  // ── 12. The panel is never clipped ───────────────────────────
+  // Desktop and a narrow phone. On the phone some steps legitimately fall back
+  // to the centred layout — the header does not wrap, so its left-most link can
+  // be off the left edge — and that is fine; being inside the viewport is not.
+  {
+    console.log('[12. the panel stays in the viewport]');
+    for (const [label, viewport] of [['desktop', DESKTOP], ['mobile', MOBILE]]) {
+      const ctx = await newContext(browser, { viewport });
+      const { page, errors } = await open(ctx);
+      for (let i = 0; i < STEPS.length; i++) {
+        if (i > 0) { await page.click('#tour-next'); await page.waitForTimeout(250); }
+        const fit = await page.evaluate(() => {
+          const r  = document.querySelector('.tour-modal').getBoundingClientRect();
+          const vw = document.documentElement.clientWidth;
+          const vh = document.documentElement.clientHeight;
+          return { ok: r.left >= -0.5 && r.top >= -0.5 && r.right <= vw + 0.5 && r.bottom <= vh + 0.5,
+                   r: [Math.round(r.left), Math.round(r.top), Math.round(r.right), Math.round(r.bottom)],
+                   vw, vh };
+        });
+        ok(fit.ok, `${label}: step ${i + 1}'s panel is fully inside the viewport ` +
+                   `(${fit.r.join(',')} in ${fit.vw}x${fit.vh})`);
+        // A caret is only ever drawn when there is a hole for it to point at.
+        const pair = await page.evaluate(() => ({
+          hole:  !!document.getElementById('tour-hole'),
+          caret: !!document.getElementById('tour-caret'),
+        }));
+        ok(!pair.caret || pair.hole,
+           `${label}: step ${i + 1} never has a caret without a hole`);
+      }
+      ok(errors.length === 0, `${label}: no uncaught page errors (${errors[0] ?? ''})`);
+      await ctx.close();
+    }
+  }
+
+  // ── 13. Resize and scroll keep the hole on the target ────────
+  {
+    console.log('[13. resize and scroll]');
+    const ctx = await newContext(browser);
+    const { page, errors } = await open(ctx);
+    const step = TARGETS.findIndex(t => t) + 1;
+    await goToStep(page, step);
+
+    const before = await rectOf(page, '#tour-hole');
+    ok(before !== null, `step ${step} starts with a hole (${fmt(before)})`);
+
+    await page.setViewportSize({ width: 780, height: 700 });
+    await page.waitForTimeout(300);
+    const t1 = await rectOf(page, TARGETS[step - 1]);
+    const h1 = await rectOf(page, '#tour-hole');
+    ok(h1 !== null, 'the hole survives a resize');
+    ok(holeMatches(h1, t1, HOLE_PAD),
+       `after a resize the hole is still on its target (${fmt(h1)} vs ${fmt(t1)})`);
+    // The target moved, so a hole that had simply been left alone would fail.
+    ok(Math.abs(h1.x - before.x) > 2 || Math.abs(h1.y - before.y) > 2,
+       'and it actually moved with the target rather than being left behind');
+
+    // Scrolling the page underneath it must do the same. Short enough that the
+    // document genuinely scrolls — at a taller viewport this whole page fits and
+    // scrollBy() is a no-op, which would make the assertion below prove nothing.
+    await page.setViewportSize({ width: 780, height: 420 });
+    await page.waitForTimeout(250);
+    await page.evaluate(() => window.scrollBy(0, 100));
+    await page.waitForTimeout(300);
+    const sy = await page.evaluate(() => window.scrollY);
+    ok(sy > 0, `the page really scrolled (scrollY ${sy}) — a no-op scroll would prove nothing`);
+    const t2 = await rectOf(page, TARGETS[step - 1]);
+    const h2 = await rectOf(page, '#tour-hole');
+    ok(holeMatches(h2, t2, HOLE_PAD),
+       `after a scroll the hole is still on its target (${fmt(h2)} vs ${fmt(t2)})`);
+    ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
+    await ctx.close();
   }
 
   await browser.close();

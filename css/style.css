@@ -3003,6 +3003,55 @@ body.settings-page {
   .tour-modal { animation: none; }
 }
 
+/* ── The spotlight ──
+   A step that names a target darkens everything except that element. The
+   darkness is the hole's own box-shadow, spread far enough to cover any
+   viewport, which is what makes the hole genuinely transparent rather than a
+   lighter patch of scrim over the page. The overlay therefore drops its own
+   flat background whenever a hole is lit, or the two would stack and the hole
+   would be dimmed by the layer that is supposed to be missing there. */
+.tour-overlay--spot {
+  background: none;
+}
+
+.tour-hole {
+  position: absolute;
+  /* The tour is a description, not an interactive product tour: a highlighted
+     button you can half-click would be worse than no highlight. Clicks land on
+     the overlay underneath and dismiss, exactly as a backdrop click always has. */
+  pointer-events: none;
+  box-shadow: 0 0 0 9999px var(--c-scrim-dark);
+  outline: 2px solid var(--c-accent);
+  outline-offset: 0;
+}
+
+/* Anchored: the panel is placed by js/tour.js in viewport coordinates rather
+   than centred by the overlay's flex. The width is fixed here rather than left
+   at 100% so the placement code measures the same box it positions. */
+.tour-modal--anchored {
+  position: absolute;
+  width: min(380px, calc(100% - 24px));
+  max-width: none;
+  z-index: 1;
+}
+
+/* A square rotated 45°, with only the two borders that meet at the pointing
+   corner kept, so it reads as a triangle with the panel's own outline. Its
+   inner half covers the panel border it sits on. */
+.tour-caret {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  transform: rotate(45deg);
+}
+
+.tour-caret--up    { top: -6px;    border-right: none;  border-bottom: none; }
+.tour-caret--down  { bottom: -6px; border-left: none;   border-top: none; }
+.tour-caret--left  { left: -6px;   border-top: none;    border-right: none; }
+.tour-caret--right { right: -6px;  border-bottom: none; border-left: none; }
+
 .tour-eyebrow {
   font-size: 11px;
   letter-spacing: 0.08em;
