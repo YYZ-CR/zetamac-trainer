@@ -2591,11 +2591,18 @@ body.settings-page {
   border-color: var(--c-border-soft);
 }
 
+/* A refusal sits directly under the rules it broke, and needs air between the
+   two or it reads as a fourth line of the rules. */
+.settings-page .auth-error {
+  margin-top: 8px;
+}
+
 /* ── Radio choices (theme) ── */
 .settings-choices {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  margin-bottom: 14px;
 }
 
 .settings-choice {

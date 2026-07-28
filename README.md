@@ -35,15 +35,21 @@ being 4,000th behind strangers.
 
 **A share card** rendered client-side to a canvas, in whichever theme you are using.
 
-**Settings** — username, profile visibility, theme and account in one place.
-Usernames are 3–20 characters of `A-Za-z0-9_-`, cannot collide with an existing name
-by case alone, and can be changed **once every 30 days** — the first time you set one
-is free. The client cannot write `profiles.username` at all; `set_username` is the
-only path, enforced by column-level grants rather than by a policy.
+**Settings** at `/settings.html` — username, profile visibility, theme and account in
+one place. The public/private toggle lives here rather than on the dashboard: the
+dashboard is about what you have scored, and this is about who may see it.
+
+A username is the identity every leaderboard, league board and duel names you by, so
+it is held to it: 3–20 characters of `A-Za-z0-9_-`, no name that collides with an
+existing one by case alone, and **one change every 30 days** — the first one you set
+is free. The rules are the database's, not the page's. `set_username` is the only way
+a username is ever written, and the client's permission to update the column is
+revoked outright, by a column-level grant rather than by a policy. `supabase/settings.sql`
+says why each rule is there.
 
 If an account ends up without a username — registration can leave it that way when
-email confirmation is enabled — the dashboard offers a way to claim one, since a
-username is what every leaderboard, league and duel names you by.
+email confirmation is enabled — both Settings and the dashboard offer a way to claim
+one.
 
 Two themes: the original Zetamac light palette, reproduced value for value, and a
 Monkeytype-flavoured dark one.
