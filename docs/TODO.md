@@ -46,6 +46,12 @@ every file is idempotent and that is the supported way to deploy a change.
       line on the pace graph a real curve instead of their final score held flat;
       and `duel_side_played`, which stops a stranger inheriting the finished run of
       an opponent who deleted their account.
+- [ ] **Apply `supabase/steal.sql`**, immediately after `duels.sql`. It replaces
+      `create_duel` with a version taking a mode argument and drops the
+      one-argument original — so if you ever re-apply `duels.sql` on its own
+      afterwards, `create_duel(120)` becomes ambiguous and duel creation breaks.
+      Re-apply `steal.sql` straight after any re-application of `duels.sql`.
+- [ ] **Apply `supabase/account.sql`**, last of all.
 - [ ] **Apply `supabase/settings.sql`** in the Supabase SQL editor, after
       `leagues.sql`. It revokes the client's column grants on `profiles` and
       replaces `username_available`; re-running `hardening.sql` afterwards undoes
@@ -164,10 +170,16 @@ Chart.js-stubbed pace graph). Always extract a frame and look at it.
 
 ## 6. Known gaps, none blocking
 
-- [ ] **Dead code in `js/db.js`** — pre-hardening fallback branches that can no
-      longer be reached now the migrations are applied. Harmless, misleading to read.
-- [ ] **`session_key` / `config_key` are 32-bit** and enumerable. Duel keys are 48
-      bits, league codes ~49. These two predate the social work.
+- [x] ~~Dead code in `js/db.js`~~ — the `isUsernameAvailable` fallback is gone. It
+      was worse than dead: post-hardening it answered "available" for every name on
+      the site. `getSession`'s fallback stays; that one is the deliberate
+      works-on-both-sides-of-a-migration pattern CLAUDE.md describes.
+- [x] ~~`session_key` is 32-bit~~ — `randomKey()` now draws 96 bits. Old keys keep
+      working; the column has no length constraint and nothing parses a key.
+- [ ] **`config_key` is still a 32-bit content hash.** Different configurations can
+      collide, and two users would then share a config row. Widening it changes the
+      identity of every config, so existing shared links would resolve to a new row
+      rather than the one they were made from — worth doing, worth doing carefully.
 - [ ] **Background-tab timer drift is unverified.** The fix anchors to a wall-clock
       deadline rather than accumulated ticks, but headless Chromium does not throttle
       background tabs, so the condition could not be reproduced. Needs a real browser,

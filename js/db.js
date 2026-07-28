@@ -28,9 +28,19 @@ async function hashToKey(str) {
     .join('');
 }
 
-// Random 8-char hex key
+// A random key, 96 bits of it, as 24 hex characters.
+//
+// It was 32 bits. A session key is the whole of the authorisation to read a
+// run — get_session_by_key takes nothing else — and 4 billion is a number a
+// script gets through, so the old width made every run on the site
+// enumerable by anybody willing to spend a weekend on it. 96 bits is not.
+//
+// Widening is safe in both directions: the column is TEXT with no length
+// constraint, keys already issued keep working, and nothing parses a key or
+// assumes its length. Guest duel tokens draw this twice and their 8-character
+// server-side floor is unaffected.
 function randomKey() {
-  return Array.from(crypto.getRandomValues(new Uint8Array(4)))
+  return Array.from(crypto.getRandomValues(new Uint8Array(12)))
     .map(b => b.toString(16).padStart(2, '0'))
     .join('');
 }
@@ -150,24 +160,24 @@ async function createProfile(userId, username) {
 // world-readable. Returns true when it genuinely cannot tell — the UNIQUE
 // constraint on profiles.username is the actual guarantee; this only exists
 // to give a nicer message before the account is created.
+// True when nobody holds this name. There is no fallback path here on
+// purpose: hardening.sql left the client no cross-user read of profiles, so a
+// direct `select username where username = ?` returns nothing for a name that
+// IS taken. That fallback used to exist, and it did not degrade — it answered
+// "available" for every name on the site, and the caller found out otherwise
+// only when the unique index rejected the insert.
+//
+// So a failed RPC reports available, and the database has the last word
+// either way: set_username and the unique lower(username) index are what
+// actually enforce this, and this call only exists to say so earlier and more
+// kindly.
 async function isUsernameAvailable(username) {
   if (!dbReady()) return true;
   try {
     const { data, error } = await supabaseClient.rpc('username_available', { p_username: username });
     if (!error && typeof data === 'boolean') return data;
-  } catch (_) { /* fall through */ }
-
-  try {
-    const { data, error } = await supabaseClient
-      .from('profiles')
-      .select('username')
-      .eq('username', username)
-      .maybeSingle();
-    if (error) return true;
-    return !data;
-  } catch (_) {
-    return true;
-  }
+  } catch (_) { /* the database still decides; see above */ }
+  return true;
 }
 
 // ── Public profiles / percentiles ────────────────────────────
