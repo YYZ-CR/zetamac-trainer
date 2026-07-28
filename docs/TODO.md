@@ -33,17 +33,24 @@ Serve with `python3 -m http.server 8099 --bind 127.0.0.1` — never `npx serve`.
 
 ## 1. Blocking deploy
 
-- [ ] **Re-apply `supabase/daily.sql` and `supabase/duels.sql`** — they carry a
-      scoring fix. Any daily or duel score recorded before it is wrong (too low):
-      every question a player fumbled scored zero. Existing rows are not corrected
-      by re-applying; if the leaderboard already has real scores on it, they were
-      computed under the old rule.
-- [ ] **Apply `supabase/settings.sql`** in the Supabase SQL editor. It must go
-      **last**, after `leagues.sql`. It revokes the client's column grants on
-      `profiles` and replaces `username_available`; re-running `hardening.sql`
-      afterwards undoes half of it. Supabase will warn about "destructive
-      operations" — that is the `REVOKE`s and a `DELETE` inside a function body,
-      not a `DROP`.
+The order is the README's table. When in doubt, re-apply the lot in that order —
+every file is idempotent and that is the supported way to deploy a change.
+
+- [ ] **Re-apply `supabase/daily.sql`** — it carries the scoring fix. Any daily
+      score recorded before it is wrong (too low): every question a player fumbled
+      scored zero. Existing rows are not corrected by re-applying; if the
+      leaderboard already has real scores on it, they were computed under the old
+      rule.
+- [ ] **Re-apply `supabase/duels.sql`.** Three changes since it was last applied:
+      the same scoring fix; `duel_pace_points`, which is what makes the opponent's
+      line on the pace graph a real curve instead of their final score held flat;
+      and `duel_side_played`, which stops a stranger inheriting the finished run of
+      an opponent who deleted their account.
+- [ ] **Apply `supabase/settings.sql`** in the Supabase SQL editor, after
+      `leagues.sql`. It revokes the client's column grants on `profiles` and
+      replaces `username_available`; re-running `hardening.sql` afterwards undoes
+      half of it. Supabase will warn about "destructive operations" — that is the
+      `REVOKE`s and a `DELETE` inside a function body, not a `DROP`.
 - [ ] **Play one daily, one duel (accept it from a private window), and one league
       join against the real project.** Everything in this repo was verified against
       local Postgres with `supabase/test/00-shim.sql` standing in for Supabase's
@@ -165,9 +172,6 @@ Chart.js-stubbed pace graph). Always extract a frame and look at it.
       deadline rather than accumulated ticks, but headless Chromium does not throttle
       background tabs, so the condition could not be reproduced. Needs a real browser,
       backgrounded, mid-run.
-- [ ] **No CI.** Everything above is run by hand. A GitHub Action running `npm test`
-      plus the browser suites would catch regressions on push.
-- [ ] **No LICENSE.**
 - [ ] **Cold start.** Percentiles suppress below 5 players and hide below 20; the
       global board will be uninteresting for a while. The daily and private leagues
       are the two mechanics that work at low player counts — lead with those.
