@@ -38,38 +38,62 @@ Serve with `python3 -m http.server 8099 --bind 127.0.0.1` — never `npx serve`.
 
 ---
 
-## 1. Blocking deploy
+## 1. Deploy — all nine migrations are applied
 
-The order is the README's table. When in doubt, re-apply the lot in that order —
-every file is idempotent and that is the supported way to deploy a change.
+A checker run against the real project reports every file OK. One thing is
+outstanding and it is one statement:
 
-- [ ] **Re-apply `supabase/daily.sql`** — it carries the scoring fix. Any daily
-      score recorded before it is wrong (too low): every question a player fumbled
-      scored zero. Existing rows are not corrected by re-applying; if the
-      leaderboard already has real scores on it, they were computed under the old
-      rule.
-- [ ] **Re-apply `supabase/duels.sql`.** Three changes since it was last applied:
-      the same scoring fix; `duel_pace_points`, which is what makes the opponent's
-      line on the pace graph a real curve instead of their final score held flat;
-      and `duel_side_played`, which stops a stranger inheriting the finished run of
-      an opponent who deleted their account.
-- [ ] **Apply `supabase/steal.sql`**, immediately after `duels.sql`. It replaces
-      `create_duel` with a version taking a mode argument and drops the
-      one-argument original — so if you ever re-apply `duels.sql` on its own
-      afterwards, `create_duel(120)` becomes ambiguous and duel creation breaks.
-      Re-apply `steal.sql` straight after any re-application of `duels.sql`.
-- [ ] **Apply `supabase/account.sql`**, last of all.
-- [ ] **Apply `supabase/settings.sql`** in the Supabase SQL editor, after
-      `leagues.sql`. It revokes the client's column grants on `profiles` and
-      replaces `username_available`; re-running `hardening.sql` afterwards undoes
-      half of it. Supabase will warn about "destructive operations" — that is the
-      `REVOKE`s and a `DELETE` inside a function body, not a `DROP`.
-- [ ] **Play one daily, one duel (accept it from a private window), and one league
-      join against the real project.** Everything in this repo was verified against
-      local Postgres with `supabase/test/00-shim.sql` standing in for Supabase's
-      `auth` schema. **`auth.uid()` behind the real PostgREST gateway is the one
-      thing no test here can exercise.** Guest duels are the least shim-like path
-      and the most likely to differ.
+- [ ] **`DROP FUNCTION IF EXISTS public.create_duel(INTEGER);`** — `duels.sql` was
+      applied after `steal.sql` at some point, which put the old one-argument
+      `create_duel` back alongside the two-argument version. Both match a
+      one-argument call, so Postgres refuses to pick and **duel creation fails
+      entirely**. Re-applying `steal.sql` does the same thing; the `DROP` is line
+      152 of it.
+
+**The rule that caused it: `duels.sql` and `steal.sql` are a pair.** Re-apply
+`steal.sql` immediately after any re-application of `duels.sql`, forever.
+
+Still worth doing by hand, because no test here can reach them:
+
+- [ ] **A steal duel in two windows.** The browser suite stubs the Realtime
+      channel; two live clients over a real socket is the part most likely to
+      differ in production. Confirm that when one side answers, *both* screens
+      advance.
+- [ ] **Delete a throwaway account** that owns a clan with other members in it, and
+      confirm the clan survives with a new owner. Local Postgres cannot exercise
+      Supabase's real `auth.users` cascade.
+- [ ] **One daily and one guest duel** against the real project. `auth.uid()` behind
+      the real PostgREST gateway is the one thing `00-shim.sql` stands in for, and
+      guest duels are the least shim-like path.
+
+---
+
+## 1b. Leaderboards and clans — designed, not built
+
+Contract: **`docs/leaderboards-design.md`**. Nothing is blocking it.
+
+Leagues become **Leaderboards** in the nav and **clans** as the noun; the page holds
+the global boards and your clans. Three global boards: today's daily, today's best,
+all-time best, all fixed at 120 seconds.
+
+**The decision the whole design turns on:** global boards are built only from
+`daily_attempts` and `duel_runs`, which the server scores itself. `game_sessions` is
+written straight from the browser —
+
+```sql
+CREATE POLICY "sessions_insert" ON public.game_sessions
+  FOR INSERT WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
+```
+
+— and the anon key is public, so anyone can insert any score for themselves. That
+has never mattered while those rows only fed their owner's dashboard. On a public
+ranking, the top of the board is whoever first types a large number.
+
+The first contract test to write is that a forged 9999 session reaches no board.
+
+Consequence, stated rather than hidden: **solo and practice runs will not appear on
+any global board.** Making them eligible means the server generating and storing
+questions for every run, the way the daily does — a real feature, not a patch.
 
 ---
 
