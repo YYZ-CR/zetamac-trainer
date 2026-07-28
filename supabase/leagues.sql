@@ -207,6 +207,19 @@ REVOKE ALL ON TABLE public.league_members FROM anon, authenticated;
 -- gen_random_uuid() is core since PostgreSQL 13, gen_random_bytes()
 -- would need pgcrypto.
 --
+-- Which bytes is not arbitrary. gen_random_uuid() returns a version-4
+-- UUID: 128 bits of which six are FIXED — the high nibble of byte 6
+-- is the version (always 0x4) and the top two bits of byte 8 are the
+-- variant (always 0b10). Byte 6 therefore only ever takes 16 values,
+-- and folding it into a 30-letter alphabet yields 16 of the 30
+-- glyphs, never the other 14 — a character that carries 4 bits
+-- instead of 4.9 and a visibly skewed position in every code the
+-- product ever prints. Byte 8 is 64 consecutive values, which covers
+-- all 30 residues but not evenly. So both are skipped and the ten
+-- characters are drawn from the ten fully random bytes 0-5, 7 and
+-- 9-11. (This was not theoretical: a per-position glyph-count test
+-- over 3,000 generated keys showed position 7 stuck at exactly 16.)
+--
 -- On the trap: the uuid is drawn in a FROM-clause subquery and the
 -- per-character expression references g.i, so the draw is correlated
 -- with the row it feeds. The failure mode this repo has already paid
@@ -230,9 +243,11 @@ AS $$
   SELECT string_agg(
            substr('23456789ABCDEFGHJKMNPQRSTVWXYZ',
                   1 + (get_byte(b.raw, g.i) % 30), 1),
-           '' ORDER BY g.i)
+           '' ORDER BY g.ord)
   FROM (SELECT decode(replace(gen_random_uuid()::TEXT, '-', ''), 'hex') AS raw) b,
-       generate_series(0, 9) AS g(i);
+       -- Bytes 6 and 8 are absent: they carry the v4 version and
+       -- variant bits and are not fully random. See above.
+       unnest(ARRAY[0, 1, 2, 3, 4, 5, 7, 9, 10, 11]) WITH ORDINALITY AS g(i, ord);
 $$;
 
 -- Internal. Not granted: a caller with no league to create has no use
