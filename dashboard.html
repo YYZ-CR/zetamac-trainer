@@ -16,7 +16,14 @@
     <div class="dashboard-head">
       <div>
         <h1>Dashboard</h1>
-        <div class="dashboard-subtitle" id="username-display"></div>
+        <!-- The Share control sits on the same line as the name, and its note
+             (the private-profile caveat) underneath. js/util.js fills both
+             slots; profile.html carries the same pair. -->
+        <div class="identity-row">
+          <div class="dashboard-subtitle" id="username-display"></div>
+          <span class="share-slot" id="share-slot"></span>
+        </div>
+        <p class="share-note" id="share-note" role="status" aria-live="polite" style="display:none"></p>
       </div>
       <a href="index.html" class="btn" style="margin-top:6px">Play</a>
     </div>

@@ -169,9 +169,21 @@ async function renderProfile(profile) {
 
   // The owner can always see their own profile so they can preview it before
   // publishing — say so plainly, or they'll assume everyone else sees this.
-  if (profile.is_owner && !profile.is_public) {
+  const minePrivate = !!(profile.is_owner && !profile.is_public);
+  if (minePrivate) {
     renderOwnerBanner();
   }
+
+  // Share this profile's /@name. Sharing the page you are looking at is
+  // normal, so the button is here on somebody else's profile too — and a
+  // public profile, mine or not, gets no caveat. The only link that needs one
+  // is the one nobody but its owner can open, which is exactly the case the
+  // banner above covers, computed once and used by both.
+  renderShareControl({
+    username:  username,
+    isPrivate: minePrivate,
+    title:     username ? `${username} — Arithmetic Trainer` : 'Arithmetic Trainer',
+  });
 
   const totalGames = Number(profile.total_games) || 0;
   if (totalGames === 0) {

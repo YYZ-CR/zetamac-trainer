@@ -109,19 +109,62 @@ window.Chart=function(){window.__charts.made++;
 window.Chart.defaults={font:{}};
 })();`;
 
+// ── The share surface ─────────────────────────────────────────
+// navigator.share and navigator.clipboard are both stubbed rather than used:
+// 127.0.0.1 is a secure context, so the real clipboard is present here and
+// would hide the one case that matters most — the insecure context, where
+// navigator.clipboard is undefined and the unguarded call throws.
+//
+// `share`/`clipboard` are left alone unless a test names them, so every
+// pre-existing block below runs against the browser as it was.
+const SHARE_STUB = (cfg) => {
+  window.__share  = [];
+  window.__copied = [];
+  const def = (name, value) =>
+    Object.defineProperty(navigator, name, { configurable: true, writable: true, value });
+
+  if (cfg.share === 'none') def('share', undefined);
+  else if (cfg.share) def('share', (data) => {
+    window.__share.push(data);
+    if (cfg.share === 'abort') {
+      const e = new Error('Share canceled'); e.name = 'AbortError';
+      return Promise.reject(e);
+    }
+    if (cfg.share === 'reject') return Promise.reject(new Error('share unavailable'));
+    return Promise.resolve();
+  });
+
+  if (cfg.clipboard === 'none') def('clipboard', undefined);
+  else if (cfg.clipboard) def('clipboard', {
+    writeText: (t) => {
+      window.__copied.push(String(t));
+      return cfg.clipboard === 'reject'
+        ? Promise.reject(new Error('denied'))
+        : Promise.resolve();
+    },
+  });
+};
+
 const b = await chromium.launch(EXE ? { executablePath: EXE } : {});
 
 async function page(o = {}) {
-  const ctx = await b.newContext({ viewport: { width: 1100, height: 900 } });
-  const p = await ctx.newPage(); const errs = [];
+  const ctx = await b.newContext({ viewport: o.viewport || { width: 1100, height: 900 } });
+  const p = await ctx.newPage(); const errs = []; const dialogs = [];
   p.on('pageerror', e => errs.push(String(e)));
+  // Playwright auto-dismisses dialogs only while nothing is listening, and the
+  // insecure-context fallback raises a prompt() that a test has to inspect.
+  p.on('dialog', d => {
+    dialogs.push({ type: d.type(), message: d.message(), value: d.defaultValue() });
+    d.dismiss().catch(() => {});
+  });
   await p.route('**/cdn.jsdelivr.net/**', r =>
     r.fulfill({ status: 200, contentType: 'application/javascript', body: SUPA(o) }));
   const theme = o.theme || 'dark';
   await p.addInitScript(t => localStorage.setItem('zt_theme', t), theme);
+  await p.addInitScript(SHARE_STUB, { share: o.share ?? null, clipboard: o.clipboard ?? null });
   await p.goto(BASE + '/dashboard.html', { waitUntil: 'networkidle' });
   await p.waitForTimeout(700);
-  return { ctx, p, errs };
+  return { ctx, p, errs, dialogs };
 }
 
 // Reads the five tiles as [[value,label], …] so an assertion can name the
@@ -413,11 +456,280 @@ console.log('[the chart is destroyed and rebuilt on zt-theme-change]');
 
 console.log('[both themes render without an uncaught error]');
 for (const theme of ['zetamac', 'dark']) {
-  const { ctx, p, errs } = await page({ profileRow: { id: 'u1', username: 'hexadecimal' },
+  const { ctx, p, errs } = await page({ profileRow: { id: 'u1', username: 'hexadecimal', is_public: true },
                                         sessions: SESSIONS, publicProfile: PUBLIC_PROFILE, theme });
   ok(await p.isVisible('#stat-strip'), `${theme}: the strip is visible`);
+  ok(await p.isVisible('#share-profile-btn'), `${theme}: the Share button is visible`);
   ok(errs.length === 0, `${theme}: no uncaught errors (${errs[0] ?? ''})`);
   await p.screenshot({ path: `${SHOTS}/dashboard-${theme}.png`, fullPage: true });
+  await p.screenshot({ path: `${SHOTS}/dashboard-share-${theme}.png`,
+                       clip: { x: 0, y: 0, width: 1100, height: 200 } });
+  await ctx.close();
+}
+
+// ── The Share button ──────────────────────────────────────────
+// It shares the /@name URL. The exact string is asserted everywhere below,
+// because "a URL was passed" is satisfied by the wrong one.
+const ORIGIN    = new URL(BASE).origin;
+const SHARE_URL = ORIGIN + '/@hexadecimal';
+const PUBLIC_ROW  = { id: 'u1', username: 'hexadecimal', is_public: true };
+const PRIVATE_ROW = { id: 'u1', username: 'hexadecimal', is_public: false };
+
+// Geometry from the live DOM, not markup order: a button that source-order
+// says is after the name can still be rendered under it, or off the row.
+const GEOM = () => {
+  const name = document.getElementById('username-display');
+  const btn  = document.getElementById('share-profile-btn');
+  if (!name || !btn) return null;
+  const n = name.getBoundingClientRect(), s = btn.getBoundingClientRect();
+  return {
+    nameLeft: n.left, nameRight: n.right, nameTop: n.top, nameBottom: n.bottom,
+    btnLeft: s.left, btnRight: s.right, btnTop: s.top, btnBottom: s.bottom,
+    btnW: s.width, btnH: s.height,
+  };
+};
+
+console.log('[the Share button sits to the right of the username]');
+{
+  const { ctx, p, errs } = await page({ profileRow: PUBLIC_ROW, sessions: SESSIONS,
+                                        publicProfile: PUBLIC_PROFILE, share: 'none', clipboard: 'ok' });
+  const g = await p.evaluate(GEOM);
+  ok(g !== null, 'the button is in the DOM beside the username line');
+  ok(g && g.btnLeft >= g.nameRight - 0.5,
+     `its left edge is at or past the name's right edge (${g && g.btnLeft} vs ${g && g.nameRight})`);
+  ok(g && g.btnTop < g.nameBottom && g.btnBottom > g.nameTop,
+     'and it overlaps that line vertically, so it is beside the name rather than under it');
+  ok(g && g.btnLeft - g.nameRight >= 6 && g.btnLeft - g.nameRight <= 24,
+     `with a real gap and not a stranded one (${g && (g.btnLeft - g.nameRight).toFixed(1)}px)`);
+  ok(g && g.btnW > 40 && g.btnH > 16, `the button has size (${g && g.btnW}×${g && g.btnH})`);
+
+  const shape = await p.evaluate(() => {
+    const b = document.getElementById('share-profile-btn');
+    b.focus();
+    return {
+      tag: b.tagName, type: b.type, text: b.textContent.trim(),
+      name: (b.getAttribute('aria-label') || b.textContent).trim(),
+      tabindex: b.getAttribute('tabindex'),
+      focused: document.activeElement === b,
+      imgs: b.querySelectorAll('img, svg').length,
+    };
+  });
+  ok(shape.tag === 'BUTTON' && shape.type === 'button', 'it is a real <button type=button>');
+  ok(shape.text === 'Share', `labelled "Share" (got "${shape.text}")`);
+  ok(shape.name.length > 1 && !/^[^A-Za-z]+$/.test(shape.name),
+     `its accessible name is words, not an icon ("${shape.name}")`);
+  ok(shape.focused && shape.tabindex === null, 'it takes keyboard focus and is not removed from the tab order');
+  ok(!(await p.isVisible('#share-note')), 'nothing is claimed under it before it is used');
+  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+  await ctx.close();
+}
+
+console.log('[navigator.share is used once, with the absolute /@name URL]');
+{
+  const { ctx, p, errs } = await page({ profileRow: PUBLIC_ROW, sessions: SESSIONS,
+                                        publicProfile: PUBLIC_PROFILE, share: 'ok', clipboard: 'ok' });
+  await p.click('#share-profile-btn');
+  await p.waitForTimeout(300);
+  const calls = await p.evaluate(() => window.__share);
+  ok(calls.length === 1, `navigator.share was called exactly once (got ${calls.length})`);
+  ok(calls[0] && calls[0].url === SHARE_URL,
+     `with ${SHARE_URL} (got ${calls[0] && calls[0].url})`);
+  ok(calls[0] && calls[0].title === 'My Arithmetic Trainer profile',
+     `and a title (got ${JSON.stringify(calls[0] && calls[0].title)})`);
+  ok((await p.evaluate(() => window.__copied)).length === 0,
+     'the clipboard was left alone — the sheet is the share');
+  ok((await p.textContent('#share-profile-btn')).trim() === 'Share',
+     'the label does not claim a copy that did not happen');
+  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+  await ctx.close();
+}
+
+console.log('[the button works from the keyboard]');
+{
+  const { ctx, p, errs } = await page({ profileRow: PUBLIC_ROW, sessions: SESSIONS,
+                                        publicProfile: PUBLIC_PROFILE, share: 'ok', clipboard: 'ok' });
+  await p.focus('#share-profile-btn');
+  await p.keyboard.press('Enter');
+  await p.waitForTimeout(300);
+  const calls = await p.evaluate(() => window.__share);
+  ok(calls.length === 1 && calls[0].url === SHARE_URL,
+     `Enter on the focused button shares the same URL (got ${calls.length} call(s))`);
+  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+  await ctx.close();
+}
+
+console.log('[no navigator.share -> the URL is copied and the label says so, then reverts]');
+{
+  const { ctx, p, errs } = await page({ profileRow: PUBLIC_ROW, sessions: SESSIONS,
+                                        publicProfile: PUBLIC_PROFILE, share: 'none', clipboard: 'ok' });
+  await p.click('#share-profile-btn');
+  await p.waitForTimeout(200);
+  const copied = await p.evaluate(() => window.__copied);
+  ok(copied.length === 1, `one clipboard write (got ${copied.length})`);
+  ok(copied[0] === SHARE_URL, `of ${SHARE_URL} (got ${copied[0]})`);
+  ok((await p.textContent('#share-profile-btn')).trim() === 'Copied!',
+     'the label confirms it in place');
+  await p.waitForTimeout(2300);
+  ok((await p.textContent('#share-profile-btn')).trim() === 'Share',
+     'and reverts about two seconds later');
+  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+  await ctx.close();
+}
+
+console.log('[insecure context: no share, no clipboard -> the URL is still offered, nothing throws]');
+{
+  const { ctx, p, errs, dialogs } = await page({ profileRow: PUBLIC_ROW, sessions: SESSIONS,
+                                                 publicProfile: PUBLIC_PROFILE,
+                                                 share: 'none', clipboard: 'none' });
+  await p.click('#share-profile-btn');
+  await p.waitForTimeout(300);
+  ok(dialogs.length === 1, `one prompt was raised (got ${dialogs.length})`);
+  ok(dialogs[0] && dialogs[0].type === 'prompt', 'it is a prompt, so the URL can be selected by hand');
+  ok(dialogs[0] && dialogs[0].value === SHARE_URL,
+     `carrying ${SHARE_URL} (got ${dialogs[0] && dialogs[0].value})`);
+  ok((await p.textContent('#share-profile-btn')).trim() === 'Share',
+     'and the label does not claim a copy that never happened');
+  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+  await ctx.close();
+}
+
+console.log('[a dismissed share sheet is not a failure]');
+{
+  const { ctx, p, errs, dialogs } = await page({ profileRow: PUBLIC_ROW, sessions: SESSIONS,
+                                                 publicProfile: PUBLIC_PROFILE,
+                                                 share: 'abort', clipboard: 'ok' });
+  await p.click('#share-profile-btn');
+  await p.waitForTimeout(400);
+  ok((await p.evaluate(() => window.__share)).length === 1, 'the sheet was opened');
+  ok((await p.evaluate(() => window.__copied)).length === 0,
+     'changing your mind does not copy something you did not ask for');
+  ok(dialogs.length === 0, 'and raises no dialog');
+  ok(!(await p.isVisible('#share-note')), 'no message is shown at all');
+  const head = (await p.textContent('.dashboard-head')) || '';
+  ok(!/couldn't|could not|error|failed|sorry/i.test(head),
+     `nothing in the head reads as a failure (got "${head.replace(/\s+/g, ' ').trim()}")`);
+  ok((await p.textContent('#share-profile-btn')).trim() === 'Share', 'the label is unchanged');
+  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+  await ctx.close();
+}
+
+console.log('[a share that genuinely fails falls back to the clipboard, still without an error]');
+{
+  const { ctx, p, errs } = await page({ profileRow: PUBLIC_ROW, sessions: SESSIONS,
+                                        publicProfile: PUBLIC_PROFILE, share: 'reject', clipboard: 'ok' });
+  await p.click('#share-profile-btn');
+  await p.waitForTimeout(400);
+  const copied = await p.evaluate(() => window.__copied);
+  ok(copied.length === 1 && copied[0] === SHARE_URL,
+     `the click still ends with the link in hand (got ${JSON.stringify(copied)})`);
+  ok((await p.textContent('#share-profile-btn')).trim() === 'Copied!', 'and says so');
+  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+  await ctx.close();
+}
+
+console.log('[a private profile says the link works for nobody else; a public one does not]');
+{
+  const { ctx, p, errs } = await page({ profileRow: PRIVATE_ROW, sessions: SESSIONS,
+                                        publicProfile: { ...PUBLIC_PROFILE, is_public: false },
+                                        share: 'none', clipboard: 'ok' });
+  await p.click('#share-profile-btn');
+  await p.waitForTimeout(200);
+  ok(await p.isVisible('#share-note'), 'the caveat is shown');
+  const note = ((await p.textContent('#share-note')) || '').replace(/\s+/g, ' ').trim();
+  ok(note === 'Copied — your profile is private, so only you can see it. Make it public in Settings.',
+     `and it is the whole sentence (got "${note}")`);
+  const link = await p.evaluate(() => {
+    const a = document.querySelector('#share-note a');
+    return a ? { href: a.getAttribute('href'), text: a.textContent.trim(), resolved: a.href } : null;
+  });
+  ok(link && link.href === 'settings.html', `Settings is a real link to settings.html (got ${link && link.href})`);
+  ok(link && link.text === 'Settings', `and reads "Settings" (got "${link && link.text}")`);
+  ok(link && /\/settings\.html$/.test(link.resolved), `resolving to ${link && link.resolved}`);
+  ok((await p.evaluate(() => window.__copied))[0] === SHARE_URL,
+     'the link was still copied — the caveat does not block the share');
+  ok((await p.textContent('#share-profile-btn')).trim() === 'Copied!', 'and the label still confirms');
+  await p.screenshot({ path: `${SHOTS}/dashboard-share-private.png`,
+                       clip: { x: 0, y: 0, width: 1100, height: 220 } });
+  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+  await ctx.close();
+}
+{
+  const { ctx, p, errs } = await page({ profileRow: PUBLIC_ROW, sessions: SESSIONS,
+                                        publicProfile: PUBLIC_PROFILE, share: 'none', clipboard: 'ok' });
+  await p.click('#share-profile-btn');
+  await p.waitForTimeout(200);
+  ok(!(await p.isVisible('#share-note')), 'a public profile shows no caveat');
+  ok(((await p.textContent('#share-note')) || '').trim() === '',
+     'and the note element is empty, not merely hidden');
+  ok(!/private/i.test((await p.textContent('.dashboard-head')) || ''),
+     'the word "private" is nowhere in the head');
+  ok((await p.evaluate(() => window.__copied))[0] === SHARE_URL, 'the copy happened all the same');
+  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+  await ctx.close();
+}
+
+console.log('[no username -> no Share button at all]');
+{
+  const { ctx, p, errs } = await page({ profileRow: null, sessions: SESSIONS,
+                                        share: 'none', clipboard: 'ok' });
+  ok(await p.evaluate(() => document.getElementById('share-profile-btn') === null),
+     'no #share-profile-btn element exists');
+  ok(await p.evaluate(() => document.getElementById('share-slot').children.length === 0),
+     'the slot is empty rather than holding a disabled control');
+  ok(!(await p.isVisible('#share-note')), 'and no note either');
+  ok(!/\bShare\b/.test((await p.textContent('.dashboard-head')) || ''),
+     'the word "Share" appears nowhere in the head');
+  ok(await p.isVisible('#username-claim'), 'the claim panel is what is offered instead');
+  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+  await ctx.close();
+}
+
+console.log('[a hostile username survives the URL and stays inert]');
+{
+  const XSS = '"><img src=x onerror=window.__pwned=1>';
+  const EXPECTED = ORIGIN + '/@' + encodeURIComponent(XSS);
+  const { ctx, p, errs } = await page({
+    profileRow: { id: 'u1', username: XSS, is_public: true },
+    sessions: SESSIONS,
+    publicProfile: { ...PUBLIC_PROFILE, username: XSS },
+    share: 'none', clipboard: 'ok',
+  });
+  await p.click('#share-profile-btn');
+  await p.waitForTimeout(200);
+  ok(await p.evaluate(() => window.__pwned !== 1), 'nothing executed');
+  ok(await p.evaluate(() => document.querySelectorAll('.dashboard-wrap img').length === 0),
+     'and it did not become an element');
+  const copied = (await p.evaluate(() => window.__copied))[0];
+  ok(copied === EXPECTED, `the copied URL is percent-encoded (got ${copied})`);
+  ok(copied && !copied.includes('<') && !copied.includes('"') && !copied.includes('>'),
+     'with no raw angle bracket or quote left in it');
+  const parsed = await p.evaluate(u => {
+    const url = new URL(u);
+    return { origin: url.origin, path: url.pathname, back: decodeURIComponent(url.pathname.slice(2)) };
+  }, copied);
+  ok(parsed.origin === ORIGIN && parsed.path.startsWith('/@'),
+     `it is still a /@name URL on this origin (${parsed.path})`);
+  ok(parsed.back === XSS, 'and it decodes back to the username the profile actually has');
+  ok((await p.textContent('#share-profile-btn')).trim() === 'Copied!', 'the button behaved normally');
+  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+  await ctx.close();
+}
+
+console.log('[at 380px the button is beside the name and fully on screen]');
+{
+  const { ctx, p, errs } = await page({ profileRow: PUBLIC_ROW, sessions: SESSIONS,
+                                        publicProfile: PUBLIC_PROFILE, share: 'none', clipboard: 'ok',
+                                        viewport: { width: 380, height: 900 } });
+  const g = await p.evaluate(GEOM);
+  ok(g && g.btnRight <= 380, `the button is inside the viewport (right edge ${g && g.btnRight})`);
+  ok(g && g.btnLeft >= 0, 'and not off the left of it');
+  ok(g && g.btnLeft >= g.nameRight - 0.5 && g.btnTop < g.nameBottom && g.btnBottom > g.nameTop,
+     'still on the same line as the name, to its right');
+  ok(await p.evaluate(() => document.documentElement.scrollWidth <= 380),
+     'and nothing it added made the page scroll sideways');
+  await p.screenshot({ path: `${SHOTS}/dashboard-share-380.png`,
+                       clip: { x: 0, y: 0, width: 380, height: 220 } });
+  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
   await ctx.close();
 }
 

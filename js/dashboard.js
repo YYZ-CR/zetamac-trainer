@@ -40,6 +40,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('username-display').textContent =
     profile?.username ? `Logged in as ${profile.username}` : user.email;
 
+  // Share your own /@name. renderShareControl (js/util.js) draws nothing
+  // without a username, which is the state directly below this line.
+  //
+  // is_public arrives with supabase/social.sql; before that migration the key
+  // is simply absent, and "absent" is correctly private here — with no
+  // get_public_profile there is nobody the link works for but its owner.
+  renderShareControl({
+    username:  profile?.username,
+    isPrivate: profile?.is_public !== true,
+    title:     'My Arithmetic Trainer profile',
+  });
+
   // An account with no profile row is a dead end everywhere else in the app:
   // the register flow already says "try logging in and setting it again", but
   // until now there was nowhere to set it. This is that place.

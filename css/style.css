@@ -606,6 +606,54 @@ body.results-page {
   background: var(--c-ink-muted);
 }
 
+/* ============ SHARE CONTROL ============
+   The Share button beside the username, on the dashboard and on a profile
+   page. Same markup on both — js/util.js renders it into #share-slot — so the
+   two heads cannot drift into two different controls. No new colour token:
+   it is the ordinary .btn on the ordinary muted note colour. */
+
+.identity-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  /* Wraps rather than pushing the button off the row: a 20-character username
+     at 28px next to a button does not fit a 360px phone. */
+  flex-wrap: wrap;
+}
+
+/* Usernames are user-chosen and can be long and unbroken. Without this the
+   name is an unshrinkable flex item and takes the button off the screen. */
+.identity-row > h1,
+.identity-row > .dashboard-subtitle {
+  min-width: 0;
+}
+
+.share-slot {
+  display: inline-flex;
+}
+
+/* Smaller than a page-level .btn: it sits against 13px subtitle text on the
+   dashboard, and a full-size button beside that line reads as the main
+   action of the page rather than a control attached to the name. */
+.btn.share-btn {
+  padding: 3px 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: nowrap;
+  flex: none;
+}
+
+/* The private-profile caveat. A full-width line under the row, not part of
+   it — a sentence with a link in it wrapping beside the name would push the
+   button around as it appeared. */
+.share-note {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--c-ink-muted);
+  max-width: 52ch;
+}
+
 /* ============ DASHBOARD PAGE ============ */
 body.dashboard-page {
   background: var(--c-page-bg);

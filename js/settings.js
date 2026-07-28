@@ -338,22 +338,18 @@ function copySettingsProfileLink() {
   if (!href) return;
 
   // Absolute, because the copied form is going somewhere else entirely.
-  const url  = new URL(href, window.location.href).toString();
-  const done = () => {
-    copyBtn.textContent = 'Copied!';
-    setTimeout(() => { copyBtn.textContent = 'Copy link'; }, 2000);
-  };
+  const url = new URL(href, window.location.href).toString();
 
-  // navigator.clipboard is undefined outside a secure context, so this has to
-  // survive the property being missing as well as the promise rejecting — over
-  // plain http the unguarded call throws instead of failing.
-  let p = null;
-  try { p = navigator.clipboard?.writeText(url); } catch (_) { p = null; }
-  if (p && typeof p.then === 'function') {
-    p.then(done).catch(() => { prompt('Copy this link:', url); });
-  } else {
-    prompt('Copy this link:', url);
-  }
+  // copyLinkToClipboard (js/util.js) carries the clipboard's failure modes:
+  // the property is undefined outside a secure context, the unguarded call
+  // throws there rather than rejecting, and the write is refused when the
+  // document is not focused. The Share buttons on the dashboard and the
+  // profile page go through the same helper, so there is one of this, not
+  // three.
+  copyLinkToClipboard(url, () => {
+    copyBtn.textContent = 'Copied!';
+    setTimeout(() => { copyBtn.textContent = 'Copy link'; }, SHARE_COPIED_MS);
+  });
 }
 
 // The current username, or '' — the one place that decides what "has a

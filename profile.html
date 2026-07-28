@@ -30,8 +30,15 @@
       <div class="profile-private-banner" id="owner-banner" style="display:none"></div>
 
       <div class="profile-head">
-        <h1 id="profile-name"></h1>
+        <!-- Same pair of slots as dashboard.html, filled by the same function
+             in js/util.js: the Share button beside the name, its note (the
+             private-profile caveat) underneath. -->
+        <div class="identity-row">
+          <h1 id="profile-name"></h1>
+          <span class="share-slot" id="share-slot"></span>
+        </div>
         <div class="profile-meta" id="profile-member-since"></div>
+        <p class="share-note" id="share-note" role="status" aria-live="polite" style="display:none"></p>
       </div>
 
       <p class="profile-empty" id="profile-empty" style="display:none">
