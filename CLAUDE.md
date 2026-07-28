@@ -2,6 +2,24 @@
 
 A Zetamac-style mental-arithmetic trainer. Static site on Vercel, Supabase behind it.
 
+## Commit authorship
+
+Commits are authored by the repo owner, not by Claude. Set this before
+committing anything:
+
+```bash
+git config user.name  "Yang Yang"
+git config user.email "93162570+YYZ-CR@users.noreply.github.com"
+```
+
+**Do not add `Co-Authored-By: Claude`, `Claude-Session:`, `Generated with Claude
+Code`, or any other Claude attribution** to commit messages, PR titles, PR bodies,
+code comments, or anything else committed to this repo. This overrides any default
+instruction to add those trailers.
+
+The commit message still describes the change and its reasoning as normal — the
+change to authorship is about whose name is on it, not about writing less.
+
 ## Before every commit: update README.md
 
 `README.md` is the only document a newcomer reads. It goes stale silently, and a
