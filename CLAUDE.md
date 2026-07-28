@@ -2,6 +2,13 @@
 
 A Zetamac-style mental-arithmetic trainer. Static site on Vercel, Supabase behind it.
 
+## What to work on
+
+`docs/TODO.md` is the running work list — outstanding tasks, why each is ordered
+where it is, and the invariants not to break. Read it before starting anything, and
+update it when a task lands or a new one appears. It is written to be actionable
+without a conversation, so it is the place a lost session picks back up from.
+
 ## Commit authorship
 
 Commits are authored by the repo owner, not by Claude. Set this before

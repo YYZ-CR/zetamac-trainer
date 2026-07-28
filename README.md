@@ -167,6 +167,8 @@ demo videos.
 
 ## Planned
 
+`docs/TODO.md` is the full work list. In short:
+
 **A first-run walkthrough.** Someone arriving for the first time sees a config
 screen and a Start button, and nothing tells them the daily, duels, leagues,
 practice mode or the per-operation analysis exist. A one-time popup should walk
