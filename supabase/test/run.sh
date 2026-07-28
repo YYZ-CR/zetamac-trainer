@@ -71,11 +71,20 @@ run_sql "$SQLDIR_MIG/hardening.sql"
 run_sql "$SQLDIR_MIG/social.sql"
 [ -r "$SQLDIR_MIG/daily.sql" ] && run_sql "$SQLDIR_MIG/daily.sql"
 [ -r "$SQLDIR_MIG/duels.sql" ] && run_sql "$SQLDIR_MIG/duels.sql"
+# Straight after duels.sql, always. It extends duels/duel_runs and it DROPs the
+# one-argument create_duel in favour of one that takes a mode — so duels.sql
+# applied after it resurrects the old overload and makes create_duel(120)
+# ambiguous. The re-apply pass below runs the two in this order for that reason.
+[ -r "$SQLDIR_MIG/steal.sql" ] && run_sql "$SQLDIR_MIG/steal.sql"
 [ -r "$SQLDIR_MIG/leagues.sql" ] && run_sql "$SQLDIR_MIG/leagues.sql"
-# Last: it revokes the client's column grants on profiles and replaces
+# Next to last: it revokes the client's column grants on profiles and replaces
 # username_available, so re-applying hardening.sql after it would undo half
 # of that. Deployment order is the README's table, and this mirrors it.
 [ -r "$SQLDIR_MIG/settings.sql" ] && run_sql "$SQLDIR_MIG/settings.sql"
+# Last: delete_account's body reads tables from every file above it, and
+# plpgsql resolves those names at call time, so applying it early would look
+# fine and fail on the first real deletion.
+[ -r "$SQLDIR_MIG/account.sql" ] && run_sql "$SQLDIR_MIG/account.sql"
 
 # These files are applied by hand in the Supabase SQL editor, so somebody will
 # eventually paste one twice. Re-applying here proves that is harmless.
@@ -83,8 +92,10 @@ echo "=== re-applying migrations (idempotency) ==="
 run_sql "$SQLDIR_MIG/social.sql"
 [ -r "$SQLDIR_MIG/daily.sql" ] && run_sql "$SQLDIR_MIG/daily.sql"
 [ -r "$SQLDIR_MIG/duels.sql" ] && run_sql "$SQLDIR_MIG/duels.sql"
+[ -r "$SQLDIR_MIG/steal.sql" ] && run_sql "$SQLDIR_MIG/steal.sql"
 [ -r "$SQLDIR_MIG/leagues.sql" ] && run_sql "$SQLDIR_MIG/leagues.sql"
 [ -r "$SQLDIR_MIG/settings.sql" ] && run_sql "$SQLDIR_MIG/settings.sql"
+[ -r "$SQLDIR_MIG/account.sql" ] && run_sql "$SQLDIR_MIG/account.sql"
 
 echo "=== seeding ==="
 run_sql "$SQLDIR_TEST/01-seed.sql"
@@ -98,4 +109,25 @@ TESTS="-f '$SQLDIR_TEST/02-test.sql'"
 [ -r "$SQLDIR_MIG/duels.sql" ] && TESTS="$TESTS -f '$SQLDIR_TEST/04-duels-test.sql'"
 [ -r "$SQLDIR_MIG/leagues.sql" ] && TESTS="$TESTS -f '$SQLDIR_TEST/05-leagues-test.sql'"
 [ -r "$SQLDIR_MIG/settings.sql" ] && TESTS="$TESTS -f '$SQLDIR_TEST/06-settings-test.sql'"
+# The account suite is skipped with a note rather than failing when the file is
+# absent — the migration and its tests are written by different hands, and a
+# missing test file must not read as a broken suite. A missing file is still
+# said out loud: silence here would be a green run that proves nothing.
+if [ -r "$SQLDIR_MIG/account.sql" ]; then
+  if [ -r "$SQLDIR_TEST/07-account-test.sql" ]; then
+    TESTS="$TESTS -f '$SQLDIR_TEST/07-account-test.sql'"
+  else
+    echo "NOTE: supabase/account.sql is applied but 07-account-test.sql is missing — account contract NOT tested" >&2
+  fi
+fi
+# Same arrangement for steal mode: migration and suite are written by different
+# hands, so a missing suite is a loud NOTE rather than a broken run — and never
+# silence, which would be a green run that proves nothing.
+if [ -r "$SQLDIR_MIG/steal.sql" ]; then
+  if [ -r "$SQLDIR_TEST/08-steal-test.sql" ]; then
+    TESTS="$TESTS -f '$SQLDIR_TEST/08-steal-test.sql'"
+  else
+    echo "NOTE: supabase/steal.sql is applied but 08-steal-test.sql is missing — steal contract NOT tested" >&2
+  fi
+fi
 psql_run "-d $DB $TESTS" 2>&1 | sed 's/^psql.*NOTICE:  //'

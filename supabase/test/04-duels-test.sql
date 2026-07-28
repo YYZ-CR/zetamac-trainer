@@ -212,6 +212,85 @@ BEGIN
   RAISE NOTICE '--- score visibility OK ---';
 END $$;
 
+-- ── Pace points ─────────────────────────────────────────────────
+-- The graph needs both players' curves. Times only, and behind the same gate
+-- as the score: before both runs are in, a timeline is a partial answer key
+-- for a run the other side has not taken yet.
+DO $$
+DECLARE k TEXT; v JSONB; r JSONB; pts JSONB; n INT;
+BEGIN
+  PERFORM pg_temp.as_user('hexadecimal');
+  k := (public.create_duel(120))->>'duel_key';
+  PERFORM pg_temp.answer_run(k, NULL, 15);
+
+  -- Creator done, opponent not. Nothing may be revealed yet.
+  v := public.get_duel_by_key(k, NULL);
+  PERFORM pg_temp.ok((v->>'scores_revealed')::BOOLEAN IS FALSE, 'not revealed yet');
+  PERFORM pg_temp.ok(v->'creator'->'points' IS NULL
+                  OR v->'creator'->'points' = 'null'::jsonb,
+    'a side''s own pace points are withheld before both runs are in');
+  PERFORM pg_temp.ok(v->'opponent'->'points' IS NULL
+                  OR v->'opponent'->'points' = 'null'::jsonb,
+    'the opponent''s pace points are withheld before both runs are in');
+
+  -- Opponent plays. Now both curves exist.
+  PERFORM pg_temp.as_user('player6');
+  PERFORM pg_temp.answer_run(k, NULL, 9);
+
+  v := public.get_duel_by_key(k, NULL);
+  PERFORM pg_temp.ok((v->>'scores_revealed')::BOOLEAN, 'revealed once both are in');
+
+  pts := v->'creator'->'points';
+  PERFORM pg_temp.ok(jsonb_typeof(pts) = 'array', 'creator points is an array');
+  PERFORM pg_temp.ok(jsonb_array_length(pts) = 15, 'one point per correct answer');
+
+  -- Ascending, or the curve doubles back on itself.
+  SELECT COUNT(*) INTO n FROM (
+    SELECT (value)::NUMERIC AS t, ROW_NUMBER() OVER () AS rn
+      FROM jsonb_array_elements_text(pts)
+  ) a JOIN (
+    SELECT (value)::NUMERIC AS t, ROW_NUMBER() OVER () AS rn
+      FROM jsonb_array_elements_text(pts)
+  ) b ON b.rn = a.rn + 1 WHERE b.t < a.t;
+  PERFORM pg_temp.ok(n = 0, 'points are ascending');
+
+  pts := v->'opponent'->'points';
+  PERFORM pg_temp.ok(jsonb_array_length(pts) = 9, 'the opponent''s curve is their own, not a copy');
+
+  -- Times, not answers. Nothing that maps back to the question sequence.
+  PERFORM pg_temp.ok(v::TEXT NOT LIKE '%"value"%', 'no answer values in the payload');
+  PERFORM pg_temp.ok(NOT (v ? 'questions'), 'still no questions');
+
+  RAISE NOTICE '--- pace points OK ---';
+END $$;
+
+-- A fumbled question contributes one point, at the time it was banked.
+DO $$
+DECLARE k TEXT; run JSONB; qs JSONB; ans JSONB; v JSONB;
+BEGIN
+  PERFORM pg_temp.as_user('hexadecimal');
+  k   := (public.create_duel(120))->>'duel_key';
+  run := public.start_duel_run(k, NULL);
+  qs  := run->'questions';
+  SELECT jsonb_agg(e ORDER BY ord) INTO ans FROM (
+    SELECT (i*2) AS ord, jsonb_build_object('i', i, 'value', (qs->i->>'answer')::INT + 5,
+                                            'elapsed_ms', (i*2+1)*600) AS e
+      FROM generate_series(0, 4) i
+    UNION ALL
+    SELECT (i*2+1) AS ord, jsonb_build_object('i', i, 'value', (qs->i->>'answer')::INT,
+                                              'elapsed_ms', (i*2+2)*600) AS e
+      FROM generate_series(0, 4) i
+  ) z;
+  PERFORM public.submit_duel_run(k, NULL, ans);
+
+  PERFORM pg_temp.as_user('player7');
+  PERFORM pg_temp.answer_run(k, NULL, 3);
+
+  v := public.get_duel_by_key(k, NULL);
+  PERFORM pg_temp.ok(jsonb_array_length(v->'creator'->'points') = 5,
+    'five fumbled-then-correct questions give five points, not ten');
+END $$;
+
 -- ── Scoring is not the client's opinion ─────────────────────────
 DO $$
 DECLARE k TEXT; run JSONB; qs JSONB; ans JSONB; r JSONB;

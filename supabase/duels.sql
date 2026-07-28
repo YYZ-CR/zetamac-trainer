@@ -336,6 +336,37 @@ $$;
 
 REVOKE ALL ON FUNCTION public.duel_role(UUID, UUID, TEXT, UUID, TEXT) FROM PUBLIC;
 
+-- Is the opponent side of this duel already spoken for by a RUN,
+-- regardless of what duels.opponent_id currently says?
+--
+-- duel_role answers "who is this caller" from the ids alone, which is
+-- correct for every path that sets them. It is not enough on its own,
+-- because duels.opponent_id is ON DELETE SET NULL: when an opponent
+-- deletes their account, their id is cleared while their finished run
+-- stays — deliberately, so the creator keeps their result — and the
+-- duel then looks unclaimed. It is not. The next stranger to open the
+-- link would be handed the side AND the deleted player's score, and
+-- the creator's result page would silently change who they played.
+--
+-- So the occupancy question is asked of duel_runs, which is where the
+-- fact actually lives: a side that has a run row has a player, past
+-- tense or present. This also covers an opponent run left behind by
+-- any future path that clears the id.
+CREATE OR REPLACE FUNCTION public.duel_side_played(p_duel_id UUID, p_side TEXT)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.duel_runs r
+    WHERE r.duel_id = p_duel_id AND r.side = p_side
+  );
+$$;
+
+REVOKE ALL ON FUNCTION public.duel_side_played(UUID, TEXT) FROM PUBLIC;
+
 -- When a run's clock stops.
 --
 -- LEAST() is the load-bearing part. A run started five seconds before
@@ -460,6 +491,45 @@ REVOKE ALL ON FUNCTION public.duel_refresh(UUID) FROM PUBLIC;
 -- STABLE, not VOLATILE: it writes nothing. duel_refresh is the
 -- volatile half and is called separately by the RPCs, which keeps
 -- "what may be seen" free of "what gets closed".
+-- ── 4a. Pace points ─────────────────────────────────────────────
+-- The seconds at which each question was first answered CORRECTLY, for one
+-- side, ascending. This is what the pace graph is drawn from.
+--
+-- Why it is safe to expose, when the answers themselves are not: it carries
+-- times and nothing else. No question index, no value, no ordering that maps
+-- back to the sequence. Even the answers would be harmless at this point —
+-- §4 only ever emits this once BOTH runs have a result, and a run that has a
+-- result cannot be replayed (duel_already_submitted, and the run row is keyed
+-- (duel_id, side)). But there is no reason to send more than the graph needs.
+--
+-- A question fumbled and then corrected contributes once, at the time of the
+-- correction that banked it — MIN over the correct attempts, matching the way
+-- submit_duel_run scores it.
+CREATE OR REPLACE FUNCTION public.duel_pace_points(
+  p_questions JSONB,
+  p_answers   JSONB
+)
+RETURNS JSONB
+LANGUAGE sql
+IMMUTABLE
+AS $$
+  SELECT COALESCE(jsonb_agg(z.t ORDER BY z.t), '[]'::JSONB)
+  FROM (
+    SELECT MIN(round((a.e->>'elapsed_ms')::NUMERIC / 1000.0, 1)) AS t
+    FROM jsonb_array_elements(COALESCE(p_answers, '[]'::JSONB)) AS a(e)
+    WHERE jsonb_typeof(a.e->'i')          = 'number'
+      AND jsonb_typeof(a.e->'elapsed_ms') = 'number'
+      AND jsonb_typeof(a.e->'value')      = 'number'
+      AND (a.e->>'i')::NUMERIC >= 0
+      AND jsonb_typeof(p_questions->((a.e->>'i')::INT)->'answer') = 'number'
+      AND (a.e->>'value')::NUMERIC
+        = (p_questions->((a.e->>'i')::INT)->>'answer')::NUMERIC
+    GROUP BY (a.e->>'i')::INT
+  ) z;
+$$;
+
+REVOKE ALL ON FUNCTION public.duel_pace_points(JSONB, JSONB) FROM PUBLIC;
+
 CREATE OR REPLACE FUNCTION public.duel_public_payload(
   p_duel_id UUID,
   p_uid     UUID,
@@ -531,6 +601,14 @@ BEGIN
   v_role := public.duel_role(v_d.creator_id, v_d.opponent_id,
                              v_d.opponent_guest_token, p_uid, p_token);
 
+  -- The page must not offer a duel that only LOOKS open. An opponent
+  -- who deleted their account leaves their run behind and their id
+  -- cleared, and start_duel_run will refuse the claim — so telling a
+  -- visitor the side is free would offer them a button that errors.
+  IF v_role = 'open' AND public.duel_side_played(v_d.id, 'opponent') THEN
+    v_role := 'spectator';
+  END IF;
+
   -- The outcome block exists so a walkover is legible AS a walkover.
   -- "You won 84–0" and "they never turned up" are different social
   -- facts, and collapsing them into a win is the thing the design
@@ -587,6 +665,11 @@ BEGIN
                            THEN to_char(v_c.submitted_at AT TIME ZONE 'UTC',
                                         'YYYY-MM-DD"T"HH24:MI:SS"Z"') END,
       'score',        CASE WHEN v_reveal AND v_c_result THEN v_c.score END,
+      -- Times only, and only once both sides are done — the same gate the
+      -- score is behind. Before that a timeline would be a partial answer key
+      -- for a run the other player has not taken yet.
+      'points',       CASE WHEN v_reveal AND v_c_found
+                           THEN public.duel_pace_points(v_d.questions, v_c.answers) END,
       -- A name, not a score: it is not behind the reveal gate.
       'username',     v_c_name,
       'is_you',       v_role = 'creator'),
@@ -597,6 +680,11 @@ BEGIN
                            THEN to_char(v_o.submitted_at AT TIME ZONE 'UTC',
                                         'YYYY-MM-DD"T"HH24:MI:SS"Z"') END,
       'score',        CASE WHEN v_reveal AND v_o_result THEN v_o.score END,
+      -- Times only, and only once both sides are done — the same gate the
+      -- score is behind. Before that a timeline would be a partial answer key
+      -- for a run the other player has not taken yet.
+      'points',       CASE WHEN v_reveal AND v_o_found
+                           THEN public.duel_pace_points(v_d.questions, v_o.answers) END,
       -- NULL for a guest, who has no profile to name.
       'username',     v_o_name,
       'is_you',       v_role = 'opponent')
@@ -867,6 +955,11 @@ BEGIN
     WHERE id = v_d.id
       AND opponent_id IS NULL
       AND opponent_guest_token IS NULL
+      -- A side that already has a run row has a player, whatever the
+      -- id column says — see duel_side_played. Written into the
+      -- statement rather than checked above it so that "you cannot
+      -- inherit somebody else's run" is true of the write itself.
+      AND NOT public.duel_side_played(id, 'opponent')
       -- Unreachable given duel_role's first branch, and written down
       -- anyway. This is the predicate that makes "the creator cannot
       -- occupy the opponent slot" true of the statement rather than
@@ -882,6 +975,14 @@ BEGIN
     SELECT * INTO v_d FROM public.duels WHERE id = v_d.id;
     v_role := public.duel_role(v_d.creator_id, v_d.opponent_id,
                                v_d.opponent_guest_token, v_uid, v_token);
+
+    -- Still 'open' after the update means the guard above refused it,
+    -- and the only guard that can refuse without a competing claim is
+    -- the abandoned-run one. Naming it 'spectator' here makes the
+    -- refusal below fire for the right reason.
+    IF v_role = 'open' AND public.duel_side_played(v_d.id, 'opponent') THEN
+      v_role := 'spectator';
+    END IF;
 
     IF v_role <> 'opponent' THEN
       RAISE EXCEPTION 'duel_already_has_opponent'

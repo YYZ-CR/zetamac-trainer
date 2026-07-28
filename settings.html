@@ -131,6 +131,70 @@
         <button class="btn btn-danger" id="settings-logout-btn">Log out</button>
       </div>
 
+      <!-- ── 5. Danger zone ──────────────────────────────────── -->
+      <!-- Last on the page and fenced off, because a control that destroys an
+           account sitting next to a Save button is a mis-tap waiting to
+           happen. Collapsed until it is asked for: nothing here is part of
+           reading the page. -->
+      <div class="panel panel-danger" id="danger-panel">
+        <div class="panel-head">
+          <h2>Danger zone</h2>
+          <span class="panel-note">Permanent</span>
+        </div>
+
+        <p class="settings-note">
+          Deleting your account takes it off this site entirely. There is no
+          grace period and nothing is archived.
+        </p>
+
+        <button class="btn btn-danger" id="danger-open-btn">Delete account</button>
+
+        <!-- The consequences come BEFORE the field, so they are read on the
+             way to it rather than after it has been filled in. -->
+        <div class="danger-zone" id="danger-zone" style="display:none">
+          <p class="danger-lead">If you delete your account:</p>
+          <ul class="danger-list">
+            <li>
+              every score you have saved is deleted, and so is every Zetamac
+              Daily attempt — you come off every daily leaderboard, including
+              past days.
+            </li>
+            <li>
+              you leave every league you are in. A league you own is handed to
+              its longest-standing remaining member; if you were its only
+              member, the league is deleted with you.
+            </li>
+            <li>
+              duels you created are deleted, along with both sides' results.
+              Duels you only played in stay, and you show on them as a deleted
+              account.
+            </li>
+            <li>
+              your username is released, and anybody else can claim it
+              afterwards.
+            </li>
+            <li>
+              <strong class="danger-strong">this cannot be undone.</strong>
+              There is no way to restore the account or anything above, and
+              signing up again starts from nothing.
+            </li>
+          </ul>
+
+          <label class="danger-prompt" id="danger-prompt" for="danger-input"></label>
+
+          <div class="claim-row">
+            <input type="text" id="danger-input" class="auth-field claim-field"
+                   autocomplete="off" autocapitalize="off" spellcheck="false"
+                   maxlength="40">
+            <button class="btn btn-danger" id="danger-delete-btn" disabled>Delete my account</button>
+            <button class="btn" id="danger-cancel-btn">Cancel</button>
+          </div>
+
+          <div class="auth-error" id="danger-error" role="alert"></div>
+          <p class="profile-visibility-status" id="danger-status" role="status" aria-live="polite"></p>
+        </div>
+      </div>
+
     </div>
 
   </div>

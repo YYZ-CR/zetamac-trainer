@@ -24,7 +24,14 @@ The shared sequence is what makes a leaderboard defensible: the usual objection 
 any arithmetic ranking is "you got easier problems", and this removes it.
 
 **Duels** — send a link, you both answer the same sequence, neither sees a score
-until both are done. Ends on a pace graph. Guests can play without an account.
+until both are done. Ends on a pace graph of both players' runs. Guests can play
+without an account.
+
+**Steal mode** — the same link, played live. The first correct answer takes the
+point and *both* players jump to the next question, so every question is a race.
+Arbitration runs on time-since-the-question-appeared, clamped against what the
+server itself observed, because awarding the point to whoever's packet arrived
+first would make it a contest of who has the better connection.
 
 **Private leagues** — an invite code, a named group, and a board over the day's
 puzzle. Being 3rd of 6 behind people you know is a better reason to practise than
@@ -50,6 +57,32 @@ says why each rule is there.
 If an account ends up without a username — registration can leave it that way when
 email confirmation is enabled — both Settings and the dashboard offer a way to claim
 one.
+
+**Deleting an account** is at the bottom of the same page, fenced off in a Danger
+zone: collapsed until you ask for it, and it lists what goes before it shows you the
+field. To confirm you type your own username (or the literal `DELETE` if you never
+set one), and the button stays disabled until that matches. The delete itself is one
+`delete_account` call — the client never names an account, and the id deleted is
+always the caller's. On success the page signs you out before it navigates, because
+the access token stays valid until it expires on its own.
+
+Deletion is not a `DELETE FROM auth.users`: a league you own would take every other
+member's board down with it, and your old sessions would keep feeding everybody's
+percentile. So each row has a stated fate — leagues you own are handed to their
+longest-standing remaining member, duels you created go with you, duels you only
+played in stay and show you as a deleted account, and your username is released.
+`docs/account-deletion.md` is the contract, and `supabase/account.sql` implements it.
+
+**A first-run walkthrough.** A first visit to the home page opens a six-step tour of
+everything above — the analysis, practice mode, the daily, duels, leagues and the
+profile — because all of it sits *behind* a run the visitor has not done yet. It is
+shown once and closes five ways (Esc, ×, Skip, the backdrop, or finishing), every one
+of which counts as seen, and it is offered again from "How this works" in the footer.
+"Seen it" is a `localStorage` key holding the tour's version, so bumping that version
+shows a materially changed tour again; the cost is that it reappears on a second
+device, which is the right trade when most first-time visitors have no account to
+hang it on. `docs/walkthrough-design.md` is the contract, and the step list is one
+array at the top of `js/tour.js`.
 
 Two themes: the original Zetamac light palette, reproduced value for value, and a
 Monkeytype-flavoured dark one.
@@ -82,16 +115,29 @@ Apply these **by hand** in the Supabase SQL editor, in this order:
 | `supabase/social.sql` | public profiles, percentiles |
 | `supabase/daily.sql` | Zetamac Daily, server-authoritative scoring |
 | `supabase/duels.sql` | duels — **depends on `daily.sql`** for the question generator |
+| `supabase/steal.sql` | steal mode — must go **immediately after `duels.sql`** |
 | `supabase/leagues.sql` | private leagues |
 | `supabase/settings.sql` | `set_username`, rename cooldown, column-level grants |
+| `supabase/account.sql` | `delete_account` — the ordered cascade for deleting an account |
 
-Two ordering constraints, both real:
+Four ordering constraints, all real:
 
 - `duels.sql` calls functions defined in `daily.sql`, so daily comes first.
-- **`settings.sql` must be last.** It revokes the client's column grants on
-  `profiles` and replaces `username_available`. Re-running `hardening.sql` after it
-  would hand those grants back and undo half of it. If you ever re-apply an earlier
-  file, re-apply `settings.sql` afterwards.
+- **`steal.sql` goes immediately after `duels.sql`, and `duels.sql` is never applied
+  after it on its own.** `steal.sql` replaces `create_duel` with a version taking a
+  mode argument and drops the one-argument original; re-applying `duels.sql`
+  afterwards puts that original back, and `create_duel(120)` then matches two
+  functions and fails as ambiguous. Re-apply `steal.sql` straight after any
+  re-application of `duels.sql`.
+- **`settings.sql` goes after every file that touches `profiles`.** It revokes the
+  client's column grants on `profiles` and replaces `username_available`. Re-running
+  `hardening.sql` after it would hand those grants back and undo half of it. If you
+  ever re-apply an earlier file, re-apply `settings.sql` afterwards.
+- **`account.sql` is last.** `delete_account` reads tables from every file above it,
+  and plpgsql resolves those names when the function is *called*, not when it is
+  created — so pasting this one early appears to work and then fails on the first
+  real deletion, part-way through an account. It only adds a function, so it takes
+  nothing back from `settings.sql` and does not need re-applying after it.
 
 **Every file is idempotent, and re-running one is the supported way to deploy a
 change.** The test suite applies each migration twice on every run to guarantee that,
@@ -101,20 +147,24 @@ Supabase's SQL editor will warn *"this query includes destructive operations"* o
 most of these. It is a static scan: the files contain `REVOKE` (removing default
 grants from tables the same file just created), `ALTER TABLE … ENABLE ROW LEVEL
 SECURITY`, and `DELETE` statements that sit **inside function bodies** and only run
-when a user leaves a league. There is no `DROP TABLE` or `TRUNCATE` anywhere.
+when a user leaves a league or deletes their own account. There is no `DROP TABLE`
+or `TRUNCATE` anywhere.
 
 ## Testing
 
 ```bash
 npm test                       # node unit tests
-npm run test:sql               # SQL contract suite — needs a local PostgreSQL 14+
-ZT_CHROMIUM=<path> node test/browser/daily.mjs     # browser tests
-ZT_CHROMIUM=<path> node test/browser/duel.mjs
-ZT_CHROMIUM=<path> node test/browser/leagues.mjs
-ZT_CHROMIUM=<path> node test/browser/dashboard.mjs
-ZT_CHROMIUM=<path> node test/browser/nav.mjs
-ZT_CHROMIUM=<path> node test/browser/settings.mjs
+npm run test:sql               # SQL contract suites — needs a local PostgreSQL 14+
+npm run test:browser           # every browser suite, one after another
 ```
+
+The browser suites need a server on port 8099 (`npm run dev`) and Playwright's
+Chromium (`npm install && npx playwright install chromium`). Run one on its own with
+`node test/browser/duel.mjs`; set `ZT_CHROMIUM=<path>` to point at a different
+Chromium build.
+
+All three run on every push, as three jobs in `.github/workflows/ci.yml`. The SQL job
+brings up its own `postgres:16` service, so nothing there touches a real project.
 
 `npm test` includes a check that the client-side username rule in `js/util.js`
 matches the `CHECK` constraint in `supabase/settings.sql` exactly — the same rule
@@ -127,9 +177,15 @@ the migrations depend on — `auth.users`, an `auth.uid()` driven by a GUC so te
 impersonate any user, and the `anon`/`authenticated` roles. Nothing touches your real
 project.
 
-`supabase/test/race-*.sh` drive real concurrent sessions at the two places where a
-check-then-act bug would hide: claiming the single opponent slot in a duel, and the
-last seat in a full league.
+`supabase/test/race-*.sh` drive real concurrent sessions at the three places where a
+check-then-act bug would hide: claiming the single opponent slot in a duel, the last
+seat in a full league, and two steal-mode players answering the same question at
+once. Each ends with a **negative control** — the same race with the guard removed —
+because a race test that has never failed proves nothing.
+
+Steal mode's live behaviour over Supabase Realtime is **not** covered by any of this:
+the browser suite stubs the channel, and two real clients over a real socket is a
+manual check against the deployed project.
 
 Browser tests stub the CDN and the Supabase client, so the real page scripts run
 against a fake network.
@@ -159,30 +215,30 @@ stored questions, and anything else the client attaches is discarded.
 ### Docs
 
 `docs/` holds the contracts the client and database were both built against —
-`social-api.md`, `daily-design.md`, `duels-design.md`, `leagues-design.md`. Settle
-the shape there first, then build both sides against it.
+`social-api.md`, `daily-design.md`, `duels-design.md`, `steal-mode-design.md`,
+`leagues-design.md`, `account-deletion.md`, `walkthrough-design.md`. Settle the shape there first, then build both sides against it.
+
+`account-deletion.md` is the one to read before touching a foreign key: it states the
+fate of every row that mentions an account, and `supabase/account.sql` is that list in
+order. Deleting an account is not a cascade — two of the foreign keys cascade
+destructively, and the function exists to get in front of them.
 
 `docs/demo-video-guide.md` is unrelated to the app: a general reference for producing
 demo videos.
 
 ## Planned
 
-`docs/TODO.md` is the full work list. In short:
+`docs/TODO.md` is the full work list. No feature is outstanding. What is left there
+is deployment — the newer migrations still have to be applied by hand against the
+real project, in the order of the table above — plus the demo video below and the
+known gaps that file lists (`config_key` is still a 32-bit content hash, and
+background-tab timer drift has never been reproduced in headless Chromium).
 
-**A first-run walkthrough.** Someone arriving for the first time sees a config
-screen and a Start button, and nothing tells them the daily, duels, leagues,
-practice mode or the per-operation analysis exist. A one-time popup should walk
-through each feature, be dismissible, and never appear twice.
+## Licence
 
-Worth building **last**, deliberately: a walkthrough is a description of the
-product, so every feature added before it is written is a feature the tour has to
-be rewritten for. It also needs a decision on where "seen it" is stored —
-localStorage means it reappears on a second device, a profile column means it
-follows the account but does nothing for signed-out visitors.
+MIT. See `LICENSE`.
 
 ## Not built
 
-**Steal mode** for duels — first correct answer takes the point and both players jump
-to the next question. It needs both players online simultaneously, latency-compensated
-arbitration, and optimistic advance; the design is written up in
-`docs/duels-design.md`.
+**A demo video.** `docs/demo-video-guide.md` has the structure and the capture
+pipeline worked out; nothing has been shot.

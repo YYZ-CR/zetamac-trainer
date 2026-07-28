@@ -159,7 +159,14 @@ function loadDb(mode) {
       if (mode === 'hardened') {
         assert('a taken username is rejected via the RPC', taken === false);
       } else {
-        assert('a taken username is rejected via the direct read', taken === false);
+        // No RPC, and deliberately no fallback: hardening.sql left the client
+        // no cross-user read of profiles, so a direct lookup of a name that IS
+        // taken comes back empty and reads as available. That fallback existed
+        // once and answered "available" for every name on the site. Optimism
+        // here is the honest answer — the unique index and set_username are
+        // what actually decide, and they still refuse it.
+        assert('with no RPC, availability is optimistic and left to the database',
+          taken === true);
       }
     }
   }

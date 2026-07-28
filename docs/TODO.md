@@ -10,19 +10,26 @@ Read `CLAUDE.md` first (conventions, security posture, sandbox gotchas), then
 
 ## Where things stand
 
-Built, tested and merged to `master`: the game, run analysis, adaptive practice,
-public profiles + percentiles, the share card, Zetamac Daily, duels with a pace
-graph, private leagues, and a settings page.
+Built and tested: the game, run analysis, adaptive practice, public profiles +
+percentiles, the share card, Zetamac Daily, duels with a real two-player pace graph,
+steal mode, private leagues, a settings page with account deletion, and the first-run
+walkthrough.
+
+**Nothing below is blocked on more code.** What is left is the deploy checklist in
+§1, one manual check per feature against the real project, and the demo video.
 
 Verification currently in the repo:
 
 ```bash
 npm test                                    # unit + the username-rule parity check
-supabase/test/run.sh                        # 5 SQL contract suites (~313 assertions)
+npm run test:sql                            # 8 SQL contract suites
+npm run test:browser                        # 8 browser suites, ~1250 assertions
 supabase/test/race-duel-claim.sh            # concurrent duel-slot claim
 supabase/test/race-league-cap.sh            # concurrent league-cap race
-ZT_CHROMIUM=<path> node test/browser/{nav,daily,duel,leagues,dashboard,settings}.mjs
+supabase/test/race-steal-point.sh           # concurrent steal claims, with a control
 ```
+
+All of it also runs on every push — `.github/workflows/ci.yml`.
 
 Sandbox: Postgres on socket `/var/run/postgresql` port **5433**
 (`ZT_SU=1 PGHOST=/var/run/postgresql PGPORT=5433 supabase/test/run.sh`).
@@ -33,17 +40,30 @@ Serve with `python3 -m http.server 8099 --bind 127.0.0.1` — never `npx serve`.
 
 ## 1. Blocking deploy
 
-- [ ] **Re-apply `supabase/daily.sql` and `supabase/duels.sql`** — they carry a
-      scoring fix. Any daily or duel score recorded before it is wrong (too low):
-      every question a player fumbled scored zero. Existing rows are not corrected
-      by re-applying; if the leaderboard already has real scores on it, they were
-      computed under the old rule.
-- [ ] **Apply `supabase/settings.sql`** in the Supabase SQL editor. It must go
-      **last**, after `leagues.sql`. It revokes the client's column grants on
-      `profiles` and replaces `username_available`; re-running `hardening.sql`
-      afterwards undoes half of it. Supabase will warn about "destructive
-      operations" — that is the `REVOKE`s and a `DELETE` inside a function body,
-      not a `DROP`.
+The order is the README's table. When in doubt, re-apply the lot in that order —
+every file is idempotent and that is the supported way to deploy a change.
+
+- [ ] **Re-apply `supabase/daily.sql`** — it carries the scoring fix. Any daily
+      score recorded before it is wrong (too low): every question a player fumbled
+      scored zero. Existing rows are not corrected by re-applying; if the
+      leaderboard already has real scores on it, they were computed under the old
+      rule.
+- [ ] **Re-apply `supabase/duels.sql`.** Three changes since it was last applied:
+      the same scoring fix; `duel_pace_points`, which is what makes the opponent's
+      line on the pace graph a real curve instead of their final score held flat;
+      and `duel_side_played`, which stops a stranger inheriting the finished run of
+      an opponent who deleted their account.
+- [ ] **Apply `supabase/steal.sql`**, immediately after `duels.sql`. It replaces
+      `create_duel` with a version taking a mode argument and drops the
+      one-argument original — so if you ever re-apply `duels.sql` on its own
+      afterwards, `create_duel(120)` becomes ambiguous and duel creation breaks.
+      Re-apply `steal.sql` straight after any re-application of `duels.sql`.
+- [ ] **Apply `supabase/account.sql`**, last of all.
+- [ ] **Apply `supabase/settings.sql`** in the Supabase SQL editor, after
+      `leagues.sql`. It revokes the client's column grants on `profiles` and
+      replaces `username_available`; re-running `hardening.sql` afterwards undoes
+      half of it. Supabase will warn about "destructive operations" — that is the
+      `REVOKE`s and a `DELETE` inside a function body, not a `DROP`.
 - [ ] **Play one daily, one duel (accept it from a private window), and one league
       join against the real project.** Everything in this repo was verified against
       local Postgres with `supabase/test/00-shim.sql` standing in for Supabase's
@@ -53,73 +73,83 @@ Serve with `python3 -m http.server 8099 --bind 127.0.0.1` — never `npx serve`.
 
 ---
 
-## 2. First-run walkthrough — do this LAST
+## 2. ~~First-run walkthrough~~ — BUILT
 
-A one-time popup for a first-time visitor describing every feature: the daily,
-duels, leagues, practice mode, the run analysis, profiles and the share card.
-Dismissible, never shown twice.
+`js/tour.js`, contract in `docs/walkthrough-design.md`, tested by
+`test/browser/tour.mjs` (120 assertions). Six steps in one array, a modal on
+`index.html` only — but never `index.html?key=…`, which is a shared configuration
+link somebody followed to play that config — `localStorage['zt_tour_seen']` holding
+`TOUR_VERSION`, five
+dismissal routes that all mark it seen, and a "How this works" link in the footer
+that re-opens it.
 
-**Why last:** a walkthrough is a description of the product, so every feature added
-before it is written is a feature the tour has to be rewritten for.
+Three things to keep true rather than rediscover:
 
-Decisions to make before building:
-
-- **Where "seen it" is stored.** `localStorage` reappears on a second device; a
-  `profiles` column follows the account but does nothing for signed-out visitors —
-  and the whole point is first-time visitors, most of whom have no account. Probably
-  localStorage, with the profile column only as a later refinement.
-- **Whether it blocks.** A modal over the config screen interrupts someone who came
-  to play. A dismissible strip, or a tour that only starts on request, respects that.
-- **Ordering.** Lead with what is different from Zetamac (the analysis, the daily),
-  not with a feature list.
-
-Must respect the existing conventions: `escapeHtml` on anything user-controlled,
-`--c-*` tokens only, no build step, and a browser test asserting it appears once and
-not twice.
-
----
-
-## 3. Steal mode for duels
-
-Designed but not built — see `docs/duels-design.md`, final section.
-
-First correct answer takes the point and both players jump to the next question.
-It is a real-time distributed system, not an extension of classic duels:
-
-- **Arbitration cannot be first-message-wins.** If A answers at 1000 ms and B at
-  1005 ms but A's packet takes 80 ms, the server sees B first — the game would
-  reward ping, not speed. Arbitrate on client-reported time-since-render, clamped
-  against the server's own send and receive times.
-- **Advance must be optimistic.** Waiting for arbitration before moving on puts a
-  visible stall on every question. Advance locally at once, settle the point a beat
-  later, and be honest in the UI that the score is briefly provisional.
-- **The steal must be legible.** A question changing mid-keystroke is disorienting
-  unless the interface explains it in the same instant.
-- **Disconnects need a policy.** Suggested: 10s presence grace, then the duel ends
-  early on the score so far, marked as such. Awarding the remainder to whoever
-  stayed invites pulling your ethernet cable.
-- **It needs two people online simultaneously**, which at current traffic may be a
-  feature nobody can use. Consider a lobby or matchmaking first.
-
-Transport: Supabase Realtime Broadcast for advance, Presence for liveness,
-a `SECURITY DEFINER` RPC for arbitration (`duel_points` keyed
-`PRIMARY KEY (duel_id, question_index)` so the award is one conflicting insert).
-Check Realtime's free-tier concurrent-connection and message caps before committing.
+- **The step list is `TOUR_STEPS`, one array at the top of the file.** A new feature
+  means one more object there. `tour.mjs` asserts the rendered step count equals the
+  array's length *and* that the length is six, so a seventh step is a decision
+  somebody makes deliberately — six is where people start clicking Skip.
+- **Bump `TOUR_VERSION` when the tour materially changes, never for a typo.** A tour
+  that reappears for no reason trains people to dismiss it unread. Steal mode was
+  folded into the duels step rather than added as a seventh, for the same reason.
+- **The seen check runs before anything is built, not after.** A returning visitor
+  gets no element at all. `tour.mjs` proves it with a `MutationObserver` installed at
+  `document_start`, so a tour that renders and then hides itself would fail — and
+  proves the assertion has teeth: deleting the check turns 11 assertions red.
 
 ---
 
-## 4. Delete account
+## 3. ~~Steal mode for duels~~ — BUILT
 
-Deliberately cut from the settings page. Needs a proper cascade:
+`supabase/steal.sql` and the steal half of `js/duel.js`, contract in
+`docs/steal-mode-design.md`, tested by `supabase/test/08-steal-test.sql`,
+`test/browser/steal.mjs` (185 assertions) and `supabase/test/race-steal-point.sh`.
 
-- `game_sessions`, `daily_attempts`, `duel_runs`, `league_members`
-- **League ownership transfer** — the same rule `leave_league` already implements
-  (longest-standing member inherits; last member out deletes the league)
-- Duels in flight — an opponent mid-run should get a coherent outcome, not a
-  dangling reference
-- The `auth.users` row itself, which needs a `SECURITY DEFINER` function
+Three things to keep true:
 
-A half-done delete is worse than none. Model it on `leave_league`.
+- **Arbitration is on clamped client time, never on arrival order.** The race script
+  fires two real concurrent claims with the *slower* player going first, and ends on
+  a negative control — the same race against first-message-wins, which awards the
+  point to the slower player. Without that control the test proves nothing.
+- **`steal.sql` goes immediately after `duels.sql`.** It drops the one-argument
+  `create_duel`, so re-applying `duels.sql` on its own afterwards makes
+  `create_duel(120)` ambiguous and breaks duel creation.
+- **Broadcast is a hint, never authority.** Everything a message asserts is
+  re-derived from the RPC's return value; `steal.mjs` asserts a forged broadcast
+  moves a screen and cannot move a score.
+
+**What no test here covers: two live clients over real Supabase Realtime.** The
+browser suite stubs the channel. Play one steal duel against yourself in two windows
+before telling anybody it works.
+
+---
+
+## 4. ~~Delete account~~ — BUILT
+
+Contract: `docs/account-deletion.md`. Database side: `supabase/account.sql` —
+`delete_account(p_confirm TEXT) → JSONB`, one `SECURITY DEFINER` function that does
+the whole thing in one transaction, in the order the doc states, with the
+`auth.users` row deleted last.
+
+- [ ] **Apply `supabase/account.sql`** in the Supabase SQL editor. It goes **last**,
+      after `settings.sql` — its body reads tables from every earlier file and
+      plpgsql resolves those names at call time, so applying it early looks fine and
+      fails on the first real deletion.
+- [ ] **Delete a throwaway account against the real project**, one that owns a league
+      with other members in it. Local Postgres cannot exercise the `auth.users`
+      cascade Supabase actually has (`auth.identities`, `auth.sessions`,
+      `auth.refresh_tokens`), and the function's own `DELETE FROM auth.users` depends
+      on the function owner having rights in the `auth` schema — which is true of the
+      role the SQL editor runs as, and is worth seeing once.
+
+Two things not to "simplify" later:
+
+- **The league rule is duplicated from `leave_league` on purpose** — same removal,
+  same "last member out deletes the league", same successor tie-break
+  (`ORDER BY joined_at ASC, user_id ASC`). `05-leagues-test.sql` and the account
+  suite each assert one copy; change one and the other must change.
+- **`game_sessions` are deleted, not orphaned.** The FK is `ON DELETE SET NULL`, and
+  unowned rows keep feeding `get_score_percentile` forever.
 
 ---
 
@@ -143,17 +173,20 @@ Chart.js-stubbed pace graph). Always extract a frame and look at it.
 
 ## 6. Known gaps, none blocking
 
-- [ ] **Dead code in `js/db.js`** — pre-hardening fallback branches that can no
-      longer be reached now the migrations are applied. Harmless, misleading to read.
-- [ ] **`session_key` / `config_key` are 32-bit** and enumerable. Duel keys are 48
-      bits, league codes ~49. These two predate the social work.
+- [x] ~~Dead code in `js/db.js`~~ — the `isUsernameAvailable` fallback is gone. It
+      was worse than dead: post-hardening it answered "available" for every name on
+      the site. `getSession`'s fallback stays; that one is the deliberate
+      works-on-both-sides-of-a-migration pattern CLAUDE.md describes.
+- [x] ~~`session_key` is 32-bit~~ — `randomKey()` now draws 96 bits. Old keys keep
+      working; the column has no length constraint and nothing parses a key.
+- [ ] **`config_key` is still a 32-bit content hash.** Different configurations can
+      collide, and two users would then share a config row. Widening it changes the
+      identity of every config, so existing shared links would resolve to a new row
+      rather than the one they were made from — worth doing, worth doing carefully.
 - [ ] **Background-tab timer drift is unverified.** The fix anchors to a wall-clock
       deadline rather than accumulated ticks, but headless Chromium does not throttle
       background tabs, so the condition could not be reproduced. Needs a real browser,
       backgrounded, mid-run.
-- [ ] **No CI.** Everything above is run by hand. A GitHub Action running `npm test`
-      plus the browser suites would catch regressions on push.
-- [ ] **No LICENSE.**
 - [ ] **Cold start.** Percentiles suppress below 5 players and hide below 20; the
       global board will be uninteresting for a while. The daily and private leagues
       are the two mechanics that work at low player counts — lead with those.

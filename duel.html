@@ -27,6 +27,11 @@
     <!-- Create a duel, or the rules and the irreversible Start -->
     <div class="panel" id="duel-panel" style="display:none"></div>
 
+    <!-- Steal mode only: the room both players wait in before the run. Who is
+         present, a Ready control each, the creator's countdown, and the offer
+         to fall back to a classic duel if the other side never arrives. -->
+    <div class="panel" id="steal-room" style="display:none"></div>
+
     <!-- Waiting for the other side, or the decided result -->
     <div id="duel-result" style="display:none"></div>
 
@@ -82,6 +87,45 @@
 
     <!-- Submitting, or submit failed and needs retrying -->
     <div class="gameover-overlay" id="duel-overlay" style="display:none"></div>
+  </div>
+
+  <!-- The steal run. Same markup and classes as the classic run above — it is
+       the same game — plus the two things steal mode adds: a live scoreline
+       whose points can still be provisional, and one line, in place, saying
+       who took the question that just changed underneath you. -->
+  <div class="duel-game steal-game" id="steal-game" style="display:none">
+    <div class="game-hud">
+      <span id="steal-timer">Seconds left: —</span>
+      <span id="steal-score">
+        <span class="steal-score-side" id="steal-score-you">You 0</span>
+        <span class="steal-score-sep">·</span>
+        <span class="steal-score-side" id="steal-score-them">Them 0</span>
+      </span>
+    </div>
+
+    <!-- Presence went away: the grace countdown before the duel ends early -->
+    <div class="steal-banner" id="steal-banner" style="display:none" role="status" aria-live="polite"></div>
+
+    <div class="game-area" id="steal-area">
+      <span class="question-text" id="steal-question"></span>
+      <input
+        type="text"
+        class="answer-input"
+        id="steal-input"
+        inputmode="numeric"
+        autocomplete="off"
+        autocorrect="off"
+        autocapitalize="off"
+        spellcheck="false"
+        aria-label="Answer"
+      >
+    </div>
+
+    <!-- "Stolen — they had it in 1.4s". In place, under the question, never a
+         toast over the next one. -->
+    <p class="steal-line" id="steal-line" role="status" aria-live="polite"></p>
+
+    <div class="gameover-overlay" id="steal-overlay" style="display:none"></div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>

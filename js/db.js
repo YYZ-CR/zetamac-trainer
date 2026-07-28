@@ -28,9 +28,19 @@ async function hashToKey(str) {
     .join('');
 }
 
-// Random 8-char hex key
+// A random key, 96 bits of it, as 24 hex characters.
+//
+// It was 32 bits. A session key is the whole of the authorisation to read a
+// run — get_session_by_key takes nothing else — and 4 billion is a number a
+// script gets through, so the old width made every run on the site
+// enumerable by anybody willing to spend a weekend on it. 96 bits is not.
+//
+// Widening is safe in both directions: the column is TEXT with no length
+// constraint, keys already issued keep working, and nothing parses a key or
+// assumes its length. Guest duel tokens draw this twice and their 8-character
+// server-side floor is unaffected.
 function randomKey() {
-  return Array.from(crypto.getRandomValues(new Uint8Array(4)))
+  return Array.from(crypto.getRandomValues(new Uint8Array(12)))
     .map(b => b.toString(16).padStart(2, '0'))
     .join('');
 }
@@ -150,24 +160,24 @@ async function createProfile(userId, username) {
 // world-readable. Returns true when it genuinely cannot tell — the UNIQUE
 // constraint on profiles.username is the actual guarantee; this only exists
 // to give a nicer message before the account is created.
+// True when nobody holds this name. There is no fallback path here on
+// purpose: hardening.sql left the client no cross-user read of profiles, so a
+// direct `select username where username = ?` returns nothing for a name that
+// IS taken. That fallback used to exist, and it did not degrade — it answered
+// "available" for every name on the site, and the caller found out otherwise
+// only when the unique index rejected the insert.
+//
+// So a failed RPC reports available, and the database has the last word
+// either way: set_username and the unique lower(username) index are what
+// actually enforce this, and this call only exists to say so earlier and more
+// kindly.
 async function isUsernameAvailable(username) {
   if (!dbReady()) return true;
   try {
     const { data, error } = await supabaseClient.rpc('username_available', { p_username: username });
     if (!error && typeof data === 'boolean') return data;
-  } catch (_) { /* fall through */ }
-
-  try {
-    const { data, error } = await supabaseClient
-      .from('profiles')
-      .select('username')
-      .eq('username', username)
-      .maybeSingle();
-    if (error) return true;
-    return !data;
-  } catch (_) {
-    return true;
-  }
+  } catch (_) { /* the database still decides; see above */ }
+  return true;
 }
 
 // ── Public profiles / percentiles ────────────────────────────
@@ -468,6 +478,20 @@ const DUEL_REFUSALS = {
     'That side of the duel has already been played.',
   duel_window_closed:
     'The window for this run has closed.',
+
+  // Steal mode (docs/steal-mode-design.md). These are refusals of a CLAIM, not
+  // of a duel, so they are worded as a thing that happened in the run rather
+  // than as an error — a player who lost a race by 30ms has not done anything
+  // wrong. None of these strings appears in a classic refusal, so adding them
+  // to this table cannot change how a classic duel reads an error.
+  not_a_participant:
+    "You aren't a player in this duel.",
+  wrong_mode:
+    'This duel is not a steal duel.',
+  stale_index:
+    'That question had already been decided.',
+  point_taken:
+    'They got there first.',
 };
 
 // Set when the last duel call failed: a sentence for the user (lastDuelError)
@@ -560,11 +584,16 @@ async function duelRpc(fn, args) {
 // notify and nobody to rematch. The duration is clamped server-side to
 // 15..600, so the returned duration_seconds is the one that was actually used
 // and is what the page must show.
-async function createDuel(durationSeconds) {
+// `mode` is 'classic' (the default) or 'steal'. p_mode is sent ONLY for a
+// steal duel: create_duel gained the argument with a default, so a classic
+// create must stay the exact one-argument call it was before — a database that
+// has not had the steal migration applied yet still answers it, and the client
+// is written to work on both sides of a migration.
+async function createDuel(durationSeconds, mode) {
   const n = Number(durationSeconds);
-  return duelRpc('create_duel', {
-    p_duration: Number.isFinite(n) ? Math.round(n) : 120,
-  });
+  const args = { p_duration: Number.isFinite(n) ? Math.round(n) : 120 };
+  if (String(mode || '') === 'steal') args.p_mode = 'steal';
+  return duelRpc('create_duel', args);
 }
 
 // The duel's public face for whoever is holding the link: duel_key,
@@ -625,6 +654,110 @@ async function submitDuelRun(key, answers) {
     p_guest_token: duelGuestToken(key) || null,
     p_answers: answers,
   });
+}
+
+// ── Steal-mode duels ─────────────────────────────────────────
+// The real-time variant: first correct answer takes the point and both players
+// jump to the next question. docs/steal-mode-design.md is the contract. Three
+// properties of it decide the shape of this section:
+//
+//   * The point is the SERVER's. claim_duel_point arbitrates on the client's
+//     time-since-the-question-was-rendered, clamped against what the server
+//     itself observed, and returns who actually won. Nothing here computes a
+//     winner, and nothing here reads one out of a broadcast — the channel
+//     below carries hints, and a hint that could award a point would make a
+//     forged message a score.
+//   * A guest must still be able to play, so these take the same guest token
+//     as every other duel RPC and are granted to `anon`.
+//   * Realtime may simply not be there: an older supabase-js with no
+//     .channel(), a blocked WebSocket, a stubbed client. duelChannel() returns
+//     null rather than throwing, and duel.js degrades to offering a classic
+//     duel — which needs nobody to be awake — instead of a dead page.
+
+// Claim the point for question `index`, having answered it `elapsedMs` after
+// it appeared on screen. Returns { ok, index, winner, elapsed_ms, provisional }
+// — `provisional` true while the server's 400ms grace window is still open, so
+// the UI can say the point may yet move — or null with lastDuelCode set for a
+// refusal ('point_taken', 'stale_index', 'wrong_mode', 'not_a_participant').
+//
+// The elapsed time is the client's, and a client can lie about it; the server
+// clamps it to the time it has itself observed since the question was
+// released, so the worst a cheat can claim is the physics the server saw.
+// Sending a wrong answer is pointless — the server checks it and awards
+// nothing — so duel.js only ever calls this for an answer it knows is right.
+async function claimDuelPoint(key, index, elapsedMs) {
+  if (!key) { lastDuelCode = 'duel_not_found'; lastDuelError = DUEL_REFUSALS.duel_not_found; return null; }
+  const i  = Number(index);
+  const ms = Number(elapsedMs);
+  return duelRpc('claim_duel_point', {
+    p_key: String(key),
+    p_guest_token: duelGuestToken(key) || null,
+    p_index:      Number.isFinite(i)  ? Math.max(0, Math.round(i))  : 0,
+    p_elapsed_ms: Number.isFinite(ms) ? Math.max(0, Math.round(ms)) : 0,
+  });
+}
+
+// End a steal duel on the score so far, because a player's presence went away
+// for longer than the grace window (or they left cleanly). The duel is marked
+// ended early — NOT as a win for whoever stayed, which would make pulling your
+// ethernet cable a winning move.
+//
+// NOTE: docs/steal-mode-design.md specifies the behaviour but does not name
+// this function or pin its payload, unlike claim_duel_point. The name and
+// arguments here are this client's proposal and must be reconciled with
+// supabase/duels.sql before either side ships. duel.js therefore treats a
+// missing function as survivable: it still renders the ended-early state and
+// re-reads the duel for the authoritative scores.
+async function endDuelEarly(key, reason) {
+  if (!key) { lastDuelCode = 'duel_not_found'; lastDuelError = DUEL_REFUSALS.duel_not_found; return null; }
+  return duelRpc('end_duel_early', {
+    p_key: String(key),
+    p_guest_token: duelGuestToken(key) || null,
+    p_reason: String(reason || 'ended_early'),
+  });
+}
+
+// Turn a steal duel that nobody turned up for into a classic one. The
+// questions are already generated and a classic duel needs nobody to be awake,
+// so this is the failure mode degrading to the thing that already works rather
+// than to a dead end.
+//
+// Same caveat as endDuelEarly: the design doc requires the offer but does not
+// name the function. Creator only — it is their duel.
+async function convertDuelToClassic(key) {
+  if (!key) { lastDuelCode = 'duel_not_found'; lastDuelError = DUEL_REFUSALS.duel_not_found; return null; }
+  return duelRpc('convert_duel_to_classic', {
+    p_key: String(key),
+    p_guest_token: duelGuestToken(key) || null,
+  });
+}
+
+// The Realtime channel a steal duel talks on: broadcast for the five messages
+// in the design doc, presence for liveness. `presenceKey` identifies this tab
+// so a reconnecting player replaces their own entry rather than appearing
+// twice.
+//
+// Returns null — never throws — when Realtime is unavailable. The caller has a
+// real fallback (a classic duel), and it can only offer it if it is told.
+function duelChannel(key, presenceKey) {
+  if (!key || !dbReady()) return null;
+  if (typeof supabaseClient.channel !== 'function') {
+    console.warn('duelChannel: this Supabase client has no Realtime');
+    return null;
+  }
+  try {
+    return supabaseClient.channel('duel:' + String(key), {
+      config: {
+        presence: { key: String(presenceKey || '') },
+        // Own messages come back from the local optimistic path, not from the
+        // server; echoing them would double-apply every advance.
+        broadcast: { self: false },
+      },
+    });
+  } catch (e) {
+    console.warn('duelChannel failed:', e);
+    return null;
+  }
 }
 
 // ── Private leagues ──────────────────────────────────────────
@@ -961,5 +1094,89 @@ async function setUsername(username) {
   } catch (e) {
     console.warn('set_username threw:', e);
     return fail('username_unavailable');
+  }
+}
+
+// ── Deleting an account ──────────────────────────────────────
+// supabase/account.sql's delete_account is the only way an account leaves this
+// site. It takes no id — the account deleted is always auth.uid() — and it
+// settles every row that mentions the caller by hand rather than letting the
+// foreign keys cascade, because two of those cascades are actively destructive
+// (a league owner would take the whole league with them, and orphaned
+// game_sessions would keep feeding everybody else's percentile).
+// docs/account-deletion.md states the fate of every row and is the contract
+// both sides are built against.
+//
+// Like set_username, and unlike the duel and league RPCs, it RETURNS its one
+// refusal rather than raising it: a confirmation that does not match is
+// something the person typing can fix, not a programming error. So the only
+// codes invented here are the transport failures.
+
+// One sentence per outcome that is not success. Every one of them has to leave
+// the reader certain about whether the account still exists — an ambiguous
+// message after a failed delete is the worst copy on the site, because the
+// obvious response to it is to try again.
+const ACCOUNT_REFUSALS = {
+  confirm_mismatch:
+    "That didn't match, so nothing was deleted. Type it exactly as shown above.",
+  account_requires_account:
+    'You are not signed in, so nothing was deleted. Log in and try again.',
+  account_missing:
+    'Account deletion is not available on this deployment yet. Your account has ' +
+    'NOT been deleted.',
+  account_unavailable:
+    "Couldn't reach the server, so your account has NOT been deleted. Nothing was " +
+    'changed — try again in a moment.',
+};
+
+// Delete the signed-in user's account. `confirmText` must be their username,
+// or the literal DELETE for an account that has none; the database compares it
+// case-insensitively after trimming and refuses anything else.
+//
+// ALWAYS returns an object and never throws:
+//
+//   { ok: true, leagues_left, leagues_deleted, leagues_transferred,
+//     duels_deleted, duel_slots_released, daily_attempts_deleted,
+//     sessions_deleted }
+//   { ok: false, error }   — a key of ACCOUNT_REFUSALS.
+//
+// The caller must sign out immediately on ok:true. The account row is gone but
+// the access token this browser is holding stays valid until it expires, so a
+// page that only redirects leaves a live session behind.
+async function deleteAccount(confirmText) {
+  const fail = (code) => ({ ok: false, error: code });
+
+  if (!dbReady()) return fail('account_unavailable');
+
+  try {
+    const { data, error } = await supabaseClient.rpc('delete_account', {
+      p_confirm: String(confirmText ?? ''),
+    });
+
+    if (error) {
+      // The refusal arrives in `data`, so an `error` here means the call never
+      // happened: the migration is not applied, or the network is gone.
+      // PostgREST reports an absent function as PGRST202.
+      const blob = [error.message, error.details, error.hint, error.code]
+        .filter(v => typeof v === 'string')
+        .join(' ');
+      console.warn('delete_account:', error.message);
+      return fail(/PGRST202|schema cache|does not exist|could not find the function/i.test(blob)
+        ? 'account_missing'
+        : 'account_unavailable');
+    }
+
+    const row = unwrapRpc(data);
+    if (!row || typeof row !== 'object') return fail('account_unavailable');
+
+    if (row.ok === true) return Object.assign({}, row, { ok: true, error: null });
+
+    // An unrecognised code is still a refusal, and the account still exists —
+    // account_unavailable is the sentence that says so.
+    const code = row.error && ACCOUNT_REFUSALS[row.error] ? row.error : 'account_unavailable';
+    return fail(code);
+  } catch (e) {
+    console.warn('delete_account threw:', e);
+    return fail('account_unavailable');
   }
 }

@@ -1975,6 +1975,215 @@ body.duel-page {
   z-index: 40;
 }
 
+/* ============ STEAL MODE ============ */
+/* The real-time duel variant: a room before the run, and during it a
+   scoreline whose points can still be provisional plus one line saying who
+   took the question that just changed underneath you.
+
+   Four new tokens, declared for BOTH themes for the same reason the duel
+   tokens above are — a token defined in only one theme is a colour that
+   silently disappears in the other. Nothing else here introduces a colour:
+   every remaining rule resolves to a token that already existed. */
+
+:root,
+:root[data-theme="zetamac"] {
+  --c-steal-win:   #060;                      /* a point you took       */
+  --c-steal-lose:  #c00;                      /* a point taken from you */
+  --c-steal-flash: rgba(204, 0, 0, 0.13);     /* the loser flash        */
+  --c-steal-soft:  #999;                      /* a point not yet settled */
+}
+
+:root[data-theme="dark"] {
+  --c-steal-win:   #7fb069;
+  --c-steal-lose:  #ca4754;
+  --c-steal-flash: rgba(202, 71, 84, 0.20);
+  --c-steal-soft:  #726f67;
+}
+
+/* ── Mode choice, on the create panel ── */
+
+.duel-mode-choice {
+  border: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.duel-mode-legend {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--c-ink-soft);
+  margin-bottom: 4px;
+}
+
+.duel-mode-option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  align-items: baseline;
+  padding: 10px 12px;
+  border: 1px solid var(--c-border-soft);
+  background: var(--c-surface);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.duel-mode-option:hover {
+  border-color: var(--c-border);
+}
+
+.duel-mode-name {
+  font-weight: bold;
+  color: var(--c-ink);
+}
+
+.duel-mode-note {
+  grid-column: 2;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--c-ink-muted);
+}
+
+/* ── The room ── */
+
+.steal-players {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.steal-player {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border-soft);
+  border-left: 3px solid var(--c-ink-dim2);
+  font-size: 14px;
+}
+
+.steal-player.is-ready { border-left-color: var(--c-steal-win); }
+.steal-player.is-away  { border-left-color: var(--c-border); }
+
+.steal-player-name {
+  font-weight: bold;
+  color: var(--c-ink);
+  overflow-wrap: anywhere;
+}
+
+.steal-player-role {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--c-ink-soft);
+}
+
+.steal-player-state {
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--c-ink-muted);
+}
+
+.steal-player.is-ready .steal-player-state { color: var(--c-steal-win); }
+.steal-player.is-away  .steal-player-state { color: var(--c-ink-soft); }
+
+.steal-room-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+
+.steal-room-status {
+  font-size: 13px;
+  color: var(--c-ink-muted);
+  flex: 1 1 220px;
+}
+
+/* The 3-2-1. Empty until the creator starts, so it takes no space. */
+.steal-countdown {
+  font-size: 46px;
+  font-weight: bold;
+  line-height: 1.1;
+  color: var(--c-ink);
+  text-align: center;
+}
+
+.steal-countdown:empty { display: none; }
+
+.steal-convert {
+  margin-top: 20px;
+  padding: 14px 16px;
+  background: var(--c-banner-bg);
+  border: 1px solid var(--c-banner-border);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--c-ink);
+}
+
+.steal-convert p {
+  margin-top: 8px;
+  color: var(--c-ink-body);
+}
+
+/* ── The run ── */
+
+.steal-score-side.is-provisional {
+  color: var(--c-steal-soft);
+}
+
+.steal-score-sep {
+  color: var(--c-ink-dim);
+  padding: 0 6px;
+}
+
+/* Presence went away: the grace countdown. */
+.steal-banner {
+  position: fixed;
+  top: 44px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  padding: 8px 16px;
+  font-size: 13px;
+  color: var(--c-ink);
+  background: var(--c-banner-bg);
+  border-bottom: 1px solid var(--c-banner-border);
+  z-index: 20;
+}
+
+/* The loser flash. A question changing underneath you is only tolerable if
+   the interface says why in the same instant, so the area itself reacts. */
+#steal-area {
+  transition: background-color 160ms ease-out;
+}
+
+#steal-area.is-stolen {
+  background: var(--c-steal-flash);
+}
+
+/* One line, in place, under the question — never a toast over the next one. */
+.steal-line {
+  position: fixed;
+  top: calc(50% + 78px);
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 15px;
+  color: var(--c-ink-muted);
+  pointer-events: none;
+}
+
+.steal-line.is-you  { color: var(--c-steal-win); }
+.steal-line.is-them { color: var(--c-steal-lose); }
+
 /* ============ LEAGUES ============ */
 /* leagues.html is a document-flow page throughout — there is no run to play
    here, only lists, a join screen and a board — so it reuses .panel and the
@@ -2657,4 +2866,306 @@ body.settings-page {
 .settings-field-value {
   color: var(--c-ink);
   overflow-wrap: anywhere;
+}
+
+/* ── Danger zone ── */
+/* It has to look like the end of the page and not like a fifth setting. The
+   gap above it is the separation: everything up to here is reversible, and
+   nothing below it is. No new colours — --c-danger and --c-mistake-bg are the
+   two red tokens this stylesheet already defines in both themes, and a
+   hardcoded hex here would look correct in exactly one of them. */
+.panel-danger {
+  border-color: var(--c-danger);
+  margin-top: 40px;
+}
+
+.panel-danger h2 {
+  color: var(--c-danger);
+}
+
+.panel-danger .panel-note {
+  color: var(--c-danger);
+}
+
+/* Everything revealed by "Delete account", tinted with the same wash the
+   results table uses for a question you got wrong. */
+.danger-zone {
+  margin-top: 16px;
+  padding: 14px 16px;
+  background: var(--c-mistake-bg);
+  border: 1px solid var(--c-danger);
+}
+
+.danger-lead {
+  font-size: 13px;
+  font-weight: bold;
+  color: var(--c-ink);
+  margin-bottom: 8px;
+}
+
+/* The consequences, before the field rather than after it. The marker and the
+   indent are both restated because the reset at the top of this file zeroes
+   every element's padding, and every other list on the site turns the bullets
+   off — this is the one place they earn their keep. */
+.danger-list {
+  list-style: disc;
+  padding-left: 20px;
+  margin-bottom: 16px;
+}
+
+.danger-list li {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--c-ink-body);
+  margin-bottom: 6px;
+}
+
+.danger-strong {
+  color: var(--c-danger);
+  font-weight: bold;
+}
+
+.danger-prompt {
+  display: block;
+  font-size: 13px;
+  color: var(--c-ink);
+  margin-bottom: 8px;
+  /* The username can be 20 characters and this panel must not be able to grow
+     wider than the page on a phone. */
+  overflow-wrap: anywhere;
+}
+
+/* The field carries the surface colour of the panel it sits in rather than the
+   tint behind it, so it still reads as somewhere to type. */
+.danger-zone .auth-field {
+  background: var(--c-surface);
+  border-color: var(--c-danger);
+}
+
+.settings-page .btn-danger:disabled {
+  color: var(--c-ink-dim);
+  border-color: var(--c-border-soft);
+  background: none;
+  cursor: not-allowed;
+}
+
+.settings-page .btn-danger:disabled:hover {
+  color: var(--c-ink-dim);
+  background: none;
+  border-color: var(--c-border-soft);
+}
+
+/* ============ FIRST-RUN WALKTHROUGH ============
+   docs/walkthrough-design.md. A modal, not a strip: a banner on the config
+   screen is something a first-time visitor's eye slides past on the way to the
+   Start button, which is the same as not building it. It is small, escapable
+   four ways, and shown once.
+
+   No new tokens are declared here — every colour below is one of the tokens at
+   the top of this file, so both themes are covered by construction rather than
+   by remembering to edit two blocks. */
+
+.tour-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--c-scrim-dark);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  /* Above the auth modal (999): the tour opens on first load and the log-in
+     modal must not be able to surface through it. */
+  z-index: 1000;
+}
+
+.tour-modal {
+  position: relative;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  width: 100%;
+  max-width: 420px;
+  padding: 24px 26px 18px;
+  /* The copy differs in length step to step; a fixed height stops the panel
+     jumping around under the cursor as somebody clicks Next. */
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 40px);
+  animation: tour-in 140ms ease-out;
+}
+
+@keyframes tour-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tour-modal { animation: none; }
+}
+
+.tour-eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--c-ink-faint);
+  margin-bottom: 6px;
+}
+
+.tour-title {
+  font-size: 19px;
+  line-height: 1.25;
+  color: var(--c-ink-max);
+  margin-bottom: 12px;
+  /* Room for the close button. */
+  padding-right: 24px;
+}
+
+.tour-body {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--c-ink-body);
+  flex: 1 1 auto;
+  overflow-y: auto;
+}
+
+.tour-body p {
+  margin-bottom: 10px;
+}
+
+.tour-body code {
+  color: var(--c-ink-strong);
+  font-size: 13px;
+}
+
+/* The worked example from the run analysis, quoted so it reads as output of
+   the product rather than as more prose. */
+.tour-example {
+  background: var(--c-banner-bg);
+  border-left: 3px solid var(--c-banner-border);
+  color: var(--c-ink-strong);
+  padding: 7px 10px;
+  font-size: 13px;
+}
+
+.tour-dots {
+  display: flex;
+  gap: 5px;
+  margin: 14px 0 12px;
+}
+
+.tour-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--c-ink-dim2);
+}
+
+.tour-dot.active {
+  background: var(--c-accent);
+}
+
+.tour-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tour-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tour-counter {
+  font-size: 12px;
+  color: var(--c-ink-faint);
+  margin-right: 2px;
+}
+
+.tour-back,
+.tour-next {
+  font-family: inherit;
+  font-size: 13px;
+  padding: 6px 12px;
+  cursor: pointer;
+  border: 1px solid var(--c-border);
+  background: none;
+  color: var(--c-ink-strong);
+}
+
+.tour-back:hover:not(:disabled) {
+  border-color: var(--c-ink-muted);
+}
+
+.tour-back:disabled {
+  color: var(--c-ink-dim);
+  border-color: var(--c-border-soft);
+  cursor: not-allowed;
+}
+
+.tour-next {
+  background: var(--c-accent);
+  color: var(--c-on-accent);
+  border-color: var(--c-accent);
+}
+
+.tour-next:hover {
+  background: var(--c-ink-muted);
+  border-color: var(--c-ink-muted);
+}
+
+.tour-skip {
+  font-family: inherit;
+  font-size: 12px;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--c-ink-faint);
+  text-decoration: underline;
+}
+
+.tour-skip:hover {
+  color: var(--c-ink-strong);
+}
+
+.tour-close {
+  position: absolute;
+  top: 6px;
+  right: 9px;
+  background: none;
+  border: none;
+  font-size: 22px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+  color: var(--c-ink-soft);
+}
+
+.tour-close:hover {
+  color: var(--c-ink-max);
+}
+
+/* The quiet way back in once the tour has been dismissed, so dismissing it is
+   not permanent. */
+.site-footer {
+  text-align: center;
+  font-size: 12px;
+  padding: 22px 15px 26px;
+  color: var(--c-ink-faint);
+}
+
+.site-footer a {
+  color: var(--c-link);
+  text-decoration: none;
+}
+
+.site-footer a:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 520px) {
+  .tour-modal { padding: 20px 18px 14px; min-height: 0; }
+  .tour-controls { flex-wrap: wrap; }
 }

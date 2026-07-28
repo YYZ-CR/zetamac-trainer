@@ -70,6 +70,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderSettingsVisibility();
   renderSettingsAppearance();
   renderSettingsAccount();
+  renderSettingsDanger();
 });
 
 // ── 1. Username ───────────────────────────────────────────────
@@ -188,6 +189,10 @@ async function saveSettingsUsername() {
 
     renderSettingsUsername();
     renderSettingsVisibility();
+    // The string the Danger zone asks for IS the username, so it moves with
+    // it. Anything already typed into that field now confirms nothing, which
+    // is the correct outcome — renderSettingsDanger re-derives the button.
+    renderSettingsDanger();
     // textContent, not innerHTML: this is the name they just chose.
     document.getElementById('username-status').textContent =
       `Saved. You are now ${res.username}.`;
@@ -413,6 +418,133 @@ function renderSettingsAccount() {
   });
 }
 
+// ── 5. Danger zone ────────────────────────────────────────────
+// The one control on this site that destroys something nobody can put back.
+// Three things keep it from firing by accident: it is last on the page, it is
+// collapsed until it is asked for, and the button that does it stays disabled
+// until the account's own name has been typed out. The last of those is the
+// only one the server also enforces — supabase/account.sql refuses any
+// p_confirm that is not the caller's username — so the page and the database
+// agree about what counts as confirmation rather than the page merely being
+// careful.
+
+// The exact string the confirmation field has to contain: the username, or the
+// literal DELETE for an account that has none (there is nothing else only its
+// owner is looking at).
+function settingsDeletePhrase() {
+  return settingsUsernameNow() || 'DELETE';
+}
+
+// Whether what has been typed confirms the delete. Trimmed and case-folded,
+// which is exactly the comparison delete_account makes: a button that enables
+// on a string the server will reject is a lie, and one that stays disabled on
+// a string the server would accept is a dead end with no way out of it.
+function settingsDeleteMatches(typed) {
+  const want = settingsDeletePhrase().trim().toLowerCase();
+  const got  = String(typed ?? '').trim().toLowerCase();
+  // An empty string never confirms, which is also stated in the contract: a
+  // username of nothing but spaces would otherwise trim to '' on both sides
+  // and arm the button over an empty field, on a call the server refuses.
+  if (!got || !want) return false;
+  return got === want;
+}
+
+// Re-rendered after a username change as well as on load: the phrase to type
+// is the username, so claiming or changing one moves it.
+function renderSettingsDanger() {
+  const phrase = settingsDeletePhrase();
+  const input  = document.getElementById('danger-input');
+
+  // The phrase is the username, which is user-controlled and is the value on
+  // this page most likely to be hostile — its owner chose it.
+  document.getElementById('danger-prompt').innerHTML =
+    `To confirm, type <strong class="settings-strong">${escapeHtml(phrase)}</strong> ` +
+    'in the box below.';
+
+  input.placeholder = phrase;
+  settingsDeleteEnable();
+}
+
+// The button's disabled state is derived from the field, never set anywhere
+// else, so there is no path that leaves it enabled over a stale value.
+function settingsDeleteEnable() {
+  const input = document.getElementById('danger-input');
+  const btn   = document.getElementById('danger-delete-btn');
+  if (!input || !btn) return;
+  btn.disabled = input.disabled || !settingsDeleteMatches(input.value);
+}
+
+function openSettingsDanger(open) {
+  document.getElementById('danger-zone').style.display = open ? 'block' : 'none';
+  document.getElementById('danger-open-btn').style.display = open ? 'none' : 'inline-block';
+
+  if (!open) {
+    const input = document.getElementById('danger-input');
+    input.value = '';
+    document.getElementById('danger-error').textContent  = '';
+    document.getElementById('danger-status').textContent = '';
+    settingsDeleteEnable();
+  }
+}
+
+async function deleteThisAccount() {
+  const input  = document.getElementById('danger-input');
+  const btn    = document.getElementById('danger-delete-btn');
+  const cancel = document.getElementById('danger-cancel-btn');
+  const err    = document.getElementById('danger-error');
+  const status = document.getElementById('danger-status');
+
+  // Re-checked rather than trusted: a keyboard Enter, a double-fired click or
+  // a disabled attribute somebody removed in devtools all arrive here.
+  if (btn.disabled || !settingsDeleteMatches(input.value)) return;
+
+  const typed = input.value;
+  err.textContent = '';
+  settingsDangerStatus('Deleting your account…', 'pending');
+
+  btn.disabled    = true;
+  cancel.disabled = true;
+  input.disabled  = true;
+  btn.textContent = 'Deleting…';
+
+  const res = await deleteAccount(typed.trim());
+
+  if (res.ok) {
+    // Sign out FIRST, before anything else and before leaving the page. The
+    // account row is gone, but the access token in this browser stays valid
+    // until it expires on its own — a redirect that skips this leaves a live
+    // session for an account that no longer exists, and every page that reads
+    // it renders a signed-in header for a deleted user.
+    settingsDangerStatus('Your account has been deleted. Signing you out…', 'ok');
+    try {
+      await logout();
+    } catch (e) {
+      console.warn('sign-out after delete failed:', e);
+    }
+    // Not a reload: there is no account left for this page to render.
+    window.location.href = 'index.html';
+    return;
+  }
+
+  // Still here, so the account still exists. Put the controls back the way
+  // they were — a mismatch is something you fix by typing.
+  btn.disabled    = false;
+  cancel.disabled = false;
+  input.disabled  = false;
+  btn.textContent = 'Delete my account';
+  input.value     = typed;
+  settingsDeleteEnable();
+
+  settingsDangerStatus('', null);
+  err.textContent = ACCOUNT_REFUSALS[res.error] || ACCOUNT_REFUSALS.account_unavailable;
+}
+
+function settingsDangerStatus(text, kind) {
+  const status = document.getElementById('danger-status');
+  status.textContent = text;
+  status.className = 'profile-visibility-status' + (kind ? ' is-' + kind : '');
+}
+
 // ── Small shared helpers ──────────────────────────────────────
 
 // When the next change is allowed, in epoch ms, given a username_changed_at —
@@ -475,4 +607,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const copyBtn = document.getElementById('visibility-copy-btn');
   if (copyBtn) copyBtn.addEventListener('click', copySettingsProfileLink);
+
+  const openBtn   = document.getElementById('danger-open-btn');
+  const cancelBtn = document.getElementById('danger-cancel-btn');
+  const delInput  = document.getElementById('danger-input');
+  const delBtn    = document.getElementById('danger-delete-btn');
+  if (openBtn)   openBtn.addEventListener('click', () => openSettingsDanger(true));
+  if (cancelBtn) cancelBtn.addEventListener('click', () => openSettingsDanger(false));
+  // 'input' rather than 'change': the button has to follow the field as it is
+  // typed, not when it is blurred.
+  if (delInput) {
+    delInput.addEventListener('input', settingsDeleteEnable);
+    delInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') deleteThisAccount();
+    });
+  }
+  if (delBtn) delBtn.addEventListener('click', deleteThisAccount);
 });
