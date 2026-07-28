@@ -1975,6 +1975,215 @@ body.duel-page {
   z-index: 40;
 }
 
+/* ============ STEAL MODE ============ */
+/* The real-time duel variant: a room before the run, and during it a
+   scoreline whose points can still be provisional plus one line saying who
+   took the question that just changed underneath you.
+
+   Four new tokens, declared for BOTH themes for the same reason the duel
+   tokens above are — a token defined in only one theme is a colour that
+   silently disappears in the other. Nothing else here introduces a colour:
+   every remaining rule resolves to a token that already existed. */
+
+:root,
+:root[data-theme="zetamac"] {
+  --c-steal-win:   #060;                      /* a point you took       */
+  --c-steal-lose:  #c00;                      /* a point taken from you */
+  --c-steal-flash: rgba(204, 0, 0, 0.13);     /* the loser flash        */
+  --c-steal-soft:  #999;                      /* a point not yet settled */
+}
+
+:root[data-theme="dark"] {
+  --c-steal-win:   #7fb069;
+  --c-steal-lose:  #ca4754;
+  --c-steal-flash: rgba(202, 71, 84, 0.20);
+  --c-steal-soft:  #726f67;
+}
+
+/* ── Mode choice, on the create panel ── */
+
+.duel-mode-choice {
+  border: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.duel-mode-legend {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--c-ink-soft);
+  margin-bottom: 4px;
+}
+
+.duel-mode-option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  align-items: baseline;
+  padding: 10px 12px;
+  border: 1px solid var(--c-border-soft);
+  background: var(--c-surface);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.duel-mode-option:hover {
+  border-color: var(--c-border);
+}
+
+.duel-mode-name {
+  font-weight: bold;
+  color: var(--c-ink);
+}
+
+.duel-mode-note {
+  grid-column: 2;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--c-ink-muted);
+}
+
+/* ── The room ── */
+
+.steal-players {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.steal-player {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border-soft);
+  border-left: 3px solid var(--c-ink-dim2);
+  font-size: 14px;
+}
+
+.steal-player.is-ready { border-left-color: var(--c-steal-win); }
+.steal-player.is-away  { border-left-color: var(--c-border); }
+
+.steal-player-name {
+  font-weight: bold;
+  color: var(--c-ink);
+  overflow-wrap: anywhere;
+}
+
+.steal-player-role {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--c-ink-soft);
+}
+
+.steal-player-state {
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--c-ink-muted);
+}
+
+.steal-player.is-ready .steal-player-state { color: var(--c-steal-win); }
+.steal-player.is-away  .steal-player-state { color: var(--c-ink-soft); }
+
+.steal-room-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+
+.steal-room-status {
+  font-size: 13px;
+  color: var(--c-ink-muted);
+  flex: 1 1 220px;
+}
+
+/* The 3-2-1. Empty until the creator starts, so it takes no space. */
+.steal-countdown {
+  font-size: 46px;
+  font-weight: bold;
+  line-height: 1.1;
+  color: var(--c-ink);
+  text-align: center;
+}
+
+.steal-countdown:empty { display: none; }
+
+.steal-convert {
+  margin-top: 20px;
+  padding: 14px 16px;
+  background: var(--c-banner-bg);
+  border: 1px solid var(--c-banner-border);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--c-ink);
+}
+
+.steal-convert p {
+  margin-top: 8px;
+  color: var(--c-ink-body);
+}
+
+/* ── The run ── */
+
+.steal-score-side.is-provisional {
+  color: var(--c-steal-soft);
+}
+
+.steal-score-sep {
+  color: var(--c-ink-dim);
+  padding: 0 6px;
+}
+
+/* Presence went away: the grace countdown. */
+.steal-banner {
+  position: fixed;
+  top: 44px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  padding: 8px 16px;
+  font-size: 13px;
+  color: var(--c-ink);
+  background: var(--c-banner-bg);
+  border-bottom: 1px solid var(--c-banner-border);
+  z-index: 20;
+}
+
+/* The loser flash. A question changing underneath you is only tolerable if
+   the interface says why in the same instant, so the area itself reacts. */
+#steal-area {
+  transition: background-color 160ms ease-out;
+}
+
+#steal-area.is-stolen {
+  background: var(--c-steal-flash);
+}
+
+/* One line, in place, under the question — never a toast over the next one. */
+.steal-line {
+  position: fixed;
+  top: calc(50% + 78px);
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 15px;
+  color: var(--c-ink-muted);
+  pointer-events: none;
+}
+
+.steal-line.is-you  { color: var(--c-steal-win); }
+.steal-line.is-them { color: var(--c-steal-lose); }
+
 /* ============ LEAGUES ============ */
 /* leagues.html is a document-flow page throughout — there is no run to play
    here, only lists, a join screen and a board — so it reuses .panel and the

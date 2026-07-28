@@ -71,6 +71,11 @@ run_sql "$SQLDIR_MIG/hardening.sql"
 run_sql "$SQLDIR_MIG/social.sql"
 [ -r "$SQLDIR_MIG/daily.sql" ] && run_sql "$SQLDIR_MIG/daily.sql"
 [ -r "$SQLDIR_MIG/duels.sql" ] && run_sql "$SQLDIR_MIG/duels.sql"
+# Straight after duels.sql, always. It extends duels/duel_runs and it DROPs the
+# one-argument create_duel in favour of one that takes a mode — so duels.sql
+# applied after it resurrects the old overload and makes create_duel(120)
+# ambiguous. The re-apply pass below runs the two in this order for that reason.
+[ -r "$SQLDIR_MIG/steal.sql" ] && run_sql "$SQLDIR_MIG/steal.sql"
 [ -r "$SQLDIR_MIG/leagues.sql" ] && run_sql "$SQLDIR_MIG/leagues.sql"
 # Next to last: it revokes the client's column grants on profiles and replaces
 # username_available, so re-applying hardening.sql after it would undo half
@@ -87,6 +92,7 @@ echo "=== re-applying migrations (idempotency) ==="
 run_sql "$SQLDIR_MIG/social.sql"
 [ -r "$SQLDIR_MIG/daily.sql" ] && run_sql "$SQLDIR_MIG/daily.sql"
 [ -r "$SQLDIR_MIG/duels.sql" ] && run_sql "$SQLDIR_MIG/duels.sql"
+[ -r "$SQLDIR_MIG/steal.sql" ] && run_sql "$SQLDIR_MIG/steal.sql"
 [ -r "$SQLDIR_MIG/leagues.sql" ] && run_sql "$SQLDIR_MIG/leagues.sql"
 [ -r "$SQLDIR_MIG/settings.sql" ] && run_sql "$SQLDIR_MIG/settings.sql"
 [ -r "$SQLDIR_MIG/account.sql" ] && run_sql "$SQLDIR_MIG/account.sql"
@@ -112,6 +118,16 @@ if [ -r "$SQLDIR_MIG/account.sql" ]; then
     TESTS="$TESTS -f '$SQLDIR_TEST/07-account-test.sql'"
   else
     echo "NOTE: supabase/account.sql is applied but 07-account-test.sql is missing — account contract NOT tested" >&2
+  fi
+fi
+# Same arrangement for steal mode: migration and suite are written by different
+# hands, so a missing suite is a loud NOTE rather than a broken run — and never
+# silence, which would be a green run that proves nothing.
+if [ -r "$SQLDIR_MIG/steal.sql" ]; then
+  if [ -r "$SQLDIR_TEST/08-steal-test.sql" ]; then
+    TESTS="$TESTS -f '$SQLDIR_TEST/08-steal-test.sql'"
+  else
+    echo "NOTE: supabase/steal.sql is applied but 08-steal-test.sql is missing — steal contract NOT tested" >&2
   fi
 fi
 psql_run "-d $DB $TESTS" 2>&1 | sed 's/^psql.*NOTICE:  //'

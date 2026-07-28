@@ -468,6 +468,20 @@ const DUEL_REFUSALS = {
     'That side of the duel has already been played.',
   duel_window_closed:
     'The window for this run has closed.',
+
+  // Steal mode (docs/steal-mode-design.md). These are refusals of a CLAIM, not
+  // of a duel, so they are worded as a thing that happened in the run rather
+  // than as an error — a player who lost a race by 30ms has not done anything
+  // wrong. None of these strings appears in a classic refusal, so adding them
+  // to this table cannot change how a classic duel reads an error.
+  not_a_participant:
+    "You aren't a player in this duel.",
+  wrong_mode:
+    'This duel is not a steal duel.',
+  stale_index:
+    'That question had already been decided.',
+  point_taken:
+    'They got there first.',
 };
 
 // Set when the last duel call failed: a sentence for the user (lastDuelError)
@@ -560,11 +574,16 @@ async function duelRpc(fn, args) {
 // notify and nobody to rematch. The duration is clamped server-side to
 // 15..600, so the returned duration_seconds is the one that was actually used
 // and is what the page must show.
-async function createDuel(durationSeconds) {
+// `mode` is 'classic' (the default) or 'steal'. p_mode is sent ONLY for a
+// steal duel: create_duel gained the argument with a default, so a classic
+// create must stay the exact one-argument call it was before — a database that
+// has not had the steal migration applied yet still answers it, and the client
+// is written to work on both sides of a migration.
+async function createDuel(durationSeconds, mode) {
   const n = Number(durationSeconds);
-  return duelRpc('create_duel', {
-    p_duration: Number.isFinite(n) ? Math.round(n) : 120,
-  });
+  const args = { p_duration: Number.isFinite(n) ? Math.round(n) : 120 };
+  if (String(mode || '') === 'steal') args.p_mode = 'steal';
+  return duelRpc('create_duel', args);
 }
 
 // The duel's public face for whoever is holding the link: duel_key,
@@ -625,6 +644,110 @@ async function submitDuelRun(key, answers) {
     p_guest_token: duelGuestToken(key) || null,
     p_answers: answers,
   });
+}
+
+// ── Steal-mode duels ─────────────────────────────────────────
+// The real-time variant: first correct answer takes the point and both players
+// jump to the next question. docs/steal-mode-design.md is the contract. Three
+// properties of it decide the shape of this section:
+//
+//   * The point is the SERVER's. claim_duel_point arbitrates on the client's
+//     time-since-the-question-was-rendered, clamped against what the server
+//     itself observed, and returns who actually won. Nothing here computes a
+//     winner, and nothing here reads one out of a broadcast — the channel
+//     below carries hints, and a hint that could award a point would make a
+//     forged message a score.
+//   * A guest must still be able to play, so these take the same guest token
+//     as every other duel RPC and are granted to `anon`.
+//   * Realtime may simply not be there: an older supabase-js with no
+//     .channel(), a blocked WebSocket, a stubbed client. duelChannel() returns
+//     null rather than throwing, and duel.js degrades to offering a classic
+//     duel — which needs nobody to be awake — instead of a dead page.
+
+// Claim the point for question `index`, having answered it `elapsedMs` after
+// it appeared on screen. Returns { ok, index, winner, elapsed_ms, provisional }
+// — `provisional` true while the server's 400ms grace window is still open, so
+// the UI can say the point may yet move — or null with lastDuelCode set for a
+// refusal ('point_taken', 'stale_index', 'wrong_mode', 'not_a_participant').
+//
+// The elapsed time is the client's, and a client can lie about it; the server
+// clamps it to the time it has itself observed since the question was
+// released, so the worst a cheat can claim is the physics the server saw.
+// Sending a wrong answer is pointless — the server checks it and awards
+// nothing — so duel.js only ever calls this for an answer it knows is right.
+async function claimDuelPoint(key, index, elapsedMs) {
+  if (!key) { lastDuelCode = 'duel_not_found'; lastDuelError = DUEL_REFUSALS.duel_not_found; return null; }
+  const i  = Number(index);
+  const ms = Number(elapsedMs);
+  return duelRpc('claim_duel_point', {
+    p_key: String(key),
+    p_guest_token: duelGuestToken(key) || null,
+    p_index:      Number.isFinite(i)  ? Math.max(0, Math.round(i))  : 0,
+    p_elapsed_ms: Number.isFinite(ms) ? Math.max(0, Math.round(ms)) : 0,
+  });
+}
+
+// End a steal duel on the score so far, because a player's presence went away
+// for longer than the grace window (or they left cleanly). The duel is marked
+// ended early — NOT as a win for whoever stayed, which would make pulling your
+// ethernet cable a winning move.
+//
+// NOTE: docs/steal-mode-design.md specifies the behaviour but does not name
+// this function or pin its payload, unlike claim_duel_point. The name and
+// arguments here are this client's proposal and must be reconciled with
+// supabase/duels.sql before either side ships. duel.js therefore treats a
+// missing function as survivable: it still renders the ended-early state and
+// re-reads the duel for the authoritative scores.
+async function endDuelEarly(key, reason) {
+  if (!key) { lastDuelCode = 'duel_not_found'; lastDuelError = DUEL_REFUSALS.duel_not_found; return null; }
+  return duelRpc('end_duel_early', {
+    p_key: String(key),
+    p_guest_token: duelGuestToken(key) || null,
+    p_reason: String(reason || 'ended_early'),
+  });
+}
+
+// Turn a steal duel that nobody turned up for into a classic one. The
+// questions are already generated and a classic duel needs nobody to be awake,
+// so this is the failure mode degrading to the thing that already works rather
+// than to a dead end.
+//
+// Same caveat as endDuelEarly: the design doc requires the offer but does not
+// name the function. Creator only — it is their duel.
+async function convertDuelToClassic(key) {
+  if (!key) { lastDuelCode = 'duel_not_found'; lastDuelError = DUEL_REFUSALS.duel_not_found; return null; }
+  return duelRpc('convert_duel_to_classic', {
+    p_key: String(key),
+    p_guest_token: duelGuestToken(key) || null,
+  });
+}
+
+// The Realtime channel a steal duel talks on: broadcast for the five messages
+// in the design doc, presence for liveness. `presenceKey` identifies this tab
+// so a reconnecting player replaces their own entry rather than appearing
+// twice.
+//
+// Returns null — never throws — when Realtime is unavailable. The caller has a
+// real fallback (a classic duel), and it can only offer it if it is told.
+function duelChannel(key, presenceKey) {
+  if (!key || !dbReady()) return null;
+  if (typeof supabaseClient.channel !== 'function') {
+    console.warn('duelChannel: this Supabase client has no Realtime');
+    return null;
+  }
+  try {
+    return supabaseClient.channel('duel:' + String(key), {
+      config: {
+        presence: { key: String(presenceKey || '') },
+        // Own messages come back from the local optimistic path, not from the
+        // server; echoing them would double-apply every advance.
+        broadcast: { self: false },
+      },
+    });
+  } catch (e) {
+    console.warn('duelChannel failed:', e);
+    return null;
+  }
 }
 
 // ── Private leagues ──────────────────────────────────────────

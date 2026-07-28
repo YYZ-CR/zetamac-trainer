@@ -24,7 +24,14 @@ The shared sequence is what makes a leaderboard defensible: the usual objection 
 any arithmetic ranking is "you got easier problems", and this removes it.
 
 **Duels** — send a link, you both answer the same sequence, neither sees a score
-until both are done. Ends on a pace graph. Guests can play without an account.
+until both are done. Ends on a pace graph of both players' runs. Guests can play
+without an account.
+
+**Steal mode** — the same link, played live. The first correct answer takes the
+point and *both* players jump to the next question, so every question is a race.
+Arbitration runs on time-since-the-question-appeared, clamped against what the
+server itself observed, because awarding the point to whoever's packet arrived
+first would make it a contest of who has the better connection.
 
 **Private leagues** — an invite code, a named group, and a board over the day's
 puzzle. Being 3rd of 6 behind people you know is a better reason to practise than
@@ -97,13 +104,20 @@ Apply these **by hand** in the Supabase SQL editor, in this order:
 | `supabase/social.sql` | public profiles, percentiles |
 | `supabase/daily.sql` | Zetamac Daily, server-authoritative scoring |
 | `supabase/duels.sql` | duels — **depends on `daily.sql`** for the question generator |
+| `supabase/steal.sql` | steal mode — must go **immediately after `duels.sql`** |
 | `supabase/leagues.sql` | private leagues |
 | `supabase/settings.sql` | `set_username`, rename cooldown, column-level grants |
 | `supabase/account.sql` | `delete_account` — the ordered cascade for deleting an account |
 
-Three ordering constraints, all real:
+Four ordering constraints, all real:
 
 - `duels.sql` calls functions defined in `daily.sql`, so daily comes first.
+- **`steal.sql` goes immediately after `duels.sql`, and `duels.sql` is never applied
+  after it on its own.** `steal.sql` replaces `create_duel` with a version taking a
+  mode argument and drops the one-argument original; re-applying `duels.sql`
+  afterwards puts that original back, and `create_duel(120)` then matches two
+  functions and fails as ambiguous. Re-apply `steal.sql` straight after any
+  re-application of `duels.sql`.
 - **`settings.sql` goes after every file that touches `profiles`.** It revokes the
   client's column grants on `profiles` and replaces `username_available`. Re-running
   `hardening.sql` after it would hand those grants back and undo half of it. If you
@@ -152,9 +166,15 @@ the migrations depend on — `auth.users`, an `auth.uid()` driven by a GUC so te
 impersonate any user, and the `anon`/`authenticated` roles. Nothing touches your real
 project.
 
-`supabase/test/race-*.sh` drive real concurrent sessions at the two places where a
-check-then-act bug would hide: claiming the single opponent slot in a duel, and the
-last seat in a full league.
+`supabase/test/race-*.sh` drive real concurrent sessions at the three places where a
+check-then-act bug would hide: claiming the single opponent slot in a duel, the last
+seat in a full league, and two steal-mode players answering the same question at
+once. Each ends with a **negative control** — the same race with the guard removed —
+because a race test that has never failed proves nothing.
+
+Steal mode's live behaviour over Supabase Realtime is **not** covered by any of this:
+the browser suite stubs the channel, and two real clients over a real socket is a
+manual check against the deployed project.
 
 Browser tests stub the CDN and the Supabase client, so the real page scripts run
 against a fake network.
@@ -184,8 +204,8 @@ stored questions, and anything else the client attaches is discarded.
 ### Docs
 
 `docs/` holds the contracts the client and database were both built against —
-`social-api.md`, `daily-design.md`, `duels-design.md`, `leagues-design.md`,
-`account-deletion.md`. Settle the shape there first, then build both sides against it.
+`social-api.md`, `daily-design.md`, `duels-design.md`, `steal-mode-design.md`,
+`leagues-design.md`, `account-deletion.md`, `walkthrough-design.md`. Settle the shape there first, then build both sides against it.
 
 `account-deletion.md` is the one to read before touching a foreign key: it states the
 fate of every row that mentions an account, and `supabase/account.sql` is that list in
@@ -216,7 +236,5 @@ MIT. See `LICENSE`.
 
 ## Not built
 
-**Steal mode** for duels — first correct answer takes the point and both players jump
-to the next question. It needs both players online simultaneously, latency-compensated
-arbitration, and optimistic advance; the design is written up in
-`docs/duels-design.md`.
+**A demo video.** `docs/demo-video-guide.md` has the structure and the capture
+pipeline worked out; nothing has been shot.

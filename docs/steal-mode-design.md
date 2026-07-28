@@ -67,7 +67,11 @@ not a literal buried in a condition.
 Ties — identical clamped milliseconds — go to `creator`. Arbitrary, but deterministic
 and written down, which is what a tie-break has to be.
 
-### `claim_duel_point(p_key, p_guest_token, p_index, p_elapsed_ms) → JSONB`
+### `claim_duel_point(p_key, p_guest_token, p_index, p_elapsed_ms, p_answer) → JSONB`
+
+`p_answer` was missing from the first draft of this document, which said in the same
+breath that the answer is checked on the server. With no answer argument there is
+nothing to check. It is last and defaulted so the shape stays readable.
 
 `SECURITY DEFINER`, `SET search_path = public`, granted to `anon` and
 `authenticated` (guests play duels).
@@ -77,9 +81,12 @@ and written down, which is what a tie-break has to be.
 - The answer is checked **on the server** against the stored question. A wrong answer
   never awards a point and never advances anybody — it returns `{ok:false,
   error:'wrong'}` and costs the claimer only their own time.
-- `p_index` must be the duel's current index (`the highest awarded index + 1`).
-  A claim for any other index is `stale_index`, which is also what a client racing
-  ahead on an optimistic advance will get.
+- **Claimable indexes.** The current index — the highest awarded index plus one — is
+  always claimable. So is the most recently awarded index, but only while its grace
+  window is open; that is what "a better claim replaces it" means, and the first
+  draft of this document contradicted itself by calling that index stale. Once the
+  window closes it gives `point_taken`. Anything below that is a genuine replay and
+  gives `stale_index`, as does a client racing ahead of the award.
 - Returns `{ok, index, winner, elapsed_ms, provisional}`. `provisional` is true while
   inside the grace window, so the UI can be honest that the point may still move.
 
