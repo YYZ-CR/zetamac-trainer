@@ -2,6 +2,31 @@
 
 A Zetamac-style mental-arithmetic trainer. Static site on Vercel, Supabase behind it.
 
+## Before every commit: update README.md
+
+`README.md` is the only document a newcomer reads. It goes stale silently, and a
+stale README is worse than none — it teaches the wrong setup with authority.
+
+**Check it before every commit, and update it in the same commit as the change.** A
+follow-up commit "to fix the docs" is a commit that does not get made.
+
+It needs updating when you:
+
+- add or remove a **page**, a **migration**, or an **npm script**
+- change the **order** migrations must be applied in, or add a dependency between them
+- change how the site is **run, served or configured** locally
+- add a **test suite**, or change how an existing one is invoked
+- add or materially change a **user-facing feature** — the "What it does" section
+  describes behaviour, not files, so a new feature belongs there in a sentence
+- discover a **setup trap** someone else would hit (the `npx serve` query-string bug
+  is in there because it cost real time)
+
+It does **not** need updating for an internal refactor, a bug fix with no user-visible
+change, or a new test that covers existing behaviour.
+
+Keep it honest: if something is untested, unbuilt, or known-broken, say so. The "Not
+built" section exists so that gaps are stated rather than discovered.
+
 ## Subagent model selection
 
 **Opus for anything that builds or audits. Sonnet for fact-finding and research.**
