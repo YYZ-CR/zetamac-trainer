@@ -165,6 +165,19 @@ the shape there first, then build both sides against it.
 `docs/demo-video-guide.md` is unrelated to the app: a general reference for producing
 demo videos.
 
+## Planned
+
+**A first-run walkthrough.** Someone arriving for the first time sees a config
+screen and a Start button, and nothing tells them the daily, duels, leagues,
+practice mode or the per-operation analysis exist. A one-time popup should walk
+through each feature, be dismissible, and never appear twice.
+
+Worth building **last**, deliberately: a walkthrough is a description of the
+product, so every feature added before it is written is a feature the tour has to
+be rewritten for. It also needs a decision on where "seen it" is stored —
+localStorage means it reappears on a second device, a profile column means it
+follows the account but does nothing for signed-out visitors.
+
 ## Not built
 
 **Steal mode** for duels — first correct answer takes the point and both players jump
