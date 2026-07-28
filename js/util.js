@@ -56,3 +56,34 @@ function escapeHtml(value) {
     "'": '&#39;',
   }[ch]));
 }
+
+// ── Username shape ────────────────────────────────────────────
+// The same rule supabase/settings.sql enforces, restated here only so a user
+// is told BEFORE an account is created rather than after. The database is
+// authoritative: set_username re-checks every one of these, and a CHECK
+// constraint on profiles blocks the registration insert outright.
+//
+// That constraint is why this exists. Registration inserts the profile row
+// directly, so without a matching check up front, signing up as "Yang Yang"
+// creates the account, fails the insert, and leaves a user with no username —
+// the exact dead end the claim panel had to be built to escape.
+const USERNAME_MIN     = 3;
+const USERNAME_MAX     = 20;
+const USERNAME_PATTERN = /^[A-Za-z0-9_-]+$/;
+
+// Null when the name is acceptable, otherwise the reason, phrased for a user.
+// Reports the most specific problem rather than the first one tripped: told
+// only "3 to 20 characters", someone typing "Yang Yang" would shorten it and
+// fail again on the space.
+function usernameProblem(value) {
+  const name = String(value ?? '').trim();
+  if (!name)                    return 'Please choose a username.';
+  if (!USERNAME_PATTERN.test(name)) {
+    return /\s/.test(name)
+      ? 'Usernames cannot contain spaces — try a hyphen or underscore.'
+      : 'Usernames can only use letters, numbers, hyphens and underscores.';
+  }
+  if (name.length < USERNAME_MIN) return `Usernames are at least ${USERNAME_MIN} characters.`;
+  if (name.length > USERNAME_MAX) return `Usernames are at most ${USERNAME_MAX} characters.`;
+  return null;
+}

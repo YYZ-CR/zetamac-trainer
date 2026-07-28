@@ -44,7 +44,7 @@ function createAuthModal() {
       <h2 id="modal-heading">Log In</h2>
       <input type="email" id="auth-email" class="auth-field" placeholder="Email" autocomplete="email">
       <input type="password" id="auth-password" class="auth-field" placeholder="Password" autocomplete="current-password">
-      <input type="text" id="auth-username" class="auth-field" placeholder="Username" autocomplete="username" style="display:none">
+      <input type="text" id="auth-username" class="auth-field" placeholder="Username — 3-20 letters, numbers, - or _" autocomplete="username" maxlength="20" style="display:none">
       <div class="auth-error" id="auth-error" role="alert"></div>
       <button class="auth-submit" id="auth-submit-btn">Log In</button>
       <button class="auth-switch" id="auth-switch-btn">Don't have an account? Register</button>
@@ -99,8 +99,16 @@ function createAuthModal() {
     try {
       if (isRegister) {
         const username = document.getElementById('auth-username').value.trim();
-        if (!username) {
-          errorEl.textContent = 'Please choose a username.';
+
+        // Checked here, before signUp, because profiles carries a CHECK
+        // constraint on username shape. Without this the account is created,
+        // the profile insert is refused, and the user is left signed in with
+        // no username at all.
+        const problem = typeof usernameProblem === 'function'
+          ? usernameProblem(username)
+          : (username ? null : 'Please choose a username.');
+        if (problem) {
+          errorEl.textContent = problem;
           submitBtn.disabled = false;
           submitBtn.textContent = 'Create Account';
           return;

@@ -116,6 +116,11 @@ ZT_CHROMIUM=<path> node test/browser/nav.mjs
 ZT_CHROMIUM=<path> node test/browser/settings.mjs
 ```
 
+`npm test` includes a check that the client-side username rule in `js/util.js`
+matches the `CHECK` constraint in `supabase/settings.sql` exactly — the same rule
+stated in two languages is a rule that drifts, and a mismatch means registration
+accepts a name the database then refuses.
+
 `supabase/test/` rebuilds a throwaway database from the migration files and asserts
 the contracts in `docs/` against it. `00-shim.sql` stands in for the parts of Supabase
 the migrations depend on — `auth.users`, an `auth.uid()` driven by a GUC so tests can
