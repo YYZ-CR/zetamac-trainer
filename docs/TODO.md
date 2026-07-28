@@ -38,6 +38,43 @@ Serve with `python3 -m http.server 8099 --bind 127.0.0.1` — never `npx serve`.
 
 ---
 
+## 0. Steal mode could not score at all — fixed, and worth reading once
+
+Landed in `1e5a1d7`, whose message is about leaderboards and does not mention it.
+Recorded here because otherwise it is unfindable.
+
+`js/db.js`'s `claimDuelPoint()` never sent `p_answer`. The server checks the answer
+against the stored question and a missing argument arrives as NULL, which is the
+first branch of that check — so **every claim returned `{ok:false, error:'wrong'}`**,
+no row was ever inserted into `duel_points`, the server's next-expected index stayed
+at 0 forever, and from the second question on every claim came back `stale_index`.
+Steal mode could not score, in a two-player game or alone.
+
+The client then made it look like something else entirely: on a refused claim it
+*guessed* the other player had won and wrote that guess into the scoreline. A player
+answering alone watched nine phantom points accrue to an idle opponent, each
+announced as "Stolen". Both are fixed — the answer is sent, and a refusal that names
+no winner now marks the index unknown and counts for nobody, with both scores shown
+muted while any index is unresolved.
+
+The scoreline shows usernames rather than "You" and "Them".
+
+**Three things the steal client still offers that the database does not implement:**
+
+- [ ] `end_duel_early` and `convert_duel_to_classic` are called by `js/db.js` and
+      exist nowhere in `supabase/steal.sql`. Both will raise `PGRST202`. The client
+      degrades survivably, but the ended-early flow and the convert button are not
+      working features.
+- [ ] **A reconnecting player re-enters at question 0** and re-answers everything,
+      every one of which is `stale_index`. `claim_duel_point` now returns
+      `current_index` on that refusal, which is exactly the missing datum —
+      `start_duel_run` should return it too.
+- [ ] **`stealOnBye` ends the run on an untrusted broadcast**, with no grace and no
+      presence corroboration. A forged `bye` ends somebody's duel. It cannot move a
+      score, so it is not a cheat, but it is a denial of service on a live game.
+
+---
+
 ## 1. Deploy — all nine migrations are applied
 
 A checker run against the real project reports every file OK. One thing is
