@@ -43,8 +43,15 @@ BEGIN
   PERFORM pg_temp.ok(v->>'name' = 'Desk Six',        'a non-member sees the league name');
   PERFORM pg_temp.ok((v->>'member_count')::INT = 1,  'a non-member sees a member count');
   PERFORM pg_temp.ok((v->>'is_member')::BOOLEAN IS FALSE, 'is_member is false for a stranger');
-  PERFORM pg_temp.ok(v::TEXT NOT LIKE '%hexadecimal%',
-    'the join screen does NOT name the members — a code is not a directory');
+
+  -- The owner IS named: an invite that cannot say who sent it is a poor thing
+  -- to receive. That is one name, deliberately, and not a roster.
+  PERFORM pg_temp.ok(v->>'owner_username' = 'hexadecimal',
+    'the join screen names the owner');
+  PERFORM pg_temp.ok(NOT (v ? 'members') AND NOT (v ? 'rows'),
+    'the join screen carries no member list');
+  PERFORM pg_temp.ok(NOT (v ? 'owner_id') AND v::TEXT NOT LIKE '%@example.test%',
+    'naming the owner leaks no id and no email');
 
   BEGIN
     b := public.get_league_board(code, 'today');
@@ -76,7 +83,19 @@ BEGIN
   PERFORM pg_temp.ok(t0 = t1,
     'joining twice does not reset joined_at — ownership transfer depends on it');
 
+  -- The property the old assertion was reaching for, stated correctly: a
+  -- stranger sees the OWNER and nobody else. player10 has now joined, so a
+  -- fresh non-member must not learn that.
+  PERFORM pg_temp.as_user('player17');
+  v := public.get_league(code);
+  PERFORM pg_temp.ok((v->>'member_count')::INT = 2, 'a stranger sees the count rise');
+  PERFORM pg_temp.ok(v::TEXT NOT LIKE '%player10%',
+    'a stranger cannot learn who else joined — a code is not a directory');
+  PERFORM pg_temp.ok(v->>'owner_username' = 'hexadecimal',
+    'a stranger still sees the owner');
+
   -- Now a member, the board opens up.
+  PERFORM pg_temp.as_user('player10');
   b := public.get_league_board(code, 'today');
   PERFORM pg_temp.ok(b IS NOT NULL AND NOT (b ? 'error'), 'a member can read the board');
   PERFORM pg_temp.ok(jsonb_typeof(b->'rows') = 'array',  'the board has rows');
