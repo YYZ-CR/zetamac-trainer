@@ -51,6 +51,21 @@ If an account ends up without a username — registration can leave it that way 
 email confirmation is enabled — both Settings and the dashboard offer a way to claim
 one.
 
+**Deleting an account** is at the bottom of the same page, fenced off in a Danger
+zone: collapsed until you ask for it, and it lists what goes before it shows you the
+field. To confirm you type your own username (or the literal `DELETE` if you never
+set one), and the button stays disabled until that matches. The delete itself is one
+`delete_account` call — the client never names an account, and the id deleted is
+always the caller's. On success the page signs you out before it navigates, because
+the access token stays valid until it expires on its own.
+
+Deletion is not a `DELETE FROM auth.users`: a league you own would take every other
+member's board down with it, and your old sessions would keep feeding everybody's
+percentile. So each row has a stated fate — leagues you own are handed to their
+longest-standing remaining member, duels you created go with you, duels you only
+played in stay and show you as a deleted account, and your username is released.
+`docs/account-deletion.md` is the contract, and `supabase/account.sql` implements it.
+
 Two themes: the original Zetamac light palette, reproduced value for value, and a
 Monkeytype-flavoured dark one.
 
@@ -84,14 +99,20 @@ Apply these **by hand** in the Supabase SQL editor, in this order:
 | `supabase/duels.sql` | duels — **depends on `daily.sql`** for the question generator |
 | `supabase/leagues.sql` | private leagues |
 | `supabase/settings.sql` | `set_username`, rename cooldown, column-level grants |
+| `supabase/account.sql` | `delete_account` — the ordered cascade for deleting an account |
 
-Two ordering constraints, both real:
+Three ordering constraints, all real:
 
 - `duels.sql` calls functions defined in `daily.sql`, so daily comes first.
-- **`settings.sql` must be last.** It revokes the client's column grants on
-  `profiles` and replaces `username_available`. Re-running `hardening.sql` after it
-  would hand those grants back and undo half of it. If you ever re-apply an earlier
-  file, re-apply `settings.sql` afterwards.
+- **`settings.sql` goes after every file that touches `profiles`.** It revokes the
+  client's column grants on `profiles` and replaces `username_available`. Re-running
+  `hardening.sql` after it would hand those grants back and undo half of it. If you
+  ever re-apply an earlier file, re-apply `settings.sql` afterwards.
+- **`account.sql` is last.** `delete_account` reads tables from every file above it,
+  and plpgsql resolves those names when the function is *called*, not when it is
+  created — so pasting this one early appears to work and then fails on the first
+  real deletion, part-way through an account. It only adds a function, so it takes
+  nothing back from `settings.sql` and does not need re-applying after it.
 
 **Every file is idempotent, and re-running one is the supported way to deploy a
 change.** The test suite applies each migration twice on every run to guarantee that,
@@ -101,7 +122,8 @@ Supabase's SQL editor will warn *"this query includes destructive operations"* o
 most of these. It is a static scan: the files contain `REVOKE` (removing default
 grants from tables the same file just created), `ALTER TABLE … ENABLE ROW LEVEL
 SECURITY`, and `DELETE` statements that sit **inside function bodies** and only run
-when a user leaves a league. There is no `DROP TABLE` or `TRUNCATE` anywhere.
+when a user leaves a league or deletes their own account. There is no `DROP TABLE`
+or `TRUNCATE` anywhere.
 
 ## Testing
 
@@ -162,8 +184,13 @@ stored questions, and anything else the client attaches is discarded.
 ### Docs
 
 `docs/` holds the contracts the client and database were both built against —
-`social-api.md`, `daily-design.md`, `duels-design.md`, `leagues-design.md`. Settle
-the shape there first, then build both sides against it.
+`social-api.md`, `daily-design.md`, `duels-design.md`, `leagues-design.md`,
+`account-deletion.md`. Settle the shape there first, then build both sides against it.
+
+`account-deletion.md` is the one to read before touching a foreign key: it states the
+fate of every row that mentions an account, and `supabase/account.sql` is that list in
+order. Deleting an account is not a cascade — two of the foreign keys cascade
+destructively, and the function exists to get in front of them.
 
 `docs/demo-video-guide.md` is unrelated to the app: a general reference for producing
 demo videos.

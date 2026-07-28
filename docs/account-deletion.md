@@ -32,10 +32,18 @@ last.
 `SECURITY DEFINER`, `SET search_path = public`, `EXECUTE` granted to `authenticated`
 only. There is no anonymous account to delete.
 
+If `auth.uid()` is somehow NULL inside an authenticated request — a gateway
+forwarding a token with no subject — the function returns
+`{ok: false, error: 'account_requires_account'}` and writes nothing. It must never be
+allowed to mean "delete the rows whose `user_id IS NULL`", which is every anonymous
+game session on the site.
+
 ### Confirmation
 
 `p_confirm` must equal the caller's current username, compared case-insensitively
-after trimming. An account with no username confirms with the literal `DELETE`.
+after trimming. An account with no username confirms with the literal `DELETE`, which
+is normalised the same way — `  delete  ` confirms. An empty string never confirms,
+including for the pathological account whose username is a single space.
 
 This is not theatre. The argument is what stops a mis-wired button, a double-fired
 event, or a stray retry from destroying an account: the call cannot succeed unless
@@ -50,10 +58,18 @@ programming error is an exception.
 All of it inside one transaction, which a function body already is. Either the
 account is gone and everything above is settled, or nothing happened.
 
-1. **Lock.** `SELECT ... FOR UPDATE` the caller's `profiles` row, so two concurrent
-   deletes cannot both run the league transfer.
-2. **Leagues.** For every league the caller is a member of, apply exactly the rule
-   `leave_league` already implements, in this order:
+1. **Lock.** Two of them, in this order:
+   - `pg_advisory_xact_lock` on **the same key `set_username` takes**, so a rename
+     and a deletion of one account can never interleave. `set_username` writes with
+     `INSERT ... ON CONFLICT (id) DO UPDATE`; against a concurrent deletion its
+     conflict target vanishes mid-flight and the insert is retried as a plain insert
+     against an `auth.users` row that is being deleted — a foreign-key error
+     surfacing out of a rename. It is also the only lock available for an account
+     with no `profiles` row, where there is no row to lock.
+   - `SELECT ... FOR UPDATE` on the caller's `profiles` row, so two concurrent
+     deletes cannot both run the league transfer.
+2. **Leagues.** For every league the caller owns **or** is a member of, apply exactly
+   the rule `leave_league` already implements, in this order:
    - remove the membership row;
    - if no members remain, delete the league;
    - else if the caller owned it, transfer ownership to the longest-standing
@@ -63,6 +79,15 @@ account is gone and everything above is settled, or nothing happened.
    key and raises `league_not_member`; a loop over "every league" wants neither. If
    the rule changes, both change — `05-leagues-test.sql` and the account suite both
    assert it.
+
+   Owner-or-member, not member: every path in `leagues.sql` keeps the owner in the
+   roster, so today the two sets are identical — but a league owned and not joined is
+   exactly the row the `owner_id` cascade would destroy, which is the failure this
+   whole function exists to prevent.
+
+   The leagues are locked in a deterministic order (`ORDER BY id ... FOR UPDATE`),
+   because two accounts deleting at the same instant take overlapping sets of league
+   locks and in any other order they can take them in opposite orders and deadlock.
 3. **Duels created by the caller** are deleted, with their runs.
 
    Stated plainly because it costs somebody else something: if an opponent played
@@ -79,6 +104,12 @@ account is gone and everything above is settled, or nothing happened.
    A duel the caller had claimed but never finished releases the slot:
    `opponent_id` is cleared and the unfinished run row is deleted, so the creator's
    link is live again for whatever remains of its 48 hours.
+
+   **"Never finished" means `duel_runs.status = 'in_progress'`, and nothing else.**
+   An `expired` run is a result — `duel_refresh` closes it at whatever was submitted,
+   which may be zero, and the creator may already have seen the comparison — and
+   re-opening a duel whose 48 hours have run out gives nobody a playable link. A
+   claimed side with no run row at all is covered by the same condition.
 5. **`daily_attempts`** are deleted. The account comes off every daily leaderboard,
    including past days.
 6. **`game_sessions`** are deleted rather than orphaned, so the account stops

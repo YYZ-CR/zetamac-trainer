@@ -110,16 +110,30 @@ Check Realtime's free-tier concurrent-connection and message caps before committ
 
 ## 4. Delete account
 
-Deliberately cut from the settings page. Needs a proper cascade:
+Contract: `docs/account-deletion.md`. Database side: `supabase/account.sql` —
+`delete_account(p_confirm TEXT) → JSONB`, one `SECURITY DEFINER` function that does
+the whole thing in one transaction, in the order the doc states, with the
+`auth.users` row deleted last.
 
-- `game_sessions`, `daily_attempts`, `duel_runs`, `league_members`
-- **League ownership transfer** — the same rule `leave_league` already implements
-  (longest-standing member inherits; last member out deletes the league)
-- Duels in flight — an opponent mid-run should get a coherent outcome, not a
-  dangling reference
-- The `auth.users` row itself, which needs a `SECURITY DEFINER` function
+- [ ] **Apply `supabase/account.sql`** in the Supabase SQL editor. It goes **last**,
+      after `settings.sql` — its body reads tables from every earlier file and
+      plpgsql resolves those names at call time, so applying it early looks fine and
+      fails on the first real deletion.
+- [ ] **Delete a throwaway account against the real project**, one that owns a league
+      with other members in it. Local Postgres cannot exercise the `auth.users`
+      cascade Supabase actually has (`auth.identities`, `auth.sessions`,
+      `auth.refresh_tokens`), and the function's own `DELETE FROM auth.users` depends
+      on the function owner having rights in the `auth` schema — which is true of the
+      role the SQL editor runs as, and is worth seeing once.
 
-A half-done delete is worse than none. Model it on `leave_league`.
+Two things not to "simplify" later:
+
+- **The league rule is duplicated from `leave_league` on purpose** — same removal,
+  same "last member out deletes the league", same successor tie-break
+  (`ORDER BY joined_at ASC, user_id ASC`). `05-leagues-test.sql` and the account
+  suite each assert one copy; change one and the other must change.
+- **`game_sessions` are deleted, not orphaned.** The FK is `ON DELETE SET NULL`, and
+  unowned rows keep feeding `get_score_percentile` forever.
 
 ---
 
