@@ -52,6 +52,14 @@ tiles. Private by default.
 **Recent games are the dashboard's alone** — `get_public_profile` returns no
 per-session rows, and a public page listing them would be a cross-user data exposure.
 
+**A Share button** sits beside the username on the dashboard and on a profile page and
+hands out that `/@username` link — the native share sheet on a phone, the clipboard
+everywhere else (`Copied!` on the button for two seconds). Sharing a profile that is
+still private says so in the same breath — *"Copied — your profile is private, so only
+you can see it. Make it public in Settings."* — because the alternative is quietly
+handing somebody a link that tells them the profile does not exist. It is not shown at
+all for an account that has no username yet: there is no `/@` nothing.
+
 **A share card** rendered client-side to a canvas, in whichever theme you are using,
 offered at the end of a run.
 
@@ -208,6 +216,10 @@ come back.
 same stubbed payload through both pages and assert the same numbers out of each, so a
 change that moves one and not the other fails. `profile.mjs` also asserts, positively,
 that the public page never reads `game_sessions` and has no per-game table in it.
+Both stub `navigator.share` and `navigator.clipboard` to cover the Share button's four
+paths — native sheet, clipboard, dismissed sheet, and the insecure context where
+`navigator.clipboard` is simply undefined — and both take the button's position from
+`getBoundingClientRect()` rather than from markup order.
 
 All three run on every push, as three jobs in `.github/workflows/ci.yml`. The SQL job
 brings up its own `postgres:16` service, so nothing there touches a real project.

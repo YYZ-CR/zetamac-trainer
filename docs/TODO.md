@@ -255,6 +255,19 @@ Five things to keep true rather than rediscover:
   username yet, or when `social.sql` is not applied. The fallback covers the loaded
   session window rather than all time, and the note under the strip says so. If the two
   ever disagree about a figure, the SQL is right and the fallback is the copy to fix.
+- **The Share button beside the username is one control on both pages.**
+  `renderShareControl()` in `js/util.js` fills the same two slots on each —
+  `#share-slot` next to the name, `#share-note` under it. Four things it must keep
+  doing: share the **absolute `/@name` URL**, percent-encoded (usernames are
+  user-controlled and go straight into a path); say so when the profile is private,
+  because a silently copied link that renders "no such profile" for the recipient is
+  a trap; stay silent when the native sheet is dismissed (`AbortError` is somebody
+  changing their mind, not a failure); and render **nothing at all** without a
+  username — there is no `/@` nothing. The clipboard half is `copyLinkToClipboard()`
+  in the same file, which Settings' Copy link button calls too: one implementation of
+  the clipboard's failure modes, not three. `navigator.clipboard` is **undefined**
+  outside a secure context and the unguarded call throws there, which is why that
+  helper exists at all.
 - **The dashboard no longer holds the public-profile link or the leagues list.** The
   link and the public/private toggle live in `settings.html`; leagues live in
   `leagues.html`. Both panels were removed on request, and `leagues.mjs` now guards

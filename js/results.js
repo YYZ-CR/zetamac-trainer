@@ -139,11 +139,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     const shareUrl = new URL('results.html', window.location.href);
     shareUrl.search = '?session=' + encodeURIComponent(sessionKey);
     const link = shareUrl.toString();
-    navigator.clipboard.writeText(link).then(() => {
+    // copyLinkToClipboard (js/util.js) rather than navigator.clipboard directly:
+    // outside a secure context the property is undefined, so the unguarded call
+    // threw a TypeError and the .catch() that used to be here never ran — in
+    // exactly the one situation its prompt fallback was written for.
+    copyLinkToClipboard(link, () => {
       btn.textContent = 'Copied!';
-      setTimeout(() => { btn.textContent = 'Copy Results Link'; }, 2000);
-    }).catch(() => {
-      prompt('Copy this link:', link);
+      setTimeout(() => { btn.textContent = 'Copy Results Link'; }, SHARE_COPIED_MS);
     });
   });
 });
