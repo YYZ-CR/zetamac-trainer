@@ -417,3 +417,212 @@ async function getDailyLeaderboard(date, limit = 100) {
     p_limit: Number.isFinite(n) && n > 0 ? Math.floor(n) : 100,
   });
 }
+
+// ── Duels ────────────────────────────────────────────────────
+// Send someone a link, both players answer the same sequence, compare. Every
+// call here is a SECURITY DEFINER RPC from supabase/duels.sql; the exact
+// payload shapes are pinned in docs/duels-design.md. Three properties of that
+// design decide the shape of this section:
+//
+//   * A guest must be able to accept. The creator needs an account, but the
+//     opponent may be anonymous, so every duel RPC except create_duel takes a
+//     guest token and is granted to `anon`.
+//   * Refusals are RAISEd, not returned. `duel_already_has_opponent`,
+//     `duel_window_closed` and the rest arrive as `error` on the Supabase
+//     response — not as a thrown exception — and a client that only checks for
+//     a thrown error shows a third arrival a blank page. duelRpc() reads the
+//     code out of `error` and turns it into a sentence.
+//   * The score is the server's. submitDuelRun() sends answers and returns
+//     whatever the server decided; nothing here computes or adjusts a score.
+//
+// Same reason as lastSocialError / lastDailyError for recording the failure
+// rather than throwing: null is a legitimate answer from getDuel() (no such
+// duel) and duel.html has to word that very differently from "duels are not
+// deployed". lastDuelCode is the machine-readable half — null means the last
+// call succeeded and any null payload was a real answer.
+
+const DUEL_GUEST_PREFIX = 'duel_guest_';
+
+// The refusals supabase/duels.sql raises, each as the sentence a player should
+// actually read. The key is the RAISE message, which is what PostgREST puts in
+// error.message; the HINT is deliberately not shown, because it is written for
+// whoever is reading the database and not for the person holding the link.
+const DUEL_REFUSALS = {
+  duel_requires_account:
+    'You need an account to create a duel — somebody has to own it.',
+  duel_key_unavailable:
+    "Couldn't allocate a link for this duel. Try again in a moment.",
+  duel_not_found:
+    'There is no duel with that link.',
+  duel_requires_identity:
+    "This browser couldn't be identified, so it can't claim a side of this duel. Allow site storage, or log in.",
+  duel_bad_guest_token:
+    "This browser couldn't be identified, so it can't claim a side of this duel. Allow site storage, or log in.",
+  duel_already_has_opponent:
+    'This duel already has two players.',
+  duel_expired:
+    'This duel has expired — a duel is open for 48 hours.',
+  duel_not_started:
+    "You haven't started this duel, so there's nothing to submit.",
+  duel_already_submitted:
+    'That side of the duel has already been played.',
+  duel_window_closed:
+    'The window for this run has closed.',
+};
+
+// Set when the last duel call failed: a sentence for the user (lastDuelError)
+// and the raised code, 'duel_unavailable' or 'duel_missing' (lastDuelCode).
+let lastDuelError = null;
+let lastDuelCode  = null;
+
+// The guest's entire identity for this duel, minted on first use and kept in
+// localStorage under duel_guest_<key>.
+//
+// Losing the token loses the run — there is nothing else tying an anonymous
+// player to their side — so it is written BEFORE it is ever sent, not after a
+// successful start. Two randomKey() draws rather than one: the server accepts
+// 8 to 200 characters, and this string is a bearer credential for one side of
+// a duel for 48 hours, so 64 bits is the right end of that range.
+//
+// Returns '' when storage is unavailable (private mode, blocked cookies). That
+// is honest rather than convenient: a token that cannot be persisted cannot be
+// used to resume, and the server refuses to hand a duel side to an identity
+// that will not survive a refresh (duel_requires_identity).
+function duelGuestToken(key) {
+  if (!key) return '';
+  const storageKey = DUEL_GUEST_PREFIX + key;
+  try {
+    const existing = localStorage.getItem(storageKey);
+    if (existing && existing.trim().length >= 8) return existing.trim();
+    const token = randomKey() + randomKey();
+    localStorage.setItem(storageKey, token);
+    // Read back: a quota-exceeded write can fail silently in some browsers,
+    // and a token we believe in but never stored is worse than none.
+    return localStorage.getItem(storageKey) === token ? token : '';
+  } catch (_) {
+    return '';
+  }
+}
+
+// Which refusal an error object represents, or 'duel_missing' when the
+// function itself is not there (migration not applied), or 'duel_unavailable'
+// for anything else. The raised name is in error.message, but PostgREST has
+// moved detail between fields across versions, so all four are searched.
+function duelErrorCode(error) {
+  if (!error) return null;
+  const blob = [error.message, error.details, error.hint, error.code]
+    .filter(v => typeof v === 'string')
+    .join(' ');
+
+  for (const code of Object.keys(DUEL_REFUSALS)) {
+    if (blob.indexOf(code) !== -1) return code;
+  }
+  // PostgREST reports an absent function as PGRST202 / "Could not find the
+  // function ... in the schema cache"; older stacks say "does not exist".
+  if (/PGRST202|schema cache|does not exist|could not find the function/i.test(blob)) {
+    return 'duel_missing';
+  }
+  return 'duel_unavailable';
+}
+
+// Shared body for the four duel RPCs: guard, call, unwrap, and record why it
+// failed instead of throwing. Returns the payload, or null.
+async function duelRpc(fn, args) {
+  lastDuelError = null;
+  lastDuelCode  = null;
+
+  if (!dbReady()) {
+    lastDuelCode  = 'duel_unavailable';
+    lastDuelError = 'Duels are unavailable right now.';
+    return null;
+  }
+
+  try {
+    const { data, error } = await supabaseClient.rpc(fn, args || {});
+    if (error) {
+      const code = duelErrorCode(error);
+      lastDuelCode  = code;
+      lastDuelError = DUEL_REFUSALS[code] || 'Duels are unavailable right now.';
+      console.warn(fn + ':', error.message, '→', code);
+      return null;
+    }
+    return unwrapRpc(data);
+  } catch (e) {
+    console.warn(fn + ' threw:', e);
+    lastDuelCode  = 'duel_unavailable';
+    lastDuelError = 'Duels are unavailable right now.';
+    return null;
+  }
+}
+
+// Create a duel and return { duel_key, expires_at, duration_seconds }, or null
+// (see lastDuelError). Signed-in callers only — an unowned duel has nobody to
+// notify and nobody to rematch. The duration is clamped server-side to
+// 15..600, so the returned duration_seconds is the one that was actually used
+// and is what the page must show.
+async function createDuel(durationSeconds) {
+  const n = Number(durationSeconds);
+  return duelRpc('create_duel', {
+    p_duration: Number.isFinite(n) ? Math.round(n) : 120,
+  });
+}
+
+// The duel's public face for whoever is holding the link: duel_key,
+// duration_seconds, created_at, expires_at, expired, status,
+// seconds_until_expiry, your_side ('creator' | 'opponent' | 'open' |
+// 'spectator'), opponent_claimed, scores_revealed, outcome and a { played,
+// status, submitted_at, score, is_you } block for each side.
+//
+// Never returns the questions, and returns a side's score ONLY when
+// scores_revealed is true — knowing the target turns a run into a chase. The
+// client must gate on that flag rather than on `score != null`.
+//
+// Null means either "no duel with that key" (lastDuelCode null — an ordinary
+// answer) or "the call failed" (lastDuelCode set). Those are different pages.
+async function getDuel(key) {
+  if (!key) { lastDuelError = null; lastDuelCode = null; return null; }
+  return duelRpc('get_duel_by_key', {
+    p_key: String(key),
+    p_guest_token: duelGuestToken(key) || null,
+  });
+}
+
+// Claim a side and begin — or resume — this browser's run:
+// { duel_key, side, duration_seconds, started_at, seconds_remaining, status,
+//   questions, duel }.
+//
+// Idempotent by design: started_at is written exactly once, so calling this
+// again returns the SAME run with the real remaining time, which is what makes
+// a refresh mid-run resume instead of restart. `questions` is present only
+// while the run is genuinely live; once the window has closed it is null, so
+// the sequence cannot be read by starting early and walking away.
+//
+// Raises (→ null, with lastDuelCode set) for a third arrival
+// ('duel_already_has_opponent'), an expired duel ('duel_expired') and a
+// browser that cannot hold a token ('duel_requires_identity').
+async function startDuelRun(key) {
+  if (!key) { lastDuelCode = 'duel_not_found'; lastDuelError = DUEL_REFUSALS.duel_not_found; return null; }
+  return duelRpc('start_duel_run', {
+    p_key: String(key),
+    p_guest_token: duelGuestToken(key) || null,
+  });
+}
+
+// Submit this side's answers — `[{ i, value, elapsed_ms }]`, elapsed_ms
+// measured from the start of the run and non-decreasing — and return the
+// server's verdict: { side, score, total_answered, accuracy, duel }. This is
+// the only place a duel score is decided; the client's own count is a guess
+// and must never be shown in its place.
+async function submitDuelRun(key, answers) {
+  if (!key) { lastDuelCode = 'duel_not_found'; lastDuelError = DUEL_REFUSALS.duel_not_found; return null; }
+  if (!Array.isArray(answers)) {
+    lastDuelCode  = 'duel_unavailable';
+    lastDuelError = 'submitDuelRun expects an array of answers';
+    return null;
+  }
+  return duelRpc('submit_duel_run', {
+    p_key: String(key),
+    p_guest_token: duelGuestToken(key) || null,
+    p_answers: answers,
+  });
+}

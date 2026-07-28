@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Duel — Arithmetic Trainer</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="js/theme.js"></script>
+</head>
+<body class="duel-page">
+
+  <div class="top-bar" id="top-bar"></div>
+
+  <div class="duel-wrap">
+
+    <div class="duel-head">
+      <h1 id="duel-title">Duel</h1>
+      <div class="duel-meta" id="duel-meta"></div>
+    </div>
+
+    <!-- Shown until the duel's state resolves one way or the other -->
+    <div class="duel-loading" id="duel-loading">Loading this duel…</div>
+
+    <!-- Signed out, no such duel, duel full, or the RPCs are not deployed -->
+    <div class="duel-notice" id="duel-notice" style="display:none"></div>
+
+    <!-- Create a duel, or the rules and the irreversible Start -->
+    <div class="panel" id="duel-panel" style="display:none"></div>
+
+    <!-- Waiting for the other side, or the decided result -->
+    <div id="duel-result" style="display:none"></div>
+
+    <!-- The shareable link. Below both #duel-panel and #duel-result, because
+         it is never the main thing on the page: on creation the confirmation
+         is, and while waiting the player's own score is. -->
+    <div class="duel-share" id="duel-share" style="display:none">
+      <label class="duel-share-label" for="duel-share-text">Send this link to your opponent</label>
+      <div class="duel-share-row">
+        <input type="text" id="duel-share-text" class="duel-share-input" readonly value="">
+        <button class="btn" id="duel-share-btn">Copy</button>
+      </div>
+      <p class="duel-share-status" id="duel-share-status" role="status" aria-live="polite"></p>
+    </div>
+
+    <!-- The pace graph: both players' projected score over one shared run -->
+    <div class="panel" id="duel-graph-panel" style="display:none">
+      <div class="panel-head">
+        <h2>Pace</h2>
+        <span class="panel-note" id="duel-graph-note"></span>
+      </div>
+      <div class="duel-chart-box"><canvas id="duel-chart"></canvas></div>
+      <p class="duel-chart-caption" id="duel-chart-caption"></p>
+    </div>
+
+    <p class="duel-expiry" id="duel-expiry" style="display:none" role="status" aria-live="polite"></p>
+
+  </div>
+
+  <!-- The run itself. Same markup and classes as game.html and daily.html —
+       a duel is the same game with a server-supplied question list and a
+       server-supplied clock, so it must not look or behave like another one. -->
+  <div class="duel-game" id="duel-game" style="display:none">
+    <div class="game-hud">
+      <span id="duel-timer">Seconds left: —</span>
+      <span id="duel-answered">Answered: 0</span>
+    </div>
+
+    <div class="game-area">
+      <span class="question-text" id="duel-question"></span>
+      <input
+        type="text"
+        class="answer-input"
+        id="duel-input"
+        inputmode="numeric"
+        autocomplete="off"
+        autocorrect="off"
+        autocapitalize="off"
+        spellcheck="false"
+        aria-label="Answer"
+      >
+    </div>
+
+    <!-- Submitting, or submit failed and needs retrying -->
+    <div class="gameover-overlay" id="duel-overlay" style="display:none"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <script src="js/util.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/db.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/duel.js"></script>
+</body>
+</html>

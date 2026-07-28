@@ -1712,3 +1712,265 @@ body.daily-page {
   color: var(--c-ink-muted);
   margin-top: 4px;
 }
+
+/* ============ DUELS ============ */
+/* duel.html has two halves that never show at once: a document-flow landing
+   page (create / rules / result / pace graph) and the run itself, which is a
+   fixed overlay reusing game.html's .game-hud / .game-area / .question-text /
+   .answer-input verbatim — a duel is the same game, so it must not have its
+   own look. Only the landing half is styled here.
+
+   The four tokens below are new, so they are declared for BOTH themes. They
+   are appended rather than folded into the blocks at the top of this file, but
+   they are the same two selectors and therefore the same two themes — a token
+   that existed in only one of them would break the other's charts. */
+
+:root,
+:root[data-theme="zetamac"] {
+  --c-duel-you:    #333;
+  --c-duel-them:   #888;
+  --c-duel-ahead:  rgba(0, 102, 0, 0.18);   /* your line above theirs */
+  --c-duel-behind: rgba(204, 0, 0, 0.15);   /* your line below theirs */
+}
+
+:root[data-theme="dark"] {
+  --c-duel-you:    #e2b714;
+  --c-duel-them:   #9c9b91;
+  --c-duel-ahead:  rgba(127, 176, 105, 0.22);
+  --c-duel-behind: rgba(202, 71, 84, 0.20);
+}
+
+body.duel-page {
+  background: var(--c-page-bg);
+}
+
+.duel-wrap {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 30px 20px 60px;
+}
+
+.duel-head {
+  margin-bottom: 22px;
+}
+
+.duel-head h1 {
+  font-size: 28px;
+  font-weight: bold;
+  line-height: 1.2;
+}
+
+.duel-meta {
+  font-size: 13px;
+  color: var(--c-ink-muted);
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+.duel-loading {
+  font-size: 14px;
+  font-style: italic;
+  color: var(--c-ink-soft);
+  padding: 20px 0;
+}
+
+/* Signed out, no such duel, duel full, duels not deployed */
+.duel-notice {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  padding: 20px 22px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.duel-notice p {
+  margin-top: 10px;
+  color: var(--c-ink-body);
+}
+
+.duel-notice code {
+  font-family: inherit;
+  background: var(--c-rule);
+  padding: 1px 5px;
+}
+
+.duel-notice-actions,
+.duel-created-actions,
+.duel-result-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+.duel-lede {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--c-ink-body);
+  margin-bottom: 16px;
+}
+
+/* ── Rules, and the warning before the irreversible Start ── */
+
+.duel-rules {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--c-ink-body);
+}
+
+.duel-rules li {
+  padding-left: 16px;
+  border-left: 2px solid var(--c-rule);
+}
+
+.duel-rules strong {
+  color: var(--c-ink);
+}
+
+/* Starting claims a side and starts the clock. Say so before the button. */
+.duel-warn {
+  margin-top: 18px;
+  background: var(--c-banner-bg);
+  border: 1px solid var(--c-banner-border);
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--c-ink);
+}
+
+.duel-create-row,
+.duel-start-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+  font-size: 14px;
+  color: var(--c-ink-body);
+}
+
+.duel-create-row select {
+  font-family: inherit;
+  font-size: 14px;
+  padding: 4px 6px;
+  color: var(--c-ink);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+}
+
+.duel-start-status {
+  font-size: 12px;
+  color: var(--c-danger);
+  flex: 1 1 200px;
+}
+
+/* ── The shareable link ── */
+
+.duel-share {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  padding: 16px 18px;
+  margin-top: 20px;
+}
+
+.duel-share-label {
+  display: block;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--c-ink-soft);
+  margin-bottom: 8px;
+}
+
+.duel-share-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.duel-share-input {
+  flex: 1 1 260px;
+  font-family: inherit;
+  font-size: 13px;
+  padding: 7px 9px;
+  color: var(--c-ink);
+  background: var(--c-page-bg);
+  border: 1px solid var(--c-border);
+}
+
+.duel-share-status {
+  font-size: 12px;
+  color: var(--c-ink-soft);
+  margin-top: 8px;
+  min-height: 15px;
+}
+
+.duel-share-status.is-ok    { color: var(--c-success); }
+.duel-share-status.is-error { color: var(--c-danger); }
+
+/* ── The verdict ── */
+
+.duel-verdict {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-left-width: 4px;
+  padding: 22px 24px;
+  margin-bottom: 20px;
+}
+
+.duel-verdict.is-win  { border-left-color: var(--c-success); }
+.duel-verdict.is-loss { border-left-color: var(--c-danger); }
+.duel-verdict.is-tie  { border-left-color: var(--c-banner-border); }
+
+.duel-verdict-head {
+  font-size: 20px;
+  font-weight: bold;
+  color: var(--c-ink);
+}
+
+.duel-verdict-stats {
+  margin-top: 18px;
+}
+
+.duel-verdict-note {
+  margin-top: 14px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--c-ink-muted);
+}
+
+/* ── The pace graph ── */
+
+.duel-chart-box {
+  position: relative;
+  height: 300px;
+  margin-top: 6px;
+}
+
+.duel-chart-caption {
+  margin-top: 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--c-ink-soft);
+}
+
+.duel-expiry {
+  font-size: 13px;
+  color: var(--c-ink-muted);
+  margin-top: 4px;
+}
+
+/* ── The run overlay ── */
+/* Covers the landing page entirely, so nothing from the pre-game state can sit
+   behind the question and distract. */
+.duel-game {
+  position: fixed;
+  inset: 0;
+  background: var(--c-surface);
+  z-index: 40;
+}
