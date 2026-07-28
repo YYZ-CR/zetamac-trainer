@@ -24,6 +24,42 @@ function makeQuestions(n) {
   }));
 }
 
+const round1 = v => Math.round(v * 10) / 10;
+
+// A pace timeline: the SECONDS at which a side banked each correct answer,
+// ascending — the shape get_duel_by_key's per-side `points` carries. Two
+// phases so the projected-score curve it produces actually bends.
+function paceTimes(nFirst, gapFirst, nSecond, gapSecond) {
+  const out = [];
+  for (let i = 1; i <= nFirst;  i++) out.push(round1(i * gapFirst));
+  const t0 = nFirst * gapFirst;
+  for (let i = 1; i <= nSecond; i++) out.push(round1(t0 + i * gapSecond));
+  return out;
+}
+
+// The two timelines the decided-duel assertions are written against. They are
+// deliberately different SHAPES, not just different lengths, so a chart that
+// silently reused one side's x values for the other cannot pass.
+//
+//   YOU  — 74 answers: slow (2.4s) to 60s, then quick (1.2s) to 118.8s.
+//          Projected score is a flat 50 through the first phase, rising to 74.
+//          Exact point to assert: (60, 50)  =  25 banked x 120 / 60.
+//   THEM — 61 answers: quick (1.2s) to 36s, then slow (2.6s) to 116.6s.
+//          Projected score starts at 100 and decays to 61.
+//          Exact point to assert: (36, 100) =  30 banked x 120 / 36.
+//
+// So the two curves cross around the 90-second mark: whoever is ahead changes
+// once, which is the only thing the tinted fill exists to show.
+const PACE_YOU  = paceTimes(25, 2.4, 49, 1.2);   // 74 times, last 118.8
+const PACE_THEM = paceTimes(30, 1.2, 31, 2.6);   // 61 times, last 116.6
+
+// A local timeline for the same 74 answers, evenly paced, so it projects to a
+// flat ~74 the whole way — nothing like PACE_YOU, which sits at 50 for the
+// first minute. It is the localStorage record wherever the server ALSO sends
+// points: the server's must win, and the (60, 50) assertion is what proves it,
+// since the even pacing puts (60, 74) there instead.
+const LOCAL_EVEN_74 = Array.from({ length: 74 }, (_, i) => round1((i + 1) * (120 / 74)));
+
 // Stub CDN (jsdelivr is blocked in the sandbox) + a Supabase client whose
 // rpc() is driven by `window.__rpc`. Chart.js is stubbed too, but records the
 // config it was constructed with so the pace graph can be asserted on.
@@ -260,6 +296,9 @@ const src = v => JSON.stringify(v);
     }
 
     // ── State 5. Both done — the verdict and the pace graph ──
+    // Both sides' per-answer times are on the payload, which is what the
+    // server sends once (and only once) scores_revealed is true. Both lines
+    // must therefore be real, measured curves.
     {
       console.log('[5 decided — verdict + pace graph]');
       const rpc = {
@@ -268,16 +307,16 @@ const src = v => JSON.stringify(v);
           status: 'complete',
           scores_revealed: true,
           outcome: { type: 'decided', winner: 'creator' },
-          creator:  { played: true, status: 'complete', submitted_at: '2026-07-28T00:05:00Z', score: 74, is_you: true },
-          opponent: { played: true, status: 'complete', submitted_at: '2026-07-28T02:05:00Z', score: 61, is_you: false },
+          creator:  { played: true, status: 'complete', submitted_at: '2026-07-28T00:05:00Z', score: 74, is_you: true,  points: PACE_YOU },
+          opponent: { played: true, status: 'complete', submitted_at: '2026-07-28T02:05:00Z', score: 61, is_you: false, points: PACE_THEM },
         }))})`,
       };
+      // Deliberately a DIFFERENT timeline for the same run: the server's
+      // points must win over this, and (60, 50) below is what proves it.
       const storage = {};
       storage['zt_duel_result_' + KEY] = JSON.stringify({
         side: 'creator', duration: 120, score: 74, answered: 78, accuracy: 0.95,
-        // A run that starts slow and finishes fast, so the projected curve
-        // genuinely crosses the opponent's 61 partway through.
-        points: Array.from({ length: 74 }, (_, i) => Math.round((i + 1) * (i < 30 ? 2.6 : 1.35) * 10) / 10),
+        points: LOCAL_EVEN_74,
       });
       const { ctx, page, errors } = await newPage(browser, { theme, session: SESSION, rpc, storage });
       await page.goto(`${BASE}/duel.html?d=${KEY}`, { waitUntil: 'networkidle' });
@@ -290,27 +329,66 @@ const src = v => JSON.stringify(v);
       const cfg = await page.evaluate(() => {
         const c = window.__charts[window.__charts.length - 1];
         if (!c) return null;
+        const [you, them] = c.data.datasets;
+        const at = (d, x) => d.data.filter(p => p.x === x).map(p => p.y);
         return {
           labels: c.data.datasets.map(d => d.label),
-          youLen: c.data.datasets[0].data.length,
-          themYs: [...new Set(c.data.datasets[1].data.map(p => p.y))],
-          fill:   c.data.datasets[0].fill,
-          lastYou: c.data.datasets[0].data[c.data.datasets[0].data.length - 1],
-          xMax:   c.options.scales.x.max,
+          youLen:  you.data.length,
+          themLen: them.data.length,
+          youYs:  [...new Set(you.data.map(p => p.y))].length,
+          themYs: [...new Set(them.data.map(p => p.y))].length,
+          youXs:  you.data.map(p => p.x).join(','),
+          themXs: them.data.map(p => p.x).join(','),
+          youAt60:   at(you, 60),
+          themAt36:  at(them, 36),
+          fill:      you.fill,
+          themFill:  them.fill,
+          youDash:   you.borderDash,
+          themDash:  them.borderDash,
+          lastYou:   you.data[you.data.length - 1],
+          lastThem:  them.data[them.data.length - 1],
+          xMax: c.options.scales.x.max,
+          yMax: c.options.scales.y.max,
+          yMin: c.options.scales.y.min,
         };
       });
       ok(cfg && cfg.labels.length === 2, 'the chart has exactly two series');
-      ok(cfg && cfg.youLen >= 3, `the viewer's pace curve has real points (${cfg && cfg.youLen})`);
-      ok(cfg && cfg.themYs.length === 1 && cfg.themYs[0] === 61,
-         "the opponent's series is their final score held flat (61)");
+      ok(cfg && cfg.youLen >= 3 && cfg.themLen >= 3,
+         `both series are real curves (${cfg && cfg.youLen} / ${cfg && cfg.themLen} points)`);
+      ok(cfg && cfg.themYs > 1,
+         `the opponent's series is NOT their final score held flat (${cfg && cfg.themYs} distinct y values)`);
+      ok(cfg && cfg.youYs > 1, "the viewer's series is not flat either");
+      ok(cfg && cfg.themXs !== cfg.youXs,
+         "the opponent's series is not the viewer's x values wearing their score");
+      // The one exact value each curve can only have if it was plotted from
+      // that side's OWN times: 25 banked at 60s projects to 50, 30 banked at
+      // 36s projects to 100.
+      ok(cfg && cfg.youAt60.length === 1 && cfg.youAt60[0] === 50,
+         `the viewer's curve passes through (60, 50) from the SERVER's times (got ${cfg && JSON.stringify(cfg.youAt60)})`);
+      ok(cfg && cfg.themAt36.length === 1 && cfg.themAt36[0] === 100,
+         `the opponent's curve passes through (36, 100) (got ${cfg && JSON.stringify(cfg.themAt36)})`);
       ok(cfg && cfg.lastYou && cfg.lastYou.x === 120 && cfg.lastYou.y === 74,
-         'the pace curve lands on the final score at the end of the run');
+         "the viewer's curve lands on their final score at the end of the run");
+      ok(cfg && cfg.lastThem && cfg.lastThem.x === 120 && cfg.lastThem.y === 61,
+         "the opponent's curve lands on THEIR final score, not the viewer's");
+      ok(cfg && Array.isArray(cfg.themDash) && cfg.themDash.length === 0,
+         'a measured opponent curve is drawn solid, not dashed');
+      ok(cfg && Array.isArray(cfg.youDash) && cfg.youDash.length === 0,
+         "and so is the viewer's — dashed means stand-in, on either line");
       ok(cfg && cfg.fill && cfg.fill.target === 1 && cfg.fill.above && cfg.fill.below
          && cfg.fill.above !== cfg.fill.below,
          'the area between the lines is filled and tinted differently above vs below');
+      ok(cfg && cfg.themFill === false, 'only one dataset fills, so the gap is tinted once');
       ok(cfg && cfg.xMax === 120, 'the x-axis spans the duel duration');
-      ok(/their line is the score they finished on, held flat/.test(body),
-         'the caption says plainly what the opponent line actually is');
+      ok(cfg && cfg.yMax >= 100 && cfg.yMin <= 50,
+         `the y-axis covers BOTH series, incl. the opponent's early 100 (got ${cfg && cfg.yMin}..${cfg && cfg.yMax})`);
+      ok(/Both lines are projected score/.test(body),
+         'the caption says both lines are real projections');
+      ok(/Only the times are shared, never the answers/.test(body),
+         'and states what was and was not shared to draw them');
+      ok(!/held flat/.test(body), 'and does NOT still claim their line is a flat final score');
+      ok((await page.textContent('#duel-graph-note')) === 'Projected score over the run',
+         'the graph note names what is plotted');
       ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
       await page.screenshot({ path: `${SHOTS}/duel-5-decided-${tag}.png` });
 
@@ -629,10 +707,165 @@ const src = v => JSON.stringify(v);
        'and the caption says no curve was invented');
     const cfg = await page.evaluate(() => {
       const c = window.__charts[window.__charts.length - 1];
-      return { you: c.data.datasets[0].data, them: c.data.datasets[1].data };
+      return { you: c.data.datasets[0].data, them: c.data.datasets[1].data,
+               youDash: c.data.datasets[0].borderDash, themDash: c.data.datasets[1].borderDash };
     });
     ok(cfg.you.length === 2 && cfg.you.every(p => p.y === 55), 'the viewer line is their flat final score');
     ok(cfg.them.length === 2 && cfg.them.every(p => p.y === 69), 'the opponent line is theirs');
+    ok(Array.isArray(cfg.youDash) && cfg.youDash.length === 2
+       && Array.isArray(cfg.themDash) && cfg.themDash.length === 2,
+       'BOTH lines are dashed, because neither of them was measured');
+    ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
+    await ctx.close();
+  }
+
+  // The same second device, but the DATABASE has both timelines. Opening a
+  // finished duel somewhere that never played it must still draw two real
+  // curves — the local record is a fallback, not the source.
+  {
+    console.log('[pace graph from the server with no local record]');
+    const rpc = {
+      get_duel_by_key: `() => (${src(duelPayload({
+        your_side: 'creator', status: 'complete', scores_revealed: true,
+        outcome: { type: 'decided', winner: 'creator' },
+        creator:  { played: true, status: 'complete', submitted_at: '2026-07-28T00:05:00Z', score: 74, is_you: true,  points: PACE_YOU },
+        opponent: { played: true, status: 'complete', submitted_at: '2026-07-28T02:05:00Z', score: 61, is_you: false, points: PACE_THEM },
+      }))})`,
+    };
+    const { ctx, page, errors } = await newPage(browser, { session: SESSION, rpc });
+    await page.goto(`${BASE}/duel.html?d=${KEY}`, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(600);
+    const body = (await page.textContent('body')) || '';
+    const rec = await page.evaluate(k => localStorage.getItem('zt_duel_result_' + k), KEY);
+    ok(rec === null, 'this browser really has no local record of the run');
+    const cfg = await page.evaluate(() => {
+      const c = window.__charts[window.__charts.length - 1];
+      const [you, them] = c.data.datasets;
+      const at = (d, x) => d.data.filter(p => p.x === x).map(p => p.y);
+      return {
+        youLen: you.data.length, themLen: them.data.length,
+        youAt60: at(you, 60), themAt36: at(them, 36),
+        lastYou: you.data[you.data.length - 1],
+        lastThem: them.data[them.data.length - 1],
+        youDash: you.borderDash, themDash: them.borderDash,
+      };
+    });
+    ok(cfg.youLen >= 3 && cfg.themLen >= 3,
+       `both lines are curves without any localStorage (${cfg.youLen} / ${cfg.themLen} points)`);
+    ok(cfg.youAt60.length === 1 && cfg.youAt60[0] === 50,
+       "the viewer's line is the server's timeline for their own side");
+    ok(cfg.themAt36.length === 1 && cfg.themAt36[0] === 100, "and the opponent's is theirs");
+    ok(cfg.lastYou.x === 120 && cfg.lastYou.y === 74 && cfg.lastThem.x === 120 && cfg.lastThem.y === 61,
+       'each line still lands on its own final score');
+    ok(Array.isArray(cfg.youDash) && cfg.youDash.length === 0
+       && Array.isArray(cfg.themDash) && cfg.themDash.length === 0,
+       'both lines are solid, because both were measured');
+    ok((await page.textContent('#duel-graph-note')) === 'Projected score over the run',
+       'it is not labelled "Final scores only"');
+    ok(/Both lines are projected score/.test(body), 'the caption reflects two real curves');
+    ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
+    await ctx.close();
+  }
+
+  // Only THEIR timeline survived: duel_pace_points returns [] for a run whose
+  // stored answers do not pass its validity filter, so one side can have real
+  // points and the other none. Half a real chart must not be described as
+  // "the two final scores, nothing interpolated between them" — the caption is
+  // the one thing on this panel that says what was measured and what was not.
+  {
+    console.log('[pace graph with only THEIR timeline]');
+    const rpc = {
+      get_duel_by_key: `() => (${src(duelPayload({
+        your_side: 'creator', status: 'complete', scores_revealed: true,
+        outcome: { type: 'decided', winner: 'creator' },
+        creator:  { played: true, status: 'complete', submitted_at: '2026-07-28T00:05:00Z', score: 74, is_you: true,  points: [] },
+        opponent: { played: true, status: 'complete', submitted_at: '2026-07-28T02:05:00Z', score: 61, is_you: false, points: PACE_THEM },
+      }))})`,
+    };
+    const { ctx, page, errors } = await newPage(browser, { session: SESSION, rpc });
+    await page.goto(`${BASE}/duel.html?d=${KEY}`, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(600);
+    const body = (await page.textContent('body')) || '';
+    const cfg = await page.evaluate(() => {
+      const c = window.__charts[window.__charts.length - 1];
+      const [you, them] = c.data.datasets;
+      return {
+        you: you.data, youDash: you.borderDash,
+        themLen: them.data.length, themDash: them.borderDash,
+        themAt36: them.data.filter(p => p.x === 36).map(p => p.y),
+        lastThem: them.data[them.data.length - 1],
+      };
+    });
+    ok(cfg.themLen >= 3 && cfg.themAt36.length === 1 && cfg.themAt36[0] === 100,
+       `the opponent's line is their real curve (${cfg.themLen} points, through (36, 100))`);
+    ok(Array.isArray(cfg.themDash) && cfg.themDash.length === 0,
+       'and is solid, because it was measured');
+    ok(cfg.lastThem.x === 120 && cfg.lastThem.y === 61, 'and lands on their final score');
+    ok(cfg.you.length === 2 && cfg.you.every(p => p.y === 74),
+       "the viewer's line is their final score held flat, on two points only");
+    ok(Array.isArray(cfg.youDash) && cfg.youDash.length === 2,
+       'and IS dashed, so the stand-in line is marked as one');
+    ok((await page.textContent('#duel-graph-note')) === 'Projected score over the run',
+       'the note is NOT "Final scores only" when one line is a real curve');
+    ok(/Their line is projected score/.test(body),
+       'the caption says whose line is the real one');
+    ok(/Your own per-answer times are not available for this run, so your line is the score you finished on, held flat/
+       .test(body.replace(/\s+/g, ' ')),
+       'and says plainly that the viewer\'s own line is the stand-in');
+    ok(!/nothing interpolated between them/.test(body),
+       'and does NOT claim nothing was interpolated, which would be false of their line');
+    ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
+    await ctx.close();
+  }
+
+  // A database without the pace migration: no `points` on either side, but
+  // this browser played the run and kept its own timeline. The pre-migration
+  // behaviour has to survive intact — the client is written to work on both
+  // sides of a migration.
+  {
+    console.log('[pace graph with no server points — local timeline only]');
+    const rpc = {
+      get_duel_by_key: `() => (${src(duelPayload({
+        your_side: 'creator', status: 'complete', scores_revealed: true,
+        outcome: { type: 'decided', winner: 'creator' },
+        creator:  { played: true, status: 'complete', submitted_at: '2026-07-28T00:05:00Z', score: 74, is_you: true },
+        opponent: { played: true, status: 'complete', submitted_at: '2026-07-28T02:05:00Z', score: 61, is_you: false },
+      }))})`,
+    };
+    const storage = {};
+    storage['zt_duel_result_' + KEY] = JSON.stringify({
+      side: 'creator', duration: 120, score: 74, answered: 78, accuracy: 0.95,
+      points: PACE_YOU,
+    });
+    const { ctx, page, errors } = await newPage(browser, { session: SESSION, rpc, storage });
+    await page.goto(`${BASE}/duel.html?d=${KEY}`, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(600);
+    const body = (await page.textContent('body')) || '';
+    const cfg = await page.evaluate(() => {
+      const c = window.__charts[window.__charts.length - 1];
+      const [you, them] = c.data.datasets;
+      return {
+        youLen: you.data.length,
+        youAt60: you.data.filter(p => p.x === 60).map(p => p.y),
+        lastYou: you.data[you.data.length - 1],
+        youDash: you.borderDash,
+        themYs: [...new Set(them.data.map(p => p.y))],
+        themDash: them.borderDash,
+      };
+    });
+    ok(cfg.youLen >= 3, `the viewer's curve is still real, from localStorage (${cfg.youLen} points)`);
+    ok(cfg.youAt60.length === 1 && cfg.youAt60[0] === 50, 'and passes through (60, 50)');
+    ok(cfg.lastYou.x === 120 && cfg.lastYou.y === 74, 'and lands on their final score');
+    ok(cfg.themYs.length === 1 && cfg.themYs[0] === 61,
+       'the opponent line falls back to their final score held flat (61)');
+    ok(Array.isArray(cfg.themDash) && cfg.themDash.length === 2,
+       'and is dashed, so the styling itself says it was not measured');
+    ok(Array.isArray(cfg.youDash) && cfg.youDash.length === 0,
+       "while the viewer's measured line stays solid");
+    ok((await page.textContent('#duel-graph-note')) === 'Projected score over the run',
+       'the note still names the viewer\'s projection');
+    ok(/their line is the score they finished on, held flat/.test(body),
+       'the old caption wording is intact when there is nothing better to say');
     ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
     await ctx.close();
   }
