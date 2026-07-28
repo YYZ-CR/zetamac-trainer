@@ -66,16 +66,23 @@ jobs:
           node-version: '20'
       - run: npm install
       - run: npx playwright install --with-deps chromium
+      # The server and the suites are one step on purpose. A background process
+      # started in an earlier step is not guaranteed to survive into the next
+      # one, and a suite failing because nothing is listening reads exactly like
+      # a suite failing on its assertions.
+      #
       # python3 -m http.server, never `npx serve`: serve has clean URLs on by
       # default and silently strips the query string on its /page.html → /page
       # redirect, so the suites would pass against the wrong page state.
-      - name: Serve the site
+      - name: Serve the site and run the browser suites
         run: |
-          python3 -m http.server 8099 --bind 127.0.0.1 &
+          python3 -m http.server 8099 --bind 127.0.0.1 >/dev/null 2>&1 &
+          SERVER=$!
+          trap 'kill $SERVER 2>/dev/null || true' EXIT
+          up=0
           for _ in $(seq 1 30); do
-            curl -sf http://127.0.0.1:8099/index.html >/dev/null && exit 0
+            if curl -sf http://127.0.0.1:8099/index.html >/dev/null; then up=1; break; fi
             sleep 1
           done
-          echo "the static server never came up" >&2
-          exit 1
-      - run: npm run test:browser
+          [ "$up" = "1" ] || { echo "the static server never came up" >&2; exit 1; }
+          npm run test:browser
