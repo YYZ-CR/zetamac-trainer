@@ -3368,3 +3368,29 @@ body.legal-page {
     font-size: 14px;
   }
 }
+
+/* ── The one other thing that scrolls sideways on a phone ─────
+   Found by test/browser/mobile-nav.mjs, which asserts
+   documentElement.scrollWidth <= innerWidth on every page: dashboard.html in
+   the DARK theme at 360px scrolled horizontally. Not the header — the Recent
+   Games table. Its five headings ("Date Score Duration Accuracy Review") have
+   a min-content width of 322px in the dark theme's monospace body font, and
+   the panel they sit in is 282px wide at that viewport, so the table hung 40px
+   past the panel's right border and 1px past the document's. The Zetamac
+   theme's proportional font fits, which is why this only ever showed in one
+   theme. It is a pre-existing bug rather than one this file introduced; it is
+   fixed here because it is the same defect at the same widths, and a page that
+   scrolls sideways on a phone is what the assertion exists to catch.
+
+   Overflow starts below about 400px; 520px matches the breakpoint the tour and
+   the legal pages already use and leaves room for a wider monospace. */
+@media (max-width: 520px) {
+  .games-table {
+    font-size: 12px;
+  }
+
+  .games-table th,
+  .games-table td {
+    padding: 5px 4px;
+  }
+}
