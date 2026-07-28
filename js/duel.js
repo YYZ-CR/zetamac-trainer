@@ -1221,21 +1221,33 @@ function renderDuelPace(input) {
   const yourFlat = [{ x: 0, y: i.myScore }, { x: duration, y: i.myScore }];
 
   if (note) {
-    note.textContent = havePace
+    // Either line being real makes this a pace chart. Reading only the
+    // viewer's would label a chart carrying a real opponent curve "Final
+    // scores only", which is the one thing this caption exists not to do.
+    note.textContent = (havePace || haveThem)
       ? 'Projected score over the run'
       : 'Final scores only';
   }
   if (caption) {
-    caption.textContent = !havePace
-      ? "The per-answer timeline for this run isn't available, so this is the honest "
-        + 'version: the two final scores, nothing interpolated between them.'
-      : haveThem
-        ? 'Both lines are projected score — questions banked so far, extrapolated to the full '
-          + duration + ' seconds. Where your line is above theirs, you were ahead on pace at that '
-          + 'moment. Only the times are shared, never the answers, and only once both runs are in.'
-        : 'Your line is your projected score — questions banked so far, extrapolated to the full '
-          + duration + ' seconds. Their per-answer times were not recorded for this duel, so their '
-          + 'line is the score they finished on, held flat.';
+    const bothReal =
+      'Both lines are projected score — questions banked so far, extrapolated to the full '
+      + duration + ' seconds. Where your line is above theirs, you were ahead on pace at that '
+      + 'moment. Only the times are shared, never the answers, and only once both runs are in.';
+    const yoursOnly =
+      'Your line is your projected score — questions banked so far, extrapolated to the full '
+      + duration + ' seconds. Their per-answer times were not recorded for this duel, so their '
+      + 'line is the score they finished on, held flat.';
+    const theirsOnly =
+      'Their line is projected score — questions banked so far, extrapolated to the full '
+      + duration + ' seconds. Your own per-answer times are not available for this run, so your '
+      + 'line is the score you finished on, held flat.';
+    const neither =
+      "The per-answer timeline for this run isn't available, so this is the honest "
+      + 'version: the two final scores, nothing interpolated between them.';
+
+    caption.textContent = havePace
+      ? (haveThem ? bothReal  : yoursOnly)
+      : (haveThem ? theirsOnly : neither);
   }
 
   const cYou   = themeColor('--c-duel-you',    '#333');
@@ -1259,6 +1271,9 @@ function renderDuelPace(input) {
           data: havePace ? youPts : yourFlat,
           borderColor: cYou,
           borderWidth: 2,
+          // Same rule as the opponent's line below: dashed means "this is the
+          // final score standing in for a curve", solid means measured.
+          borderDash: havePace ? [] : [5, 4],
           tension: havePace ? 0.3 : 0,
           pointRadius: 0,
           pointHoverRadius: 4,
