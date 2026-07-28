@@ -927,7 +927,9 @@ function renderDailyReset(status) {
   el.style.display = 'block';
 
   const tick = () => {
-    const left = Math.max(0, Math.round((deadline - performance.now()) / 1000));
+    // Ceil, not round: seconds_until_reset arrives whole, and a countdown that
+    // rounded down would open on "3h 18m" for a payload that said 3h 19m.
+    const left = Math.max(0, Math.ceil((deadline - performance.now()) / 1000));
     if (left <= 0) {
       el.textContent = 'A new puzzle is available — reload to play it.';
       if (dailyResetTimer) { clearInterval(dailyResetTimer); dailyResetTimer = null; }
@@ -941,14 +943,19 @@ function renderDailyReset(status) {
   dailyResetTimer = setInterval(tick, 1000);
 }
 
+// Hours and minutes far out, minutes and seconds close in. Minutes are
+// rounded UP rather than truncated: 3h 18m 59s left is nearly 3h 19m, and
+// flooring it would make a payload that said 11,940 seconds render as
+// "3h 18m" a heartbeat after it arrived.
 function dailyDuration(totalSeconds) {
-  const s = Math.max(0, Math.floor(totalSeconds));
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = s % 60;
-  if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m`;
-  if (m > 0) return `${m}m ${String(sec).padStart(2, '0')}s`;
-  return `${sec}s`;
+  const s = Math.max(0, Math.ceil(totalSeconds));
+  if (s >= 3600) {
+    const mins = Math.ceil(s / 60);
+    return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m`;
+  }
+  const m = Math.floor(s / 60);
+  if (m > 0) return `${m}m ${String(s % 60).padStart(2, '0')}s`;
+  return `${s}s`;
 }
 
 // ── Shell helpers ─────────────────────────────────────────────

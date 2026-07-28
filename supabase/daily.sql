@@ -194,29 +194,28 @@ BEGIN
   -- each append copies the whole document, so the loop is quadratic
   -- in the question count for no reason.
   --
-  -- The first LATERAL exists to *name* the random draws. Written
-  -- inline, `random()` in the display string and `random()` in the
-  -- answer would be two different numbers and every question would be
-  -- wrong. Both operand pairs are drawn for every row and the CASE
-  -- discards the pair it does not need — cheaper and clearer than
-  -- branching before the draw.
-  SELECT COALESCE(jsonb_agg(g.q ORDER BY g.i), '[]'::JSONB)
-  INTO v_out
-  FROM generate_series(1, GREATEST(COALESCE(p_count, 0), 0)) AS i
-  CROSS JOIN LATERAL (
-    SELECT
-      v_ops[1 + floor(random() * cardinality(v_ops))::INT]      AS op,
-      v_am1 + floor(random() * (v_ax1 - v_am1 + 1))::INT        AS aa,
-      v_am2 + floor(random() * (v_ax2 - v_am2 + 1))::INT        AS ab,
-      v_mm1 + floor(random() * (v_mx1 - v_mm1 + 1))::INT        AS ma,
-      v_mm2 + floor(random() * (v_mx2 - v_mm2 + 1))::INT        AS mb,
-      -- Which of the two reverses to show. Without this every
-      -- subtraction would subtract the first operand and half the
-      -- shapes the game can produce would never appear.
-      random() < 0.5                                           AS flip
-  ) d
-  CROSS JOIN LATERAL (
-    SELECT i, CASE d.op
+  -- The subquery `d` exists to *name* the random draws, because each
+  -- one is read twice — `aa` appears in both the display string and
+  -- the answer, and two inline random() calls would be two different
+  -- numbers, i.e. a question whose stated answer is wrong.
+  --
+  -- It has to be a subquery whose target list does the drawing, and
+  -- specifically NOT `CROSS JOIN LATERAL (SELECT random() ...)` with
+  -- no reference to the outer row. That form is uncorrelated, the
+  -- planner evaluates it exactly once, and all 400 questions come out
+  -- byte-identical — a whole day of "puzzle" that is one question
+  -- repeated. (Observed, not theorised.) The form below is safe for a
+  -- documented reason rather than a lucky one: PostgreSQL refuses to
+  -- pull up a subquery with volatile functions in its target list,
+  -- precisely so they cannot be duplicated or hoisted, so `d` is
+  -- guaranteed to be evaluated once per generate_series row and each
+  -- draw is guaranteed to be read consistently.
+  --
+  -- Both operand pairs are drawn for every row and the CASE discards
+  -- the pair it does not need — cheaper and clearer than branching
+  -- before the draw.
+  SELECT COALESCE(jsonb_agg(
+    CASE d.op
 
       WHEN 'addition' THEN jsonb_build_object(
         'display',   d.aa || ' + ' || d.ab,
@@ -255,8 +254,23 @@ BEGIN
         'display',   d.aa || ' + ' || d.ab,
         'operation', 'addition',
         'answer',    d.aa + d.ab)
-      END AS q
-  ) g;
+    END
+    ORDER BY d.i), '[]'::JSONB)
+  INTO v_out
+  FROM (
+    SELECT
+      i,
+      v_ops[1 + floor(random() * cardinality(v_ops))::INT] AS op,
+      v_am1 + floor(random() * (v_ax1 - v_am1 + 1))::INT   AS aa,
+      v_am2 + floor(random() * (v_ax2 - v_am2 + 1))::INT   AS ab,
+      v_mm1 + floor(random() * (v_mx1 - v_mm1 + 1))::INT   AS ma,
+      v_mm2 + floor(random() * (v_mx2 - v_mm2 + 1))::INT   AS mb,
+      -- Which of the two reverses to show. Without it every
+      -- subtraction would subtract the first operand and half the
+      -- shapes the game can produce would never appear.
+      random() < 0.5                                       AS flip
+    FROM generate_series(1, GREATEST(COALESCE(p_count, 0), 0)) AS i
+  ) d;
 
   RETURN v_out;
 END;

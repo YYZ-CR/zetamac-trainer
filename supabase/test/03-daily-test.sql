@@ -39,6 +39,30 @@ BEGIN
                  AND a->'questions'->0 ? 'operation'
                  AND a->'questions'->0 ? 'answer',
     'questions carry display, operation and answer');
+  -- A generator whose random draws are uncorrelated is evaluated once by the
+  -- planner and emits the SAME question 400 times — a whole day's puzzle that
+  -- is one question repeated. It still passes every shape check above, so it
+  -- has to be asserted directly.
+  SELECT COUNT(DISTINCT e->>'display') INTO n
+    FROM jsonb_array_elements(a->'questions') e;
+  PERFORM pg_temp.ok(n > 50,
+    'the day''s questions are actually varied, not one draw repeated');
+
+  -- Every operation the config enables should appear across 400 draws.
+  SELECT COUNT(DISTINCT e->>'operation') INTO n
+    FROM jsonb_array_elements(a->'questions') e;
+  PERFORM pg_temp.ok(n = 4, 'all four operations appear in the day''s questions');
+
+  -- The stated answer must match the stated display, or the puzzle is
+  -- unwinnable in a way no shape check would reveal.
+  SELECT COUNT(*) INTO n
+    FROM jsonb_array_elements(a->'questions') e
+   WHERE e->>'operation' = 'addition'
+     AND (split_part(e->>'display', ' + ', 1))::INT
+       + (split_part(e->>'display', ' + ', 2))::INT
+       <> (e->>'answer')::INT;
+  PERFORM pg_temp.ok(n = 0, 'every addition question''s answer matches its display');
+
   PERFORM pg_temp.ok((a->>'duration_seconds')::INT = 120, 'duration is 120s');
   PERFORM pg_temp.ok((a->>'seconds_remaining')::NUMERIC > 0, 'a fresh attempt has time left');
   PERFORM pg_temp.ok(a->>'status' = 'in_progress', 'a fresh attempt is in_progress');
