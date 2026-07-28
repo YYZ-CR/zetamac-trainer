@@ -177,29 +177,57 @@ async function logout() {
   currentUser = null;
 }
 
+// The one header builder. There used to be two — this one, which rendered
+// Dashboard and never Play, and a hand-rolled copy in js/dashboard.js which
+// rendered Play and never Dashboard. The result was that exactly one of the
+// two appeared depending on which page you were on, which reads as links
+// randomly disappearing. Every page calls this now; if a page needs a
+// different link, it belongs in NAV, not in a second copy of this function.
+const NAV = [
+  { href: 'index.html',     label: 'Play' },
+  { href: 'dashboard.html', label: 'Dashboard' },
+  // Nothing to configure without an account, so this one is conditional.
+  { href: 'settings.html',  label: 'Settings', authOnly: true },
+];
+
+// Which file is being viewed, so the current page can be marked rather than
+// linking to itself. A clean URL (/@name, /d/key) has no .html basename, so
+// nothing matches and nothing is marked — which is correct.
+function currentPageFile() {
+  const last = String(window.location.pathname).split('/').pop() || 'index.html';
+  return last === '' ? 'index.html' : last;
+}
+
 function renderAuthBar(user, container) {
   if (!container) return;
+
+  const here  = currentPageFile();
+  const links = NAV
+    .filter(item => !item.authOnly || user)
+    .map(item => item.href === here
+      ? `<span class="nav-current" aria-current="page">${item.label}</span>`
+      : `<a href="${item.href}">${item.label}</a>`);
+
+  const account = user
+    ? '<button class="link-btn" id="logout-btn">Log out</button>'
+    : '<button class="link-btn" id="login-btn">Log in</button>' +
+      '<span class="sep">|</span>' +
+      '<button class="link-btn" id="register-btn">Register</button>';
+
+  container.innerHTML = [...links, account].join('<span class="sep">|</span>');
+
   if (user) {
-    container.innerHTML = `
-      <a href="dashboard.html">Dashboard</a>
-      <span class="sep">|</span>
-      <button class="link-btn" id="logout-btn">Log out</button>
-    `;
     document.getElementById('logout-btn').addEventListener('click', async () => {
       await logout();
+      // The dashboard's old copy omitted this, so logging out there left a
+      // signed-out page still showing the previous user's data until reload.
       window.location.reload();
     });
   } else {
-    container.innerHTML = `
-      <a href="dashboard.html">Dashboard</a>
-      <span class="sep">|</span>
-      <button class="link-btn" id="login-btn">Log in</button>
-      <span class="sep">|</span>
-      <button class="link-btn" id="register-btn">Register</button>
-    `;
     document.getElementById('login-btn').addEventListener('click', () => showAuthModal('login'));
     document.getElementById('register-btn').addEventListener('click', () => showAuthModal('register'));
   }
-  // Appended last: the innerHTML assignments above would wipe it out.
+
+  // Appended last: the innerHTML assignment above would wipe it out.
   if (typeof renderThemeToggle === 'function') renderThemeToggle(container);
 }

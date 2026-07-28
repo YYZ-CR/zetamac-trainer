@@ -2496,3 +2496,11 @@ body.leagues-page {
   margin: 0;
   max-width: 260px;
 }
+
+/* ── Header: current page ───────────────────────────────────── */
+/* Shown rather than hidden, so the set of links never changes between
+   pages — a link that vanishes on the page it points at reads as a bug. */
+.top-bar .nav-current {
+  color: var(--c-ink-faint);
+  cursor: default;
+}

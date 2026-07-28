@@ -93,6 +93,7 @@ ZT_CHROMIUM=<path> node test/browser/daily.mjs     # browser tests
 ZT_CHROMIUM=<path> node test/browser/duel.mjs
 ZT_CHROMIUM=<path> node test/browser/leagues.mjs
 ZT_CHROMIUM=<path> node test/browser/dashboard.mjs
+ZT_CHROMIUM=<path> node test/browser/nav.mjs
 ```
 
 `supabase/test/` rebuilds a throwaway database from the migration files and asserts

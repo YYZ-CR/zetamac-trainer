@@ -16,27 +16,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     prevUserId = user?.id ?? null;
   } catch (e) { console.warn('initAuth failed:', e); }
 
-  // Build the top bar manually (Play instead of Dashboard)
-  const topBar = document.getElementById('top-bar');
-  if (user) {
-    topBar.innerHTML = `
-      <a href="index.html">Play</a>
-      <span class="sep">|</span>
-      <button class="link-btn" id="logout-btn">Log out</button>
-    `;
-    document.getElementById('logout-btn').addEventListener('click', () => logout());
-  } else {
-    topBar.innerHTML = `
-      <a href="index.html">Play</a>
-      <span class="sep">|</span>
-      <button class="link-btn" id="login-btn">Log in</button>
-      <span class="sep">|</span>
-      <button class="link-btn" id="register-btn">Register</button>
-    `;
-    document.getElementById('login-btn').addEventListener('click', () => showAuthModal('login'));
-    document.getElementById('register-btn').addEventListener('click', () => showAuthModal('register'));
-  }
-  if (typeof renderThemeToggle === 'function') renderThemeToggle(topBar);
+  renderAuthBar(user, document.getElementById('top-bar'));
 
   if (!user) {
     document.getElementById('auth-prompt').style.display = 'block';
