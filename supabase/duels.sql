@@ -460,6 +460,45 @@ REVOKE ALL ON FUNCTION public.duel_refresh(UUID) FROM PUBLIC;
 -- STABLE, not VOLATILE: it writes nothing. duel_refresh is the
 -- volatile half and is called separately by the RPCs, which keeps
 -- "what may be seen" free of "what gets closed".
+-- ── 4a. Pace points ─────────────────────────────────────────────
+-- The seconds at which each question was first answered CORRECTLY, for one
+-- side, ascending. This is what the pace graph is drawn from.
+--
+-- Why it is safe to expose, when the answers themselves are not: it carries
+-- times and nothing else. No question index, no value, no ordering that maps
+-- back to the sequence. Even the answers would be harmless at this point —
+-- §4 only ever emits this once BOTH runs have a result, and a run that has a
+-- result cannot be replayed (duel_already_submitted, and the run row is keyed
+-- (duel_id, side)). But there is no reason to send more than the graph needs.
+--
+-- A question fumbled and then corrected contributes once, at the time of the
+-- correction that banked it — MIN over the correct attempts, matching the way
+-- submit_duel_run scores it.
+CREATE OR REPLACE FUNCTION public.duel_pace_points(
+  p_questions JSONB,
+  p_answers   JSONB
+)
+RETURNS JSONB
+LANGUAGE sql
+IMMUTABLE
+AS $$
+  SELECT COALESCE(jsonb_agg(z.t ORDER BY z.t), '[]'::JSONB)
+  FROM (
+    SELECT MIN(round((a.e->>'elapsed_ms')::NUMERIC / 1000.0, 1)) AS t
+    FROM jsonb_array_elements(COALESCE(p_answers, '[]'::JSONB)) AS a(e)
+    WHERE jsonb_typeof(a.e->'i')          = 'number'
+      AND jsonb_typeof(a.e->'elapsed_ms') = 'number'
+      AND jsonb_typeof(a.e->'value')      = 'number'
+      AND (a.e->>'i')::NUMERIC >= 0
+      AND jsonb_typeof(p_questions->((a.e->>'i')::INT)->'answer') = 'number'
+      AND (a.e->>'value')::NUMERIC
+        = (p_questions->((a.e->>'i')::INT)->>'answer')::NUMERIC
+    GROUP BY (a.e->>'i')::INT
+  ) z;
+$$;
+
+REVOKE ALL ON FUNCTION public.duel_pace_points(JSONB, JSONB) FROM PUBLIC;
+
 CREATE OR REPLACE FUNCTION public.duel_public_payload(
   p_duel_id UUID,
   p_uid     UUID,
@@ -587,6 +626,11 @@ BEGIN
                            THEN to_char(v_c.submitted_at AT TIME ZONE 'UTC',
                                         'YYYY-MM-DD"T"HH24:MI:SS"Z"') END,
       'score',        CASE WHEN v_reveal AND v_c_result THEN v_c.score END,
+      -- Times only, and only once both sides are done — the same gate the
+      -- score is behind. Before that a timeline would be a partial answer key
+      -- for a run the other player has not taken yet.
+      'points',       CASE WHEN v_reveal AND v_c_found
+                           THEN public.duel_pace_points(v_d.questions, v_c.answers) END,
       -- A name, not a score: it is not behind the reveal gate.
       'username',     v_c_name,
       'is_you',       v_role = 'creator'),
@@ -597,6 +641,11 @@ BEGIN
                            THEN to_char(v_o.submitted_at AT TIME ZONE 'UTC',
                                         'YYYY-MM-DD"T"HH24:MI:SS"Z"') END,
       'score',        CASE WHEN v_reveal AND v_o_result THEN v_o.score END,
+      -- Times only, and only once both sides are done — the same gate the
+      -- score is behind. Before that a timeline would be a partial answer key
+      -- for a run the other player has not taken yet.
+      'points',       CASE WHEN v_reveal AND v_o_found
+                           THEN public.duel_pace_points(v_d.questions, v_o.answers) END,
       -- NULL for a guest, who has no profile to name.
       'username',     v_o_name,
       'is_you',       v_role = 'opponent')

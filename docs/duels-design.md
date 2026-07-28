@@ -46,6 +46,10 @@ The second player must not know the target. Knowing you need 84 changes how you 
 complete (or the duel has expired). Before that it returns only whether they have
 played.
 
+The same gate covers `points`, the per-side pace timeline the graph is drawn from
+(below). Withholding a live opponent's pace is the same rule as withholding their
+score: watching someone bank their 40th point at 55 seconds is a chase target too.
+
 ## Schema
 
 ```sql
@@ -89,7 +93,9 @@ All `SECURITY DEFINER`, `SET search_path = public`, matching `social.sql`.
   `{duel_key, expires_at}`. Signed-in callers only.
 - **`get_duel_by_key(p_key TEXT, p_guest_token TEXT) → JSONB`** — the duel's public
   face: who is playing, what each side's status is, and the scores **only** once both
-  are done. Never the questions.
+  are done. Never the questions. Each side block also carries `points` once scores
+  are revealed: the ascending list of seconds at which that side banked a correct
+  answer. Times only — never a question index, never a value.
 - **`start_duel_run(p_key TEXT, p_guest_token TEXT) → JSONB`** — claims a side,
   stamps `started_at`, returns the questions and `seconds_remaining`. Idempotent:
   calling it again resumes rather than restarting.
@@ -128,6 +134,26 @@ in" is a more interesting thing to post than a final number.
 
 Both runs are on the same question sequence, so the x-axis is directly comparable in
 a way two ordinary runs never are.
+
+### Where the opponent's line comes from
+
+A stored per-answer timeline is a partial answer key: an entry saying "correct at
+7.4s on question 12" states the answer to question 12. So the server never returns
+one, and for a while the opponent's line was their final score held flat.
+
+What it returns instead is `duel_pace_points()`: the **times only**, one per correct
+answer, with the question index and the value dropped. That is enough to draw the
+curve and reveals nothing about the questions. It is gated on the same reveal flag as
+the score, and by the time the flag flips, the duel can no longer be replayed —
+`submit_duel_run` rejects a second run per side, and `duel_runs` is keyed
+`(duel_id, side)` — so a timeline is no longer a hint to anybody.
+
+De-duplicated per question index, so a question fumbled and then answered correctly
+contributes one point at the time it was finally banked, matching the score.
+
+The client still falls back to the flat line when a duel predates this, and says so
+in the caption and by drawing that line dashed. A fabricated curve would be a lie in
+the one chart people screenshot.
 
 ## Deferred: steal mode
 

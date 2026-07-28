@@ -243,6 +243,18 @@ function duelScoreOf(d, block) {
   return duelNumber(block && block.score);
 }
 
+// The seconds at which a side banked each correct answer, ascending, or []. The
+// server sends TIMES ONLY — never which question, never the value — so this
+// says how fast someone was without saying what they answered. Gated on
+// scores_revealed for the same reason the score is: before both runs are in, a
+// live opponent's pace is a chase target.
+function duelPointsOf(d, block) {
+  if (!d || d.scores_revealed !== true) return [];
+  const raw = block && block.points;
+  if (!Array.isArray(raw)) return [];
+  return raw.map(Number).filter(Number.isFinite).sort((a, b) => a - b);
+}
+
 // Clears everything the previous state put on the page, and stops its timers.
 function resetDuelView() {
   if (duelTimer)       { clearInterval(duelTimer);       duelTimer = null; }
@@ -916,14 +928,17 @@ function clearDuelDraft() {
 }
 
 // ── The local result record ───────────────────────────────────
-// What this client knows about its OWN finished run, and the only source the
-// pace graph has for a per-answer timeline: get_duel_by_key deliberately does
-// not return one, because a stored timeline is a partial answer key — a
-// correct entry states the answer to question i.
+// What this client knows about its OWN finished run.
 //
-// Consequence, stated plainly because the graph depends on it: the pace curve
-// exists only for the run this browser played, on this browser. There is no
-// path by which this page can ever draw the opponent's curve.
+// get_duel_by_key never returns a stored ANSWER timeline — a correct entry
+// states the answer to question i, so that would be a partial answer key. What
+// it does return, once both runs are in, is the bare list of seconds at which
+// each side banked a point: enough to draw a curve, and no help to anyone,
+// since by then the duel can never be replayed.
+//
+// This record is therefore a fallback, not the source: it covers a run that
+// finished against a database without the pace migration applied, and it is
+// the only timeline available for the brief window before the reveal.
 
 function duelResultKey(key) { return DUEL_RESULT_PREFIX + key; }
 
@@ -1114,32 +1129,32 @@ function showDuelResult(d, submitRes) {
   if (!revealed && iPlay) showDuelShareLink(duelKey);
 
   renderDuelExpiry(d);
-  renderDuelPace({ duration, myScore, theirScore, record, revealed, myLabel, themLabel });
+  renderDuelPace({
+    duration, myScore, theirScore, record, revealed, myLabel, themLabel,
+    myPoints:    duelPointsOf(d, me),
+    theirPoints: duelPointsOf(d, them),
+  });
 }
 
 // ── The pace graph ────────────────────────────────────────────
 // Projected score over the run: banked × duration ÷ elapsed — the same curve,
 // and the same warm-up gates, as renderRunGraph() in js/results.js.
 //
-// WHAT THIS IS ACTUALLY DRAWN FROM, because the honest version is narrower
-// than the design doc's sketch:
+// WHAT THIS IS DRAWN FROM, stated because a chart people screenshot should not
+// be quietly interpolated:
 //
-//   Your line   — real. One point per correct answer, from the timeline this
-//                 browser recorded while you played (the local result record).
-//   Their line  — their FINAL SCORE, held flat across the run. Not a curve,
-//                 and not presented as one.
+//   Both lines  — real. One point per correct answer, at the second it landed,
+//                 from get_duel_by_key's per-side `points`.
+//   Fallbacks   — your own local timeline if the server sent no points (a run
+//                 finished against a database without the pace migration), and
+//                 failing that, the two final scores held flat, labelled as
+//                 exactly that. A fabricated curve would be a lie.
 //
-// There is no per-answer timeline for the opponent, anywhere, on purpose:
-// get_duel_by_key does not return one because a stored timeline is a partial
-// answer key, and submit_duel_run returns only the caller's own totals. So the
-// choice was a fabricated curve or a flat reference, and a fabricated curve
-// would be a lie in the one chart people screenshot.
-//
-// The flat line still earns its place: projected score converges on the final
-// score as the clock runs down, so "their final score" is exactly the pace
-// they finished on, and every crossing of it is a real fact — the moment your
-// pace passed, or fell behind, what they ended up doing. The fill is tinted
-// toward whoever is ahead at that instant, which is what makes that readable.
+// The server sends TIMES ONLY, never the answers, and only after both runs are
+// in — at which point the duel can never be replayed (submit_duel_run rejects a
+// second run per side), so a timeline is no longer a chase target or a hint.
+// The fill is tinted toward whoever is ahead at that instant, which is what
+// makes the crossings readable.
 function renderDuelPace(input) {
   duelChartInput = input || null;
 
@@ -1160,29 +1175,49 @@ function renderDuelPace(input) {
   }
 
   const duration = i.duration || 120;
-  const pts      = (i.record && Array.isArray(i.record.points)) ? i.record.points : [];
+  // Both curves come from the server once both runs are in. It sends the
+  // SECONDS at which each side banked a correct answer — times only, never the
+  // answers — so the opponent's line is their real pace rather than their
+  // final score held flat. Before the reveal these are absent, and the panel
+  // is hidden anyway.
+  //
+  // i.record is the locally-saved timeline of this browser's own run. It is
+  // still the fallback for your own line, for a duel finished a moment ago on
+  // a database that has not had the migration applied yet.
+  const localPts = (i.record && Array.isArray(i.record.points)) ? i.record.points : [];
+  const myPts    = Array.isArray(i.myPoints)    && i.myPoints.length    ? i.myPoints    : localPts;
+  const themRaw  = Array.isArray(i.theirPoints) ? i.theirPoints : [];
 
-  const youPts  = [];
-  for (let k = 0; k < pts.length; k++) {
-    const x = pts[k];
-    const banked = k + 1;
-    if (!(x > 0) || x > duration) continue;
-    if (banked < DUEL_WARMUP_Q || x < DUEL_WARMUP_SEC) continue;
-    youPts.push({ x: duelRound1(x), y: duelRound1(banked * duration / x) });
-  }
-  // Terminal point: the score actually finished on, so the line lands on the
-  // number in the card above it.
-  youPts.push({ x: duration, y: i.myScore });
+  // banked-so-far extrapolated to the full run, the same maths results.js uses.
+  const curve = (times, finalScore) => {
+    const out = [];
+    for (let k = 0; k < times.length; k++) {
+      const x = Number(times[k]);
+      const banked = k + 1;
+      if (!(x > 0) || x > duration) continue;
+      if (banked < DUEL_WARMUP_Q || x < DUEL_WARMUP_SEC) continue;
+      out.push({ x: duelRound1(x), y: duelRound1(banked * duration / x) });
+    }
+    // Terminal point: the score actually finished on, so the line lands on the
+    // number in the card above it.
+    if (finalScore !== null) out.push({ x: duration, y: finalScore });
+    return out;
+  };
+
+  const youPts = curve(myPts, i.myScore);
 
   panel.style.display = 'block';
 
-  // Fewer than three plotted points is not a curve, and there is no local
-  // timeline at all when the run was played on another device. Fall back to
-  // the two numbers that ARE known, and say that is what this is.
-  const havePace = youPts.length >= 3;
+  // Fewer than three plotted points is not a curve.
+  const havePace  = youPts.length >= 3;
+  const themCurve = curve(themRaw, i.theirScore);
+  const haveThem  = themCurve.length >= 3;
 
-  const themPts = (havePace ? youPts : [{ x: 0 }, { x: duration }])
-    .map(p => ({ x: p.x, y: i.theirScore }));
+  // Their real pace when the server gave it, otherwise the one thing that IS
+  // known about them — the score they finished on — held flat and labelled.
+  const themPts = haveThem
+    ? themCurve
+    : (havePace ? youPts : [{ x: 0 }, { x: duration }]).map(p => ({ x: p.x, y: i.theirScore }));
   const yourFlat = [{ x: 0, y: i.myScore }, { x: duration, y: i.myScore }];
 
   if (note) {
@@ -1191,13 +1226,16 @@ function renderDuelPace(input) {
       : 'Final scores only';
   }
   if (caption) {
-    caption.textContent = havePace
-      ? 'Your line is your projected score — questions banked so far, extrapolated to the full '
-        + duration + ' seconds. Their per-answer times are never shared (a stored timeline gives away '
-        + 'answers), so their line is the score they finished on, held flat. Where your line is above '
-        + 'it, you were on a winning pace.'
-      : "The per-answer timeline for this run isn't on this device, and the server never shares one — "
-        + 'so this is the honest version: the two final scores, nothing interpolated between them.';
+    caption.textContent = !havePace
+      ? "The per-answer timeline for this run isn't available, so this is the honest "
+        + 'version: the two final scores, nothing interpolated between them.'
+      : haveThem
+        ? 'Both lines are projected score — questions banked so far, extrapolated to the full '
+          + duration + ' seconds. Where your line is above theirs, you were ahead on pace at that '
+          + 'moment. Only the times are shared, never the answers, and only once both runs are in.'
+        : 'Your line is your projected score — questions banked so far, extrapolated to the full '
+          + duration + ' seconds. Their per-answer times were not recorded for this duel, so their '
+          + 'line is the score they finished on, held flat.';
   }
 
   const cYou   = themeColor('--c-duel-you',    '#333');
@@ -1207,7 +1245,7 @@ function renderDuelPace(input) {
   const cGrid  = themeColor('--c-rule',        '#eee');
   const cText  = themeColor('--c-ink-muted',   '#555');
 
-  const ys  = [i.myScore, i.theirScore, ...youPts.map(p => p.y)];
+  const ys  = [i.myScore, i.theirScore, ...youPts.map(p => p.y), ...themPts.map(p => p.y)];
   const lo  = Math.min(...ys);
   const hi  = Math.max(...ys);
   const pad = Math.max(2, (hi - lo) * 0.2);
@@ -1235,7 +1273,9 @@ function renderDuelPace(input) {
           data: themPts,
           borderColor: cThem,
           borderWidth: 2,
-          borderDash: [5, 4],
+          // Dashed only when the line is the flat final-score fallback, so the
+          // styling itself says whether it is a measured curve.
+          borderDash: haveThem ? [] : [5, 4],
           tension: 0,
           pointRadius: 0,
           pointHoverRadius: 4,

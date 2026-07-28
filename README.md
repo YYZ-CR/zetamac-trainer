@@ -107,14 +107,17 @@ when a user leaves a league. There is no `DROP TABLE` or `TRUNCATE` anywhere.
 
 ```bash
 npm test                       # node unit tests
-npm run test:sql               # SQL contract suite — needs a local PostgreSQL 14+
-ZT_CHROMIUM=<path> node test/browser/daily.mjs     # browser tests
-ZT_CHROMIUM=<path> node test/browser/duel.mjs
-ZT_CHROMIUM=<path> node test/browser/leagues.mjs
-ZT_CHROMIUM=<path> node test/browser/dashboard.mjs
-ZT_CHROMIUM=<path> node test/browser/nav.mjs
-ZT_CHROMIUM=<path> node test/browser/settings.mjs
+npm run test:sql               # SQL contract suites — needs a local PostgreSQL 14+
+npm run test:browser           # every browser suite, one after another
 ```
+
+The browser suites need a server on port 8099 (`npm run dev`) and Playwright's
+Chromium (`npm install && npx playwright install chromium`). Run one on its own with
+`node test/browser/duel.mjs`; set `ZT_CHROMIUM=<path>` to point at a different
+Chromium build.
+
+All three run on every push, as three jobs in `.github/workflows/ci.yml`. The SQL job
+brings up its own `postgres:16` service, so nothing there touches a real project.
 
 `npm test` includes a check that the client-side username rule in `js/util.js`
 matches the `CHECK` constraint in `supabase/settings.sql` exactly — the same rule
@@ -179,6 +182,10 @@ product, so every feature added before it is written is a feature the tour has t
 be rewritten for. It also needs a decision on where "seen it" is stored —
 localStorage means it reappears on a second device, a profile column means it
 follows the account but does nothing for signed-out visitors.
+
+## Licence
+
+MIT. See `LICENSE`.
 
 ## Not built
 
