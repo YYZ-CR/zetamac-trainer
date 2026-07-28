@@ -96,10 +96,17 @@
   <div class="duel-game steal-game" id="steal-game" style="display:none">
     <div class="game-hud">
       <span id="steal-timer">Seconds left: —</span>
+      <!-- Both sides are named, not labelled "You" and "Them": in a two-player
+           game the other player has a name and seeing it is most of what makes
+           the scoreline feel like a game against a person. Filled by
+           stealRenderScore() and left empty here, because the only honest
+           starting value is one that knows who is playing. Yours is on the
+           LEFT and carries "(you)"; a name too long for the space is
+           ellipsized so it can never push the timer off the other end. -->
       <span id="steal-score">
-        <span class="steal-score-side" id="steal-score-you">You 0</span>
+        <span class="steal-score-side" id="steal-score-you"></span>
         <span class="steal-score-sep">·</span>
-        <span class="steal-score-side" id="steal-score-them">Them 0</span>
+        <span class="steal-score-side" id="steal-score-them"></span>
       </span>
     </div>
 

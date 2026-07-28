@@ -105,7 +105,7 @@ function renderSettingsUsername() {
     // pick.
     badge.textContent = 'Not set';
     intro.textContent =
-      "You don't have a username yet, so nothing on a leaderboard, a league board " +
+      "You don't have a username yet, so nothing on a leaderboard, a clan board " +
       'or a duel can name you. Claiming your first one is free and takes effect ' +
       'immediately — the 30-day wait only starts once you have one.';
     rules.textContent = SETTINGS_USERNAME_RULES;
@@ -127,7 +127,7 @@ function renderSettingsUsername() {
   } else {
     badge.textContent = 'Set';
     intro.textContent =
-      'This is the name every leaderboard, league board and duel shows for you. ' +
+      'This is the name every leaderboard, clan board and duel shows for you. ' +
       'Changing it starts a 30-day wait before the next change.';
     rules.textContent = SETTINGS_USERNAME_RULES;
     input.value       = current;

@@ -2520,6 +2520,18 @@ body.leagues-page {
   color: var(--c-ink-soft);
 }
 
+/* A board that could not be LOADED, which is a different thing from a board
+   nobody has played yet and must not look like one — an empty board is an
+   invitation and this is a fault. Same size, different ink, so the two are
+   distinguishable at a glance and not only by reading. No new token: --c-danger
+   is already defined in both theme blocks. */
+.league-board-error {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--c-danger);
+  font-weight: bold;
+}
+
 .league-board-table {
   width: 100%;
   border-collapse: collapse;

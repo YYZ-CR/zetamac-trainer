@@ -3,7 +3,7 @@ import { chromium } from 'playwright';
 // The header at phone widths.
 //
 // `.top-bar` was a single non-wrapping right-aligned flex row. On a 406px
-// screen it began "y | Duel | Leagues | …" — Play, the link back to the game,
+// screen it began "y | Duel | Leaderboards | …" — Play, the link back to the game,
 // was sliced in half and pushed off the LEFT edge, where nothing can scroll it
 // back. The fix is one media query at the end of css/style.css: the bar wraps,
 // centres, drops the "|" separators and grows a 44px tap target.
@@ -105,7 +105,7 @@ async function load(pg, { width, theme, signedIn, unfix = false }) {
   await p.addInitScript(t => {
     // The walkthrough modal would otherwise cover the header on index.html and
     // make every hit test return the overlay.
-    localStorage.setItem('zt_tour_seen', '2');
+    localStorage.setItem('zt_tour_seen', '3');   // must track TOUR_VERSION
     localStorage.setItem('zt_theme', t);
   }, theme);
   await p.goto(BASE + '/' + pg, { waitUntil: 'networkidle' });
@@ -118,7 +118,7 @@ async function load(pg, { width, theme, signedIn, unfix = false }) {
 }
 
 const expectedLabels = (signedIn, theme, pg) => {
-  const nav = ['Play', 'Duel', 'Leagues', 'Dashboard'];
+  const nav = ['Play', 'Duel', 'Leaderboards', 'Dashboard'];
   if (signedIn) nav.push('Settings');
   nav.push(signedIn ? 'Log out' : 'Log in');
   if (!signedIn) nav.push('Register');

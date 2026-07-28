@@ -177,6 +177,30 @@ async function goToStep(page, n) {
     ok(TARGETS[0] === null, `step 1 names no target (got ${TARGETS[0] ?? 'null'})`);
     ok(TARGETS.slice(1).every(t => typeof t === 'string' && t.length > 0),
        'every step after the welcome still names a target');
+
+    // ── The rename ────────────────────────────────────────────
+    // Leagues became Leaderboards and a league became a clan. The tour is the
+    // one place on the site that describes a feature before you have seen it,
+    // so copy that still said "league" would be teaching the old word to
+    // exactly the people who do not know either.
+    const COPY = await page.evaluate(() =>
+      TOUR_STEPS.map(s => (s.title + ' ' + s.html).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()));
+    const offenders = COPY.map((t, i) => [i + 1, t]).filter(([, t]) => /league/i.test(t));
+    ok(offenders.length === 0,
+       `no tour step says "league" (${JSON.stringify(offenders).slice(0, 200)})`);
+
+    const clanStep = COPY[5];
+    ok(/clans/i.test(clanStep), `step 6 says clans (got "${clanStep.slice(0, 120)}")`);
+    ok(/leaderboards/i.test(clanStep), 'and names the section they live in');
+    ok(/120-second/.test(clanStep), 'and says the global boards are 120-second runs');
+    ok(/No account needed to read them/i.test(clanStep),
+       'and that the boards are readable signed out — the thing the rename made true');
+    // The step still points at leagues.html: the page was renamed, the FILE
+    // was not, so invite links already sent keep resolving.
+    ok(TARGETS[5] === '#top-bar a[href="leagues.html"]',
+       `step 6 still targets the leagues.html nav item (got ${TARGETS[5]})`);
+    ok(/leaderboards/i.test(COPY[0]),
+       'the welcome step points at the leaderboards rather than at "league boards"');
     await ctx.close();
   }
 
@@ -745,7 +769,7 @@ async function goToStep(page, n) {
       [3, 'a[href="practice.html"]',            'Practice'],
       [4, 'a[href="daily.html"]',               'Zetamac Daily'],
       [5, '#top-bar a[href="duel.html"]',       'Duels'],
-      [6, '#top-bar a[href="leagues.html"]',    'Private leagues'],
+      [6, '#top-bar a[href="leagues.html"]',    'Leaderboards and clans'],
       [7, '#top-bar a[href="dashboard.html"]',  'A profile worth sharing'],
     ];
     ok(EXPECT.length === STEPS.length,
@@ -775,27 +799,28 @@ async function goToStep(page, n) {
     await ctx.close();
   }
 
-  // ── 16. The version bump brings it back for a '1' dismisser ──
-  // The whole reason TOUR_VERSION exists. Someone who read and dismissed the
-  // six-step tour has not read the welcome step or the closing line, so they
-  // must see it again — and once they dismiss THIS one, it stays gone.
+  // ── 16. The version bump brings it back for an older dismisser ──
+  // The whole reason TOUR_VERSION exists. Someone who dismissed '2' was told
+  // the nav item is called Leagues, which it is not any more, and was never
+  // told the global boards exist — so they must see it again, and once they
+  // dismiss THIS one it stays gone.
   {
-    console.log('[16. the bump to 2]');
+    console.log('[16. the bump to 3]');
     const ctx = await newContext(browser);
     const probe = await ctx.newPage();
     await probe.goto(`${BASE}/index.html`, { waitUntil: 'networkidle' });
     const V = await probe.evaluate(() => TOUR_VERSION);
     await probe.close();
     await ctx.close();
-    ok(V === '2', `TOUR_VERSION is "2" (got "${V}")`);
+    ok(V === '3', `TOUR_VERSION is "3" (got "${V}") — the rename changed what the tour says`);
 
-    const ctx1 = await newContext(browser, { seen: '1' });
+    const ctx1 = await newContext(browser, { seen: '2' });
     const { page, errors } = await open(ctx1);
-    ok(await shown(page), 'somebody who dismissed version "1" is shown the tour again');
+    ok(await shown(page), 'somebody who dismissed version "2" is shown the tour again');
     ok((await heading(page)).trim() === STEPS[0], 'and lands on the new welcome step');
     await page.click('#tour-skip');
     await page.waitForTimeout(150);
-    ok((await stored(page)) === '2', 'dismissing overwrites "1" with "2"');
+    ok((await stored(page)) === '3', 'dismissing overwrites "2" with "3"');
     await page.reload({ waitUntil: 'networkidle' });
     await page.waitForTimeout(350);
     ok(!(await shown(page)), 'and it does not come back a third time');
@@ -839,7 +864,7 @@ async function goToStep(page, n) {
 
         // The shared top bar, built by js/auth.js like everywhere else.
         const bar = ((await p.textContent('#top-bar')) || '').replace(/\s+/g, ' ').trim();
-        for (const label of ['Play', 'Duel', 'Leagues', 'Dashboard', 'Log in']) {
+        for (const label of ['Play', 'Duel', 'Leaderboards', 'Dashboard', 'Log in']) {
           ok(bar.includes(label), `${theme} ${file}: the top bar has ${label} (${bar})`);
         }
 
@@ -895,7 +920,7 @@ async function goToStep(page, n) {
     ok(/private until you turn it on|off by default/i.test(priv),
        'privacy: says a public profile is opt-in');
     ok(/longest-standing/i.test(priv),
-       'privacy: deletion section matches docs/account-deletion.md on league succession');
+       'privacy: deletion section matches docs/account-deletion.md on clan succession');
     ok(/Duels you created/i.test(priv) && /deleted account/i.test(priv),
        'privacy: and on which duels go and which survive');
     ok(/\[contact email\]/.test(priv), 'privacy: the contact placeholder is marked for the owner to fill in');

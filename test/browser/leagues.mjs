@@ -1,5 +1,13 @@
-// Browser verification of leagues.html, written against docs/leagues-design.md
-// and the payload shapes in supabase/leagues.sql.
+// Browser verification of leagues.html — the Leaderboards page — written
+// against docs/leaderboards-design.md, docs/leagues-design.md and the payload
+// shapes in supabase/leagues.sql.
+//
+// The page has two halves and this suite covers both: the GLOBAL boards from
+// get_global_board(), which need no account, and the CLAN half, whose
+// mechanics are unchanged from when it was called a league. The rename is
+// pinned at the bottom by walking the rendered text of every page on the site
+// for the word "league": ids, classes, hrefs and wire error codes still say
+// it, and must; a sentence somebody reads must not.
 //
 // Every assertion below names a SPECIFIC expected string. This repo has three
 // times shipped a green suite that only proved "something rendered" and was
@@ -137,6 +145,58 @@ function boardPayload(over = {}) {
 
 const src = v => JSON.stringify(v);
 
+// ── The global boards ────────────────────────────────────────
+// get_global_board(p_scope, p_limit) → { scope, duration_seconds,
+// generated_at, rows: [{ rank, username, score }] }. Three distinct boards
+// with DIFFERENT rows and different lengths, so "the tab switched" cannot pass
+// by rendering the same table three times.
+const GLOBAL_DAILY_ROWS = [
+  { rank: 1, username: 'hexadecimal', score: 91 },
+  { rank: 2, username: 'quietstorm',  score: 77 },
+  { rank: 3, username: 'marchhare',   score: 64 },
+];
+const GLOBAL_TODAY_ROWS = [
+  { rank: 1, username: 'sleepydog',   score: 103 },
+  { rank: 2, username: 'hexadecimal', score: 91  },
+];
+const GLOBAL_ALLTIME_ROWS = [
+  { rank: 1, username: 'marchhare',   score: 142 },
+  { rank: 2, username: 'sleepydog',   score: 118 },
+  { rank: 3, username: 'quietstorm',  score: 109 },
+  { rank: 4, username: 'hexadecimal', score: 91  },
+];
+
+function globalPayload(scope, rows) {
+  return { scope, duration_seconds: 120, generated_at: '2026-07-28T14:32:00Z', rows };
+}
+
+// STRICT: an unrecognised scope is an error, never a quiet fall back to the
+// daily board. A client that sent the wrong p_scope would otherwise render a
+// perfectly good table and pass.
+const GLOBAL_HANDLER = `(a) => {
+  const m = {
+    daily:    ${src(globalPayload('daily', GLOBAL_DAILY_ROWS))},
+    today:    ${src(globalPayload('today', GLOBAL_TODAY_ROWS))},
+    all_time: ${src(globalPayload('all_time', GLOBAL_ALLTIME_ROWS))},
+  };
+  return m[a.p_scope] || { __error: { message: 'bad scope ' + a.p_scope } };
+}`;
+
+// Every rendered row of the global board, in DOM order.
+async function globalRows(page) {
+  return page.evaluate(() =>
+    [...document.querySelectorAll('#global-board .league-board-table tbody tr')].map(tr => ({
+      cells: [...tr.querySelectorAll('td')].map(td => (td.textContent || '').trim()),
+      links: tr.querySelectorAll('a').length,
+    })));
+}
+
+// The last get_global_board call, with its arguments.
+async function lastGlobalCall(page) {
+  return page.evaluate(() =>
+    (window.__rpcCalls || []).filter(c => c[0] === 'get_global_board').pop());
+}
+
 // A board handler that answers all three scopes from one stub, so a scope
 // switch is exercised end to end rather than mocked per test.
 const BOARD_HANDLER = `(a) => {
@@ -145,7 +205,7 @@ const BOARD_HANDLER = `(a) => {
   return ${src(boardPayload())};
 }`;
 
-// The cells of the board row whose Member column contains `name`.
+// The cells of the board row whose Player column contains `name`.
 async function boardRow(page, name) {
   return page.evaluate(n => {
     const rows = [...document.querySelectorAll('.league-board-table tbody tr')];
@@ -169,6 +229,226 @@ async function boardRow(page, name) {
     const tag = theme === 'dark' ? 'dark' : 'light';
     console.log(`\n══════ theme: ${tag} ══════`);
 
+    // ── Global G1. The three boards, signed in ──────────────
+    // The boards come FIRST on the page and are the reason a stranger would
+    // land on it. Every expected rank, name and score is written out; a
+    // non-emptiness check here would pass against the wrong board.
+    {
+      console.log('[G1 global boards — three tabs, three payloads]');
+      const rpc = { get_my_leagues: `() => []`, get_global_board: GLOBAL_HANDLER };
+      const { ctx, page, errors } = await newPage(browser, { theme, session: SESSION, rpc });
+      await page.goto(`${BASE}/leagues.html`, { waitUntil: 'networkidle' });
+      await page.waitForTimeout(500);
+
+      ok((await page.textContent('h1')).trim() === 'Leaderboards',
+         'the page is called Leaderboards');
+      ok((await page.title()).startsWith('Leaderboards'), 'and so is the document title');
+      ok(await page.isVisible('#global-panel'), 'the global boards are on the index view');
+
+      // The boards are above the clans. Not decoration: they are the half that
+      // works without an account.
+      const order = await page.evaluate(() => {
+        const g = document.getElementById('global-panel');
+        const c = document.getElementById('league-panel');
+        return g.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING ? 'global-first' : 'clans-first';
+      });
+      ok(order === 'global-first', `the global boards come before the clans (${order})`);
+
+      const tabs = await page.$$eval('#global-scopes .league-scope-btn',
+        els => els.map(e => [e.textContent.trim(), e.dataset.scope, e.classList.contains('active')]));
+      ok(JSON.stringify(tabs) === JSON.stringify([
+        ["Today's Daily", 'daily', true],
+        ["Today's Best", 'today', false],
+        ['All-Time Best', 'all_time', false],
+      ]), `three tabs, Today's Daily first and active (${JSON.stringify(tabs)})`);
+
+      // The heading has to carry BOTH facts: 120 seconds, and server-scored
+      // only. Somebody whose practice score is missing needs to know why
+      // without asking.
+      const lede = flat(await page.textContent('#global-lede'));
+      ok(lede.includes('120-second runs'), `the copy says 120-second runs (got "${lede}")`);
+      ok(/server scored itself/.test(lede), 'and that the server scored them');
+      ok(/daily and duels/.test(lede), 'and names the two eligible sources');
+      ok(/practice and solo runs stay on your own dashboard/.test(lede),
+         'and says where a practice score went instead');
+
+      // 1. Today's Daily.
+      let rows = await globalRows(page);
+      ok(JSON.stringify(rows.map(r => r.cells)) === JSON.stringify([
+        ['1', 'hexadecimal', '91'], ['2', 'quietstorm', '77'], ['3', 'marchhare', '64'],
+      ]), `the daily board is exactly its three rows in order (${JSON.stringify(rows.map(r => r.cells))})`);
+      ok(rows.every(r => r.links === 0),
+         'no row links anywhere — the payload carries no is_public, so nothing is linked');
+      const head = await page.$$eval('#global-board .league-board-table th',
+        els => els.map(e => e.textContent.trim()));
+      ok(JSON.stringify(head) === JSON.stringify(['#', 'Player', 'Score']),
+         `rank / player / score, the same columns a clan board has (${head})`);
+      ok(flat(await page.textContent('#global-note')).includes('3 players'),
+         'the note counts the players on the board');
+      ok(/the same questions for everyone, one attempt each/.test(flat(await page.textContent('#global-board'))),
+         'and the foot says how the daily board ranks');
+
+      const first = await lastGlobalCall(page);
+      ok(first && first[1].p_scope === 'daily', `the first call asked for daily (${first && first[1].p_scope})`);
+      ok(first && typeof first[1].p_limit === 'number' && first[1].p_limit > 0,
+         `and passed a numeric limit (${first && first[1].p_limit})`);
+      await page.screenshot({ path: `${SHOTS}/global-1-daily-${tag}.png`, fullPage: true });
+
+      // 2. Today's Best — the ARGUMENT is asserted, not just that something moved.
+      await page.click('#global-scopes .league-scope-btn[data-scope="today"]');
+      await page.waitForTimeout(400);
+      const c2 = await lastGlobalCall(page);
+      ok(c2 && c2[1].p_scope === 'today', `switching tabs sent p_scope=today (got ${c2 && c2[1].p_scope})`);
+      rows = await globalRows(page);
+      ok(JSON.stringify(rows.map(r => r.cells)) === JSON.stringify([
+        ['1', 'sleepydog', '103'], ['2', 'hexadecimal', '91'],
+      ]), `and rendered THAT board, two rows (${JSON.stringify(rows.map(r => r.cells))})`);
+      ok(/A tie goes to whoever got there first/.test(flat(await page.textContent('#global-board'))),
+         'the tiebreak is stated');
+      await page.screenshot({ path: `${SHOTS}/global-2-today-${tag}.png`, fullPage: true });
+
+      // 3. All-Time Best.
+      await page.click('#global-scopes .league-scope-btn[data-scope="all_time"]');
+      await page.waitForTimeout(400);
+      const c3 = await lastGlobalCall(page);
+      ok(c3 && c3[1].p_scope === 'all_time', `and p_scope=all_time (got ${c3 && c3[1].p_scope})`);
+      rows = await globalRows(page);
+      ok(JSON.stringify(rows.map(r => r.cells)) === JSON.stringify([
+        ['1', 'marchhare', '142'], ['2', 'sleepydog', '118'],
+        ['3', 'quietstorm', '109'], ['4', 'hexadecimal', '91'],
+      ]), `four rows, all-time order (${JSON.stringify(rows.map(r => r.cells))})`);
+      ok(/One row per player/.test(flat(await page.textContent('#global-board'))),
+         'and says one row per player, so a second good run does not displace anybody');
+      const active = await page.$$eval('#global-scopes .league-scope-btn.active',
+        els => els.map(e => e.dataset.scope));
+      ok(JSON.stringify(active) === JSON.stringify(['all_time']),
+         `exactly one tab is active and it is the one showing (${active})`);
+      ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
+      await page.screenshot({ path: `${SHOTS}/global-3-alltime-${tag}.png`, fullPage: true });
+      await ctx.close();
+    }
+
+    // ── Global G2. Signed out ───────────────────────────────
+    // The whole point of granting the RPC to anon. The boards render; the
+    // clans below them ask for an account and say why.
+    {
+      console.log('[G2 global boards — signed OUT]');
+      const rpc = { get_global_board: GLOBAL_HANDLER };
+      const { ctx, page, errors } = await newPage(browser, { theme, session: null, rpc });
+      await page.goto(`${BASE}/leagues.html`, { waitUntil: 'networkidle' });
+      await page.waitForTimeout(500);
+
+      const rows = await globalRows(page);
+      ok(JSON.stringify(rows.map(r => r.cells)) === JSON.stringify([
+        ['1', 'hexadecimal', '91'], ['2', 'quietstorm', '77'], ['3', 'marchhare', '64'],
+      ]), `signed out, the daily board still renders in full (${JSON.stringify(rows.map(r => r.cells))})`);
+      ok(flat(await page.textContent('#global-lede')).includes('120-second runs'),
+         'and still says what it is ranking');
+
+      // Switching boards works signed out too — a read-only page that needs an
+      // account to change tabs would be worse than no page.
+      await page.click('#global-scopes .league-scope-btn[data-scope="all_time"]');
+      await page.waitForTimeout(400);
+      const call = await lastGlobalCall(page);
+      ok(call && call[1].p_scope === 'all_time', 'and the tabs work without an account');
+      ok((await globalRows(page)).length === 4, 'rendering the all-time board');
+
+      const body = (await page.textContent('body')) || '';
+      ok(body.includes('Clans need an account'), 'the clans half asks for an account');
+      ok(await page.isVisible('#league-login-btn'), 'and offers a way to get one');
+      ok(flat(body).includes('The boards above are open to everyone'),
+         'and distinguishes itself from the boards, which are not gated');
+      ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
+      await page.screenshot({ path: `${SHOTS}/global-4-signedout-${tag}.png`, fullPage: true });
+      await ctx.close();
+    }
+
+    // ── Global G3. An EMPTY board ───────────────────────────
+    // The normal case right now, and it must read as an invitation. The
+    // load-bearing assertion is the row COUNT: a placeholder row would satisfy
+    // every "the empty copy is there" check.
+    {
+      console.log('[G3 global board — empty]');
+      const rpc = {
+        get_my_leagues: `() => []`,
+        get_global_board: `(a) => ({ scope: a.p_scope, duration_seconds: 120,
+          generated_at: '2026-07-28T14:32:00Z', rows: [] })`,
+      };
+      const { ctx, page, errors } = await newPage(browser, { theme, session: SESSION, rpc });
+      await page.goto(`${BASE}/leagues.html`, { waitUntil: 'networkidle' });
+      await page.waitForTimeout(500);
+
+      const rows = await globalRows(page);
+      ok(rows.length === 0, `an empty board renders ZERO rows (got ${rows.length})`);
+      const tables = await page.evaluate(() =>
+        document.querySelectorAll('#global-board .league-board-table').length);
+      ok(tables === 0, 'and no empty table shell either');
+
+      const txt = flat(await page.textContent('#global-board'));
+      ok(/Nobody has played today's daily yet/.test(txt),
+         `the empty state says so plainly (got "${txt}")`);
+      ok(/you hold rank 1 until somebody beats you/.test(txt),
+         'and invites rather than reports');
+      ok(!/unavailable|couldn't|error/i.test(txt),
+         'and is NOT worded as a failure');
+      ok(await page.evaluate(() =>
+        document.querySelectorAll('#global-board .league-board-error').length) === 0,
+         'and carries no error class');
+      const links = await page.$$eval('#global-board a', els => els.map(e => e.getAttribute('href')));
+      ok(links.includes('daily.html') && links.includes('duel.html'),
+         `the invitation is actionable (${links})`);
+      ok(!/undefined|NaN|\[object/i.test(txt), 'and invented nothing');
+
+      // Switching to another empty board changes the sentence with the scope.
+      await page.click('#global-scopes .league-scope-btn[data-scope="all_time"]');
+      await page.waitForTimeout(400);
+      ok((await globalRows(page)).length === 0, 'the all-time board is empty too');
+      ok(/No server-scored runs yet at all/.test(flat(await page.textContent('#global-board'))),
+         'and says something true of THAT board, not the daily one');
+      ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
+      await page.screenshot({ path: `${SHOTS}/global-5-empty-${tag}.png`, fullPage: true });
+      await ctx.close();
+    }
+
+    // ── Global G4. The RPC fails ────────────────────────────
+    // A broken deployment must not look like an unpopular site. This is the
+    // pair to G3 and the two are asserted against each other.
+    {
+      console.log('[G4 global board — RPC error]');
+      const rpc = {
+        get_my_leagues: `() => []`,
+        get_global_board: `() => ({ __error: { message: 'function get_global_board does not exist',
+          code: 'PGRST202' } })`,
+      };
+      const { ctx, page, errors } = await newPage(browser, { theme, session: SESSION, rpc });
+      await page.goto(`${BASE}/leagues.html`, { waitUntil: 'networkidle' });
+      await page.waitForTimeout(500);
+
+      ok((await globalRows(page)).length === 0, 'a failed call renders no rows');
+      const err = await page.evaluate(() => {
+        const el = document.querySelector('#global-board .league-board-error');
+        return el ? (el.textContent || '').trim() : null;
+      });
+      ok(err !== null, 'an error state is rendered, with its own class');
+      ok(/Leaderboards are unavailable right now/.test(err || ''),
+         `and says the boards could not be loaded (got "${err}")`);
+      const txt = flat(await page.textContent('#global-board'));
+      ok(/The boards are not empty/.test(txt),
+         'and says explicitly that this is not an empty board');
+      ok(!/Nobody has played/.test(txt),
+         'the EMPTY copy is not shown for a FAILURE — the two are distinguishable');
+      ok(!/PGRST202|does not exist|schema cache/i.test(txt),
+         'the raw database error is not shown');
+      ok(await page.isVisible('#global-retry-btn'), 'and a retry is offered');
+
+      // The clan half is unaffected: two calls, two error slots.
+      ok((await page.textContent('body')).includes("You're not in a clan yet"),
+         'a failed global board does not take the clans down with it');
+      ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
+      await page.screenshot({ path: `${SHOTS}/global-6-error-${tag}.png`, fullPage: true });
+      await ctx.close();
+    }
+
     // ── State 1a. Signed out, no code ───────────────────────
     {
       console.log('[1a signed out — index]');
@@ -176,7 +456,7 @@ async function boardRow(page, name) {
       await page.goto(`${BASE}/leagues.html`, { waitUntil: 'networkidle' });
       await page.waitForTimeout(400);
       const body = (await page.textContent('body')) || '';
-      ok(body.includes('Leagues need an account'), 'a signed-out visitor is told an account is required');
+      ok(body.includes('Clans need an account'), 'a signed-out visitor is told an account is required for a CLAN');
       ok(flat(body).includes('one attempt can only be enforced against an account'),
          'and WHY: one attempt cannot be enforced anonymously');
       ok(flat(body).includes('an anonymous player can come back as somebody else'),
@@ -196,10 +476,10 @@ async function boardRow(page, name) {
       await page.goto(`${BASE}/leagues.html?l=${KEY}`, { waitUntil: 'networkidle' });
       await page.waitForTimeout(400);
       const body = (await page.textContent('body')) || '';
-      ok(body.includes("You've been invited to a league"), 'an invited visitor is greeted as invited');
+      ok(body.includes("You've been invited to a clan"), 'an invited visitor is greeted as invited');
       ok(/The invite works — it just needs an account behind it/.test(body),
          'and is told the invite is fine, it is the account that is missing');
-      ok(!body.includes('Desk Six'), 'no league detail is shown before signing in');
+      ok(!body.includes('Desk Six'), 'no clan detail is shown before signing in');
       ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
       await page.screenshot({ path: `${SHOTS}/leagues-1b-signedout-invite-${tag}.png`, fullPage: true });
       await ctx.close();
@@ -208,15 +488,15 @@ async function boardRow(page, name) {
     // ── State 2a. Index, empty ──────────────────────────────
     {
       console.log('[2a index — no leagues yet]');
-      const rpc = { get_my_leagues: `() => []` };
+      const rpc = { get_my_leagues: `() => []`, get_global_board: GLOBAL_HANDLER };
       const { ctx, page, errors } = await newPage(browser, { theme, session: SESSION, rpc });
       await page.goto(`${BASE}/leagues.html`, { waitUntil: 'networkidle' });
       await page.waitForTimeout(400);
       const body = (await page.textContent('body')) || '';
-      ok(body.includes("You're not in a league yet"), 'the empty state names itself');
+      ok(body.includes("You're not in a clan yet"), 'the empty state names itself');
       ok(flat(body).includes('send the code to four people you would actually like to beat'),
          'the empty state invites rather than reporting — it is not a dash');
-      ok(body.includes('Create a league'), 'a create form is offered');
+      ok(body.includes('Create a clan'), 'a create form is offered');
       ok(body.includes('Join with a code'), 'a join-with-a-code form is offered');
       ok(await page.isVisible('#league-name-input'), 'the name field is there');
       ok(await page.isVisible('#league-code-input'), 'the code field is there');
@@ -237,19 +517,19 @@ async function boardRow(page, name) {
         { league_key: 'ZK4M9TQBVR', name: 'Maths Club', owner_username: 'quietstorm', member_count: 12,
           is_owner: true, max_members: 100, joined_at: '2026-06-02T00:00:00Z', created_at: '2026-06-01T00:00:00Z' },
       ];
-      const rpc = { get_my_leagues: `() => (${src(mine)})` };
+      const rpc = { get_my_leagues: `() => (${src(mine)})`, get_global_board: GLOBAL_HANDLER };
       const { ctx, page, errors } = await newPage(browser, { theme, session: SESSION, rpc });
       await page.goto(`${BASE}/leagues.html`, { waitUntil: 'networkidle' });
       await page.waitForTimeout(400);
       const body = (await page.textContent('body')) || '';
       ok(body.includes('Desk Six') && body.includes('Maths Club'),
-         'BOTH leagues render — the payload is a bare array, not an object wrapper');
+         'BOTH clans render — the payload is a bare array, not an object wrapper');
       ok(body.includes('4 members of 100'), 'the member count and cap are shown');
       ok(body.includes('12 members of 100'), 'and for the second league too');
-      ok(body.includes('owned by hexadecimal'), 'the owner of a league you do not own is named');
-      ok(body.includes('you own this'), 'a league you own is marked as yours');
+      ok(body.includes('owned by hexadecimal'), 'the owner of a clan you do not own is named');
+      ok(body.includes('you own this'), 'a clan you own is marked as yours');
       const hrefs = await page.$$eval('.league-list-name', els => els.map(e => e.getAttribute('href')));
-      ok(hrefs.includes(`leagues.html?l=${KEY}`), `each league links to its own board (${hrefs.join(', ')})`);
+      ok(hrefs.includes(`leagues.html?l=${KEY}`), `each clan links to its own board (${hrefs.join(', ')})`);
       ok(body.includes('2 of 20'), 'the per-account cap is visible');
       ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
       await page.screenshot({ path: `${SHOTS}/leagues-2b-index-list-${tag}.png`, fullPage: true });
@@ -264,7 +544,7 @@ async function boardRow(page, name) {
       await page.goto(`${BASE}/leagues.html?l=${KEY}`, { waitUntil: 'networkidle' });
       await page.waitForTimeout(400);
       const body = (await page.textContent('body')) || '';
-      ok(body.includes('Join Desk Six?'), 'the league is named on the join screen');
+      ok(body.includes('Join Desk Six?'), 'the clan is named on the join screen');
       ok(body.includes('owned by hexadecimal'), 'the owner is named');
       ok(body.includes('6 members'), 'the member count is shown');
       ok(/The other members will see your username and your daily scores/.test(body),
@@ -296,7 +576,7 @@ async function boardRow(page, name) {
       await page.waitForTimeout(500);
       const body = (await page.textContent('body')) || '';
 
-      ok((await page.textContent('#league-title')) === 'Desk Six', 'the league name is the page title');
+      ok((await page.textContent('#league-title')) === 'Desk Six', 'the clan name is the page title');
       ok(body.includes('74') && body.includes('58') && body.includes('41'),
          'the three played scores are on the board');
       ok(body.includes('4 members · 2026-07-28'), 'the note names the puzzle date and the size');
@@ -373,10 +653,10 @@ async function boardRow(page, name) {
       await page.goto(`${BASE}/leagues.html?l=${KEY}`, { waitUntil: 'networkidle' });
       await page.waitForTimeout(500);
       let body = (await page.textContent('body')) || '';
-      ok(body.includes('You own this league'), 'the owner is told they own it');
+      ok(body.includes('You own this clan'), 'the owner is told they own it');
       ok(/Leaving hands it to whoever has been in it longest/.test(body),
          'the warning says what leaving does BEFORE the button is pressed');
-      ok(!/deletes this league outright/.test(body),
+      ok(!/deletes this clan outright/.test(body),
          'and does NOT threaten deletion when there are other members');
 
       await page.click('#league-leave-btn');
@@ -393,7 +673,7 @@ async function boardRow(page, name) {
       ok(/ownership passed to quietstorm/.test(body),
          'the NEW OWNER from the leave_league payload is named');
       ok(body.includes('5 members remain'), 'and the remaining count comes from the payload');
-      ok(!/has been deleted/.test(body), 'the league is not reported as deleted');
+      ok(!/has been deleted/.test(body), 'the clan is not reported as deleted');
       ok(!(await page.isVisible('#league-board-panel')), 'the board is gone once you have left');
       ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
       await page.screenshot({ path: `${SHOTS}/leagues-5b-left-transferred-${tag}.png`, fullPage: true });
@@ -414,8 +694,8 @@ async function boardRow(page, name) {
       await page.goto(`${BASE}/leagues.html?l=${KEY}`, { waitUntil: 'networkidle' });
       await page.waitForTimeout(500);
       let body = (await page.textContent('body')) || '';
-      ok(/You are the only member, so leaving deletes this league outright/.test(body),
-         'the last member is warned that leaving DELETES the league');
+      ok(/You are the only member, so leaving deletes this clan outright/.test(body),
+         'the last member is warned that leaving DELETES the clan');
       ok(/invite code stops working/.test(body), 'and that its code stops working');
 
       await page.click('#league-leave-btn');
@@ -441,8 +721,8 @@ async function boardRow(page, name) {
       await page.goto(`${BASE}/leagues.html?l=${KEY}`, { waitUntil: 'networkidle' });
       await page.waitForTimeout(400);
       const body = (await page.textContent('body')) || '';
-      ok(/This league is full — it already has all 100 of its members/.test(body),
-         'a full league says so on the join screen');
+      ok(/This clan is full — it already has all 100 of its members/.test(body),
+         'a full clan says so on the join screen');
       ok(/Somebody has to leave before anyone else can join/.test(body),
          'and says what would have to change');
       ok(await page.isDisabled('#league-join-btn'), 'the Join button is disabled');
@@ -459,7 +739,7 @@ async function boardRow(page, name) {
       await page.goto(`${BASE}/leagues.html?l=ZZZZZZZZZZ`, { waitUntil: 'networkidle' });
       await page.waitForTimeout(400);
       const body = (await page.textContent('body')) || '';
-      ok(body.includes("There's no league with that code"), 'an unknown code gets its own page');
+      ok(body.includes("There's no clan with that code"), 'an unknown code gets its own page');
       ok(/never contain the letters I, L, O or U/.test(body),
          'and names the excluded glyphs, which is what a mistyped code usually is');
       ok(!/unavailable|couldn't reach/i.test(body),
@@ -476,7 +756,7 @@ async function boardRow(page, name) {
       await page.goto(`${BASE}/leagues.html?l=${KEY}`, { waitUntil: 'networkidle' });
       await page.waitForTimeout(500);
       const body = (await page.textContent('body')) || '';
-      ok(body.includes("Leagues aren't available right now"),
+      ok(body.includes("Clans aren't available right now"),
          'a missing migration produces a readable page, not a blank one');
       ok(!/PGRST202|does not exist|schema cache/i.test(body),
          'the raw database error is not shown to the user');
@@ -493,9 +773,9 @@ async function boardRow(page, name) {
       await page.goto(`${BASE}/leagues.html`, { waitUntil: 'networkidle' });
       await page.waitForTimeout(400);
       const body = (await page.textContent('body')) || '';
-      ok(body.includes("Leagues aren't available right now"),
-         'a failed get_my_leagues is not rendered as an empty league list');
-      ok(!body.includes("You're not in a league yet"),
+      ok(body.includes("Clans aren't available right now"),
+         'a failed get_my_leagues is not rendered as an empty clan list');
+      ok(!body.includes("You're not in a clan yet"),
          'null and [] are NOT confused — a failed call is not an empty state');
       ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
       await ctx.close();
@@ -505,11 +785,11 @@ async function boardRow(page, name) {
   // ══════ Theme-independent checks ══════
   console.log('\n══════ contract checks ══════');
 
-  // A hostile LEAGUE NAME. One person names a thing that everybody else then
+  // A hostile CLAN NAME. One person names a thing that everybody else then
   // loads, which makes this the more dangerous of the two user-controlled
-  // strings on this page.
+  // strings on the clan half of this page.
   {
-    console.log('[hostile league name]');
+    console.log('[hostile clan name]');
     const XSS = `<img src=x onerror="window.__pwned=1">`;
     const rpc = { get_league: `() => (${src(leaguePayload({ is_member: false, name: XSS }))})` };
     const { ctx, page, errors } = await newPage(browser, { session: SESSION, rpc });
@@ -518,9 +798,9 @@ async function boardRow(page, name) {
     const pwned = await page.evaluate(() => window.__pwned === 1);
     const imgs  = await page.evaluate(() => document.querySelectorAll('.league-wrap img').length);
     const body  = (await page.textContent('body')) || '';
-    ok(!pwned, 'hostile league name did NOT execute');
-    ok(imgs === 0, 'hostile league name produced no live element in the DOM');
-    ok(body.includes(XSS), 'hostile league name is rendered as literal text');
+    ok(!pwned, 'hostile clan name did NOT execute');
+    ok(imgs === 0, 'hostile clan name produced no live element in the DOM');
+    ok(body.includes(XSS), 'hostile clan name is rendered as literal text');
     ok((await page.textContent('#league-title')) === XSS, 'including in the page heading');
     ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
     await ctx.close();
@@ -579,7 +859,7 @@ async function boardRow(page, name) {
     await page.goto(`${BASE}/leagues.html?l=${KEY}`, { waitUntil: 'networkidle' });
     await page.waitForTimeout(500);
     const body = (await page.textContent('body')) || '';
-    ok(/Only members can see this league/.test(body),
+    ok(/Only members can see this clan/.test(body),
        'a raised refusal becomes a human sentence');
     ok(!/league_forbidden/.test(body), 'the raised code is NOT shown');
     ok(!/42501/.test(body), 'the SQLSTATE is NOT shown');
@@ -603,8 +883,8 @@ async function boardRow(page, name) {
     await page.click('#league-join-btn');
     await page.waitForTimeout(400);
     const status = (await page.textContent('#league-join-status')) || '';
-    ok(/This league is full — it already has the maximum of 100 members/.test(status),
-       `league_full becomes a sentence (got "${status.trim()}")`);
+    ok(/This clan is full — it already has the maximum of 100 members/.test(status),
+       `league_full becomes a sentence that says CLAN (got "${status.trim()}")`);
     ok(!/league_full|23514/.test(await page.textContent('body')), 'the raw code is not shown');
     ok(await page.isEnabled('#league-join-btn'), 'the button is re-enabled so the page is not stuck');
     ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
@@ -625,7 +905,7 @@ async function boardRow(page, name) {
     await page.click('#league-create-btn');
     await page.waitForTimeout(400);
     const status = (await page.textContent('#league-create-status')) || '';
-    ok(/already in the maximum of 20 leagues/.test(status),
+    ok(/already in the maximum of 20 clans/.test(status),
        `league_limit_reached becomes a sentence (got "${status.trim()}")`);
     ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
     await ctx.close();
@@ -650,11 +930,11 @@ async function boardRow(page, name) {
     const sent = await page.evaluate(() => window.__rpcCalls.find(c => c[0] === 'create_league'));
     ok(sent && sent[1].p_name === 'Desk Six', `the trimmed name was sent (got "${sent && sent[1].p_name}")`);
     const body = (await page.textContent('body')) || '';
-    ok(body.includes('Your league is ready'), 'creation confirms');
+    ok(body.includes('Your clan is ready'), 'creation confirms');
     ok((await page.textContent('#league-code')) === KEY, 'the invite code is shown');
     const link = await page.inputValue('#league-share-text');
     ok(link.endsWith(`/leagues.html?l=${KEY}`), `the invite link carries the code (got "${link}")`);
-    ok(!(await page.isVisible('#league-forms')), 'the forms step aside once the league exists');
+    ok(!(await page.isVisible('#league-forms')), 'the forms step aside once the clan exists');
 
     await page.click('#league-share-btn');
     await page.waitForTimeout(400);
@@ -759,10 +1039,10 @@ async function boardRow(page, name) {
 
   // The dashboard used to carry a compact copy of this list. It does not any
   // more — the dashboard is the five-tile record, the chart, the operation
-  // bars and Recent Games, and nothing else. leagues.html owns every league
+  // bars and Recent Games, and nothing else. leagues.html owns every clan
   // state, and this is the guard against the panel quietly coming back.
   {
-    console.log('[the dashboard no longer carries a leagues panel]');
+    console.log('[the dashboard no longer carries a clans panel]');
     const XSS = `<img src=x onerror="window.__pwned=1">`;
     const mine = [
       { league_key: KEY, name: XSS, owner_username: 'hexadecimal', member_count: 4,
@@ -777,13 +1057,173 @@ async function boardRow(page, name) {
     ok(await page.evaluate(() => document.getElementById('leagues-panel') === null),
        'no #leagues-panel element exists on the dashboard at all');
     const body = (await page.textContent('body')) || '';
-    ok(!body.includes('Maths Club'), 'no league is listed there');
-    ok(!/Your Leagues/i.test(body), 'and the heading is gone with it');
+    ok(!body.includes('Maths Club'), 'no clan is listed there');
+    ok(!/Your Leagues|Your Clans/i.test(body), 'and the heading is gone with it');
     ok(await page.evaluate(() => document.querySelectorAll('.dashboard-wrap img').length) === 0,
-       'a hostile league name still produces no live element on that page');
+       'a hostile clan name still produces no live element on that page');
     ok(await page.evaluate(() => window.__pwned !== 1), 'nothing executed');
     ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
     await ctx.close();
+  }
+
+  // A hostile USERNAME on a GLOBAL board. This is the largest XSS surface on
+  // the site: a public page, readable signed out, rendering names chosen by
+  // strangers. The clan board's version of this test is above; this one is
+  // separate because the two use different renderers.
+  {
+    console.log('[hostile username on a global board]');
+    const XSS  = `"><img src=x onerror=window.__pwned=1>`;
+    const XSS2 = `<svg onload="window.__pwned2=1">`;
+    const rows = [
+      { rank: 1, username: XSS,  score: 88 },
+      { rank: 2, username: XSS2, score: 71 },
+    ];
+    const rpc = {
+      get_my_leagues: `() => []`,
+      get_global_board: `(a) => ({ scope: a.p_scope, duration_seconds: 120,
+        generated_at: '2026-07-28T14:32:00Z', rows: ${src(rows)} })`,
+    };
+    const { ctx, page, errors } = await newPage(browser, { session: SESSION, rpc });
+    await page.goto(`${BASE}/leagues.html`, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(500);
+
+    const state = await page.evaluate(() => ({
+      pwned: window.__pwned === 1 || window.__pwned2 === 1,
+      imgs:  document.querySelectorAll('#global-board img').length,
+      svgs:  document.querySelectorAll('#global-board svg').length,
+      anyImg: document.querySelectorAll('.league-wrap img').length,
+    }));
+    ok(!state.pwned, 'a hostile username on a public board did NOT execute');
+    ok(state.imgs === 0, `no img element was created (${state.imgs})`);
+    ok(state.svgs === 0, `no svg element was created (${state.svgs})`);
+    ok(state.anyImg === 0, 'and none anywhere else in the page either');
+
+    const r = await globalRows(page);
+    ok(r.length === 2, `both hostile rows still rendered (${r.length})`);
+    ok(r[0].cells[1] === XSS, 'the first is literal text, verbatim');
+    ok(r[1].cells[1] === XSS2, 'and so is the second');
+    ok(r.every(x => x.links === 0), 'and neither is a link');
+    ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
+    await ctx.close();
+  }
+
+  // A row with no username. get_global_board is specified never to emit one;
+  // if one arrives it must be DROPPED, not rendered as a dash. A public board
+  // topped by anonymous placeholders is worse than a shorter board.
+  {
+    console.log('[global board — a row with no username]');
+    const rows = [
+      { rank: 1, username: null, score: 200 },
+      { rank: 2, username: '',   score: 150 },
+      { rank: 3, username: 'hexadecimal', score: 91 },
+    ];
+    const rpc = {
+      get_my_leagues: `() => []`,
+      get_global_board: `(a) => ({ scope: a.p_scope, duration_seconds: 120,
+        generated_at: '2026-07-28T14:32:00Z', rows: ${src(rows)} })`,
+    };
+    const { ctx, page, errors } = await newPage(browser, { session: SESSION, rpc });
+    await page.goto(`${BASE}/leagues.html`, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(500);
+    const r = await globalRows(page);
+    ok(JSON.stringify(r.map(x => x.cells)) === JSON.stringify([['3', 'hexadecimal', '91']]),
+       `only the named row survives (${JSON.stringify(r.map(x => x.cells))})`);
+    const txt = flat(await page.textContent('#global-board'));
+    ok(!txt.includes('200') && !txt.includes('150'), 'their scores are not shown against nobody');
+    ok(flat(await page.textContent('#global-note')).includes('1 player'),
+       'and the count reflects what was actually rendered');
+    ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
+    await ctx.close();
+  }
+
+  // The boards are 120 seconds because that is what the payload says, not
+  // because the page hardcoded it. If the server ever changed it the sentence
+  // has to change with it, or the page is lying about what it ranks.
+  {
+    console.log('[the duration comes off the payload]');
+    const rpc = {
+      get_my_leagues: `() => []`,
+      get_global_board: `(a) => ({ scope: a.p_scope, duration_seconds: 60,
+        generated_at: '2026-07-28T14:32:00Z', rows: [{ rank: 1, username: 'hexadecimal', score: 44 }] })`,
+    };
+    const { ctx, page, errors } = await newPage(browser, { session: SESSION, rpc });
+    await page.goto(`${BASE}/leagues.html`, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(500);
+    const lede = flat(await page.textContent('#global-lede'));
+    ok(lede.includes('60-second runs'), `the copy follows the payload (got "${lede}")`);
+    ok(!lede.includes('120-second'), 'and does not still claim 120');
+    ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
+    await ctx.close();
+  }
+
+  // ══════ The rename ══════
+  // "League" is gone from everything a person READS. It is still in the file
+  // name, the element ids, the CSS classes and the RPC error codes — those are
+  // wire identifiers and renaming them buys nothing a user can see. So this
+  // walks the rendered TEXT of every page, in both themes, rather than
+  // grepping the source.
+  {
+    console.log('[the word "league" is gone from every rendered page]');
+    const RENAME_PAGES = [
+      ['index.html', {}],
+      ['dashboard.html', {}],
+      ['daily.html', {}],
+      ['duel.html', {}],
+      ['practice.html', {}],
+      ['results.html', {}],
+      ['profile.html?u=hexadecimal', {}],
+      ['settings.html', {}],
+      ['privacy.html', {}],
+      ['terms.html', {}],
+      // Every state of the Leaderboards page itself, because that is where
+      // the word lived.
+      ['leagues.html', { get_my_leagues: `() => []`, get_global_board: GLOBAL_HANDLER }],
+      ['leagues.html', { get_my_leagues: `() => (${src([{ league_key: KEY, name: 'Desk Six',
+          owner_username: 'hexadecimal', member_count: 4, is_owner: true, max_members: 100,
+          joined_at: '2026-07-02T00:00:00Z', created_at: '2026-07-01T00:00:00Z' }])})`,
+        get_global_board: GLOBAL_HANDLER }],
+      ['leagues.html', {}],                                   // nothing deployed
+      [`leagues.html?l=${KEY}`, { get_league: `() => (${src(leaguePayload({ is_member: false }))})` }],
+      [`leagues.html?l=${KEY}`, { get_league: `() => (${src(leaguePayload())})`,
+        get_league_board: BOARD_HANDLER }],
+      [`leagues.html?l=${KEY}`, { get_league: `() => null` }], // unknown code
+      [`leagues.html?l=${KEY}`, { get_league: `() => (${src(leaguePayload())})`,
+        get_league_board: `() => ({ __error: { message: 'league_forbidden', code: '42501' } })` }],
+    ];
+
+    for (const theme of ['dark', 'zetamac']) {
+      for (const signedIn of [true, false]) {
+        for (const [pg, rpc] of RENAME_PAGES) {
+          const { ctx, page, errors } = await newPage(browser,
+            { theme, session: signedIn ? SESSION : null, rpc });
+          await page.goto(`${BASE}/${pg}`, { waitUntil: 'networkidle' });
+          await page.waitForTimeout(450);
+
+          // innerText, not textContent: it is what is actually painted, and it
+          // excludes the <input> value carrying the leagues.html invite URL,
+          // which is a file name and is allowed to keep it.
+          const seen = await page.evaluate(() => {
+            const hits = [];
+            const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+            for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+              const el = n.parentElement;
+              if (!el || el.offsetParent === null && el.tagName !== 'BODY') continue;
+              const t = (n.nodeValue || '');
+              if (/league/i.test(t)) hits.push(t.replace(/\s+/g, ' ').trim().slice(0, 90));
+            }
+            return hits;
+          });
+          ok(seen.length === 0,
+             `${theme} signed-${signedIn ? 'in' : 'out'} ${pg}: rendered text says "league" — ${JSON.stringify(seen).slice(0, 300)}`);
+
+          const bar = flat(await page.textContent('#top-bar'));
+          ok(bar.includes('Leaderboards'), `${theme} ${pg}: the nav says Leaderboards (${bar})`);
+          ok(!/\bLeagues\b/.test(bar), `${theme} ${pg}: and no longer says Leagues`);
+          ok(errors.length === 0, `${theme} ${pg}: no uncaught page errors (${errors[0] ?? ''})`);
+          await ctx.close();
+        }
+      }
+    }
   }
 
   await browser.close();

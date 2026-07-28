@@ -108,7 +108,13 @@ window.supabase = { createClient: () => ({
   },
   from: () => ({ select(){return this}, eq(){return this}, is(){return this},
                  order(){return this}, limit(){return this},
-                 single: async () => ({ data: null, error: { message: 'stub' } }),
+                 // getProfile() reads through here. window.__profile is how a
+                 // test gives the LOCAL player a username, which the scoreline
+                 // now shows; left null it is a player with no username, which
+                 // is every guest.
+                 single: async () => (window.__profile
+                   ? { data: window.__profile, error: null }
+                   : { data: null, error: { message: 'stub' } }),
                  maybeSingle: async () => ({ data: null, error: null }),
                  insert: async () => ({ error: null }), update: async () => ({ error: null }),
                  upsert: async () => ({ error: null }) }),
@@ -135,20 +141,21 @@ window.Chart = function(ctx, cfg){
 window.Chart.defaults = { font: {} };
 `;
 
-async function newPage(browser, { theme = 'dark', session, rpc, storage } = {}) {
+async function newPage(browser, { theme = 'dark', session, rpc, storage, profile } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 1100, height: 950 } });
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', e => errors.push(String(e)));
   await page.route('**/cdn.jsdelivr.net/**', r =>
     r.fulfill({ status: 200, contentType: 'application/javascript', body: CDN }));
-  await page.addInitScript(([t, s, r, st]) => {
+  await page.addInitScript(([t, s, r, st, pr]) => {
     localStorage.setItem('zt_theme', t);
     for (const [k, v] of Object.entries(st || {})) localStorage.setItem(k, v);
     window.__session = s;
+    window.__profile = pr;
     window.__rpc = {};
     for (const [k, v] of Object.entries(r)) window.__rpc[k] = eval('(' + v + ')');
-  }, [theme, session ?? null, rpc ?? {}, storage ?? {}]);
+  }, [theme, session ?? null, rpc ?? {}, storage ?? {}, profile ?? null]);
   return { ctx, page, errors };
 }
 
@@ -185,9 +192,13 @@ const START_RUN = `() => ({ duel_key: ${src(KEY)}, side: 'creator', duration_sec
 // Room → both ready → creator starts → clock jumped past the shared deadline →
 // the run. Used by every in-run assertion; the room's own behaviour is
 // asserted separately in section 1.
-async function enterRun(page) {
+//
+// The peer's presence name is 'Rival' unless a test says otherwise, and the
+// scoreline shows it — so an assertion reading "Rival 0" is asserting that the
+// OTHER browser's name reached the HUD, not that a placeholder rendered.
+async function enterRun(page, peer = { side: 'opponent', name: 'Rival', ready: true }) {
   await page.click('#steal-ready-btn');
-  await page.evaluate(() => window.__peer({ side: 'opponent', name: 'Rival', ready: true }));
+  await page.evaluate(p => window.__peer(p), peer);
   await page.waitForTimeout(60);
   await page.click('#steal-start-btn');
   await page.evaluate(() => window.__advanceClock(4000));
@@ -203,7 +214,12 @@ const scores = page => page.evaluate(() => ({
   them: document.getElementById('steal-score-them').textContent,
   youClass:  document.getElementById('steal-score-you').className,
   themClass: document.getElementById('steal-score-them').className,
+  youHtml:   document.getElementById('steal-score-you').innerHTML,
+  themHtml:  document.getElementById('steal-score-them').innerHTML,
 }));
+
+const line = page => page.evaluate(() =>
+  (document.getElementById('steal-line').textContent || '').trim());
 
 const question = page => page.evaluate(() =>
   (document.getElementById('steal-question').textContent || '').trim());
@@ -483,7 +499,7 @@ const question = page => page.evaluate(() =>
          `the question did NOT rewind (got "${await question(page)}")`);
       const s = await scores(page);
       ok(s.you === 'You 0',  'the optimistic point was taken off our score');
-      ok(s.them === 'Them 1', 'and given to them');
+      ok(s.them === 'Rival 1', "and given to them, under the opponent's own name");
       const line = (await page.textContent('#steal-line')).trim();
       ok(line === 'Stolen — they had it in 0.8s',
          `and the line says who actually had it, and how fast (got "${line}")`);
@@ -511,7 +527,7 @@ const question = page => page.evaluate(() =>
       await enterRun(page);
 
       const before = await scores(page);
-      ok(before.you === 'You 0' && before.them === 'Them 0', 'the run opens level');
+      ok(before.you === 'You 0' && before.them === 'Rival 0', 'the run opens level');
 
       await page.evaluate(() => {
         window.__push('advance', { index: 0, by: 'opponent', ms: 500 });
@@ -520,7 +536,7 @@ const question = page => page.evaluate(() =>
       await page.waitForTimeout(120);
 
       let s = await scores(page);
-      ok(s.them === 'Them 0',
+      ok(s.them === 'Rival 0',
          `an advance + settled claiming a point for them, with no RPC behind it, moved nothing (got "${s.them}")`);
       ok(s.you === 'You 0', 'and did not move our score either');
       ok((await question(page)) === SHOWN(1), 'though the screen did advance — a hint may do that');
@@ -533,7 +549,7 @@ const question = page => page.evaluate(() =>
       await page.evaluate(() => window.__push('settled', { index: 1, winner: 'opponent' }));
       await page.waitForTimeout(120);
       s = await scores(page);
-      ok(s.you === 'You 1' && s.them === 'Them 0',
+      ok(s.you === 'You 1' && s.them === 'Rival 0',
          `a forged settled cannot take a banked point away either (got "${s.you} / ${s.them}")`);
       ok(/is-provisional/.test(s.youClass),
          'it stays muted instead — the server has the last word, and the display says so');
@@ -672,6 +688,310 @@ const question = page => page.evaluate(() =>
       const after = (await page.textContent('body')) || '';
       ok(after.includes('Steal'), 'the confirmation says which mode it made');
       ok(/It opens a room/.test(after), 'and tells the creator the link opens a room');
+      ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
+      await ctx.close();
+    }
+
+    // ── 10. THE CASCADE — the regression test for the report ─
+    // Reported from a real two-player game: a player answered nine questions
+    // alone and all nine were credited to an opponent who was not playing,
+    // "Stolen — they took it" each time. The mechanism was that a refused
+    // claim was read as "then it must have been them" — and one refusal leaves
+    // the client's index ahead of the server's, so every later claim came back
+    // stale_index and handed out another invented point.
+    //
+    // This is written first and it is the assertion that matters most: drive a
+    // wall of refusals and the opponent's score must not move off zero.
+    {
+      console.log('[10 the cascade — consecutive refusals invent NOTHING]');
+      const rpc = {
+        get_duel_by_key: `() => (${src(stealPayload())})`,
+        start_duel_run: START_RUN,
+        // Exactly what supabase/steal.sql returns for a client whose index has
+        // run ahead of the server's: refused, and naming nobody.
+        claim_duel_point: `(a) => ({ ok: false, error: 'stale_index',
+          index: a.p_index, current_index: 0 })`,
+      };
+      const { ctx, page, errors } = await newPage(browser, { theme, session: SESSION, rpc });
+      await page.goto(`${BASE}/duel.html?d=${KEY}`, { waitUntil: 'networkidle' });
+      await page.waitForTimeout(400);
+      await enterRun(page);
+
+      const before = await scores(page);
+      ok(before.you === 'You 0' && before.them === 'Rival 0',
+         `the run opens level (got "${before.you} / ${before.them}")`);
+
+      // Nine answers, alone, exactly as reported.
+      for (let i = 0; i < 9; i++) {
+        await page.fill('#steal-input', String(ANSWER(i)));
+        await page.waitForTimeout(70);
+      }
+
+      const claims = await page.evaluate(() =>
+        window.__rpcCalls.filter(c => c[0] === 'claim_duel_point').length);
+      ok(claims === 9,
+         `nine claims really were made and really were refused (got ${claims})`);
+      ok((await question(page)) === SHOWN(9),
+         `nine questions really were answered (got "${await question(page)}")`);
+
+      const after = await scores(page);
+      ok(after.them === 'Rival 0',
+         `NINE refusals gave the opponent nothing (got "${after.them}")`);
+      ok(after.you === 'You 0',
+         `and gave us nothing either — a refused claim is not a point (got "${after.you}")`);
+      ok(!/Stolen/.test(await line(page)),
+         `"Stolen" was never announced, because nobody was ever named (got "${await line(page)}")`);
+      ok(await page.evaluate(() =>
+           !document.getElementById('steal-line').className.includes('is-them')),
+         'and the losing colour was never used');
+
+      // The unknown indexes are visible as unknown: both numbers are muted,
+      // because both are incomplete.
+      ok(/is-provisional/.test(after.youClass) && /is-provisional/.test(after.themClass),
+         'both numbers are muted, saying the scoreline is incomplete rather than wrong');
+
+      ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
+      await ctx.close();
+    }
+
+    // ── 11. A single refusal, in detail ─────────────────────
+    {
+      console.log('[11 one refusal — point_taken and stale_index, neither a scoring event]');
+
+      // 11a. point_taken with nobody named. The RAISEd shape: an error object,
+      // no payload at all.
+      {
+        const rpc = {
+          get_duel_by_key: `() => (${src(stealPayload())})`,
+          start_duel_run: START_RUN,
+          claim_duel_point: `() => ({ __error: { message: 'point_taken' } })`,
+        };
+        const { ctx, page, errors } = await newPage(browser, { theme, session: SESSION, rpc });
+        await page.goto(`${BASE}/duel.html?d=${KEY}`, { waitUntil: 'networkidle' });
+        await page.waitForTimeout(400);
+        await enterRun(page);
+
+        const before = await scores(page);
+        ok(before.you === 'You 0' && before.them === 'Rival 0', 'level before the claim');
+
+        await page.fill('#steal-input', String(ANSWER(0)));
+        await page.waitForTimeout(150);
+
+        const after = await scores(page);
+        ok(after.them === 'Rival 0',
+           `a point_taken refusal did NOT give them a point (got "${after.them}")`);
+        ok(after.you === 'You 0',
+           `and took our optimistic one back off (got "${after.you}")`);
+        ok(!/Stolen/.test(await line(page)),
+           `no steal was announced (got "${await line(page)}")`);
+        ok((await line(page)) === 'That one was not yours — waiting for the server to say who took it.',
+           `the line says exactly what is known and no more (got "${await line(page)}")`);
+        ok((await question(page)) === SHOWN(1),
+           'and the question did not rewind');
+        ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
+        await ctx.close();
+      }
+
+      // 11b. stale_index — a resync condition, and it says so on screen.
+      {
+        const rpc = {
+          get_duel_by_key: `() => (${src(stealPayload())})`,
+          start_duel_run: START_RUN,
+          claim_duel_point: `(a) => ({ ok: false, error: 'stale_index',
+            index: a.p_index, current_index: 0 })`,
+        };
+        const { ctx, page, errors } = await newPage(browser, { theme, session: SESSION, rpc });
+        await page.goto(`${BASE}/duel.html?d=${KEY}`, { waitUntil: 'networkidle' });
+        await page.waitForTimeout(400);
+        await enterRun(page);
+
+        ok(!(await page.isVisible('#steal-banner')), 'no banner before the disagreement');
+
+        await page.fill('#steal-input', String(ANSWER(0)));
+        await page.waitForTimeout(150);
+
+        const after = await scores(page);
+        ok(after.you === 'You 0' && after.them === 'Rival 0',
+           `a stale_index refusal moved neither score (got "${after.you} / ${after.them}")`);
+        ok(await page.isVisible('#steal-banner'), 'the client went into a resync state');
+        const banner = (await page.textContent('#steal-banner')).trim();
+        ok(banner === 'Out of step with the server — points may not be counted until the next question is decided.',
+           `and says so, in as many words (got "${banner}")`);
+
+        // The resync clears when the game catches up with this client: an
+        // `advance` hint at or ahead of our own index.
+        await page.evaluate(() => window.__push('advance', { index: 1, by: 'opponent', ms: 900 }));
+        await page.waitForTimeout(120);
+        ok(!(await page.isVisible('#steal-banner')),
+           'and clears once an advance shows the game has caught up');
+        const s = await scores(page);
+        ok(s.them === 'Rival 0',
+           `that advance was still only a hint — it awarded nothing (got "${s.them}")`);
+        ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
+        await ctx.close();
+      }
+    }
+
+    // ── 12. A genuine server award still scores ─────────────
+    // supabase/steal.sql returns point_taken WITH `winner`, `elapsed_ms` and
+    // `provisional`: it is a refusal of the claim and an award of the point in
+    // one payload. That named winner is the server's word and must still score
+    // and still announce — the fix must not have made the client deaf.
+    {
+      console.log('[12 a named winner still scores and still announces]');
+      const rpc = {
+        get_duel_by_key: `() => (${src(stealPayload())})`,
+        start_duel_run: START_RUN,
+        claim_duel_point: `(a) => (a.p_index === 0
+          ? { ok: false, error: 'point_taken', index: 0, side: 'creator',
+              winner: 'opponent', elapsed_ms: 820, provisional: false }
+          : { ok: true, index: a.p_index, side: 'creator', winner: 'creator',
+              elapsed_ms: 640, provisional: false })`,
+      };
+      const { ctx, page, errors } = await newPage(browser, { theme, session: SESSION, rpc });
+      await page.goto(`${BASE}/duel.html?d=${KEY}`, { waitUntil: 'networkidle' });
+      await page.waitForTimeout(400);
+      await enterRun(page);
+
+      await page.fill('#steal-input', String(ANSWER(0)));
+      await page.waitForTimeout(150);
+      let s = await scores(page);
+      ok(s.them === 'Rival 1',
+         `a point_taken that NAMES the winner scores for them (got "${s.them}")`);
+      ok(s.you === 'You 0', 'and our optimistic point came off');
+      ok((await line(page)) === 'Stolen — they had it in 0.8s',
+         `"Stolen" is announced, because the server named somebody (got "${await line(page)}")`);
+      ok(!/is-provisional/.test(s.themClass),
+         'a settled award is not muted');
+
+      await page.fill('#steal-input', String(ANSWER(1)));
+      await page.waitForTimeout(150);
+      s = await scores(page);
+      ok(s.you === 'You 1' && s.them === 'Rival 1',
+         `an ok:true award still scores for us (got "${s.you} / ${s.them}")`);
+      ok(!/is-provisional/.test(s.youClass) && !/is-provisional/.test(s.themClass),
+         'and with nothing unknown left, neither number is muted');
+      ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
+      await ctx.close();
+    }
+
+    // ── 13. The scoreline is two usernames ──────────────────
+    {
+      console.log('[13 the scoreline — usernames, escaped, and yours identifiable]');
+      const rpc = {
+        get_duel_by_key: `() => (${src(stealPayload())})`,
+        start_duel_run: START_RUN,
+        claim_duel_point: `(a) => ({ ok: true, index: a.p_index, side: 'creator',
+          winner: 'creator', elapsed_ms: 640, provisional: false })`,
+      };
+      const { ctx, page, errors } = await newPage(browser, {
+        theme, session: SESSION, rpc, profile: { id: 'u1', username: 'Ada' },
+      });
+      await page.goto(`${BASE}/duel.html?d=${KEY}`, { waitUntil: 'networkidle' });
+      await page.waitForTimeout(400);
+      await enterRun(page);
+
+      let s = await scores(page);
+      ok(s.you === 'Ada (you) 0',
+         `our own username is on the scoreline, marked as ours (got "${s.you}")`);
+      ok(s.them === 'Rival 0',
+         `and the opponent's name, from their presence payload (got "${s.them}")`);
+      ok(!/\bYou\b|\bThem\b/.test(s.you + ' ' + s.them),
+         `neither placeholder survives (got "${s.you} / ${s.them}")`);
+      ok(s.youHtml.includes('(you)') && !s.themHtml.includes('(you)'),
+         'only our own side carries the marker');
+
+      await page.fill('#steal-input', String(ANSWER(0)));
+      await page.waitForTimeout(150);
+      s = await scores(page);
+      ok(s.you === 'Ada (you) 1' && s.them === 'Rival 0',
+         `the number sits beside the name and moves (got "${s.you} / ${s.them}")`);
+      ok(!/is-provisional/.test(s.youClass) && !/is-provisional/.test(s.themClass),
+         'a settled award is not muted, so both names render in the HUD ink');
+      const inks = await page.evaluate(() => [
+        getComputedStyle(document.getElementById('steal-score-you')).color,
+        getComputedStyle(document.getElementById('steal-score-them')).color,
+      ]);
+      ok(inks[0] === inks[1],
+         `both sides of the scoreline are the same colour (got ${JSON.stringify(inks)})`);
+
+      await page.screenshot({ path: `${SHOTS}/steal-13-names-${tag}.png` });
+
+      // A hostile name from the other browser. It reaches the HUD through a
+      // presence payload, so it is exactly as attacker-controlled as the room's.
+      await page.evaluate(() => window.__peer({
+        side: 'opponent', name: '<img src=x onerror="window.__xss=1">', ready: true,
+      }));
+      await page.waitForTimeout(120);
+      ok(await page.evaluate(() => window.__xss === undefined),
+         'a hostile peer name on the scoreline does not execute');
+      ok(await page.evaluate(() =>
+           document.querySelectorAll('#steal-score img').length === 0),
+         'and does not become an element');
+      ok((await page.innerHTML('#steal-score-them')).includes('&lt;img'),
+         'it is escaped into the markup instead');
+
+      // A long name must lose its own tail, not the timer.
+      await page.evaluate(() => window.__peer({
+        side: 'opponent', name: 'Bartholomew Featherstonehaugh III', ready: true,
+      }));
+      await page.waitForTimeout(120);
+      await page.screenshot({ path: `${SHOTS}/steal-13-longname-${tag}.png` });
+      const layout = await page.evaluate(() => {
+        const t = document.getElementById('steal-timer').getBoundingClientRect();
+        const sc = document.getElementById('steal-score').getBoundingClientRect();
+        const nm = document.querySelector('#steal-score-them .steal-score-name');
+        return {
+          gap: Math.round(sc.left - t.right),
+          // #steal-game's HUD specifically. `.game-hud` alone matches the
+          // CLASSIC run's hidden one first, which is 0px tall and would make
+          // the one-line assertion below pass without measuring anything.
+          hudLines: Math.round(
+            document.querySelector('#steal-game .game-hud').getBoundingClientRect().height),
+          clipped: nm.scrollWidth > nm.clientWidth,
+          ellipsis: getComputedStyle(nm).textOverflow,
+        };
+      });
+      ok(layout.gap > 0,
+         `a long name does not push the timer off the left (gap ${layout.gap}px)`);
+      ok(layout.clipped && layout.ellipsis === 'ellipsis',
+         'it is truncated with an ellipsis rather than wrapped');
+      ok(layout.hudLines > 20 && layout.hudLines < 45,
+         `and the HUD is still one line, not two (${layout.hudLines}px)`);
+      ok((await scores(page)).them.endsWith(' 0'),
+         'the number survives the truncation — only the name is clipped');
+      ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
+      await ctx.close();
+    }
+
+    // ── 14. A guest has no username ─────────────────────────
+    {
+      console.log('[14 a guest — an honest fallback, never blank or undefined]');
+      const rpc = {
+        get_duel_by_key: `() => (${src(stealPayload())})`,
+        start_duel_run: START_RUN,
+      };
+      // No profile for us, and a peer whose presence carries no name at all.
+      const { ctx, page, errors } = await newPage(browser, { theme, session: SESSION, rpc });
+      await page.goto(`${BASE}/duel.html?d=${KEY}`, { waitUntil: 'networkidle' });
+      await page.waitForTimeout(400);
+      await enterRun(page, { side: 'opponent', ready: true });
+
+      const s = await scores(page);
+      ok(s.you === 'You 0',
+         `a player with no username falls back to "You" (got "${s.you}")`);
+      ok(s.them === 'Them 0',
+         `and a nameless guest to "Them" (got "${s.them}")`);
+      ok(!/undefined|null/.test(s.youHtml + s.themHtml),
+         'with no "undefined" and no "null" anywhere in the markup');
+      ok(!s.youHtml.includes('(you)'),
+         'and no "(you)" marker on a name that is already the word "You"');
+
+      // An empty-string name is a name too, and must not render as a blank.
+      await page.evaluate(() => window.__peer({ side: 'opponent', name: '   ', ready: true }));
+      await page.waitForTimeout(120);
+      ok((await scores(page)).them === 'Them 0',
+         `a whitespace-only name falls back rather than rendering blank (got "${(await scores(page)).them}")`);
       ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
       await ctx.close();
     }

@@ -77,6 +77,11 @@ run_sql "$SQLDIR_MIG/social.sql"
 # ambiguous. The re-apply pass below runs the two in this order for that reason.
 [ -r "$SQLDIR_MIG/steal.sql" ] && run_sql "$SQLDIR_MIG/steal.sql"
 [ -r "$SQLDIR_MIG/leagues.sql" ] && run_sql "$SQLDIR_MIG/leagues.sql"
+# After steal.sql, because it reads duel_runs/duels and steal.sql is the last
+# file that changes their shape. Before settings.sql, which keeps its "after
+# everything that touches profiles" rule. It defines only new objects, so it
+# neither disturbs an earlier file nor is disturbed by one being re-applied.
+[ -r "$SQLDIR_MIG/leaderboards.sql" ] && run_sql "$SQLDIR_MIG/leaderboards.sql"
 # Next to last: it revokes the client's column grants on profiles and replaces
 # username_available, so re-applying hardening.sql after it would undo half
 # of that. Deployment order is the README's table, and this mirrors it.
@@ -94,6 +99,7 @@ run_sql "$SQLDIR_MIG/social.sql"
 [ -r "$SQLDIR_MIG/duels.sql" ] && run_sql "$SQLDIR_MIG/duels.sql"
 [ -r "$SQLDIR_MIG/steal.sql" ] && run_sql "$SQLDIR_MIG/steal.sql"
 [ -r "$SQLDIR_MIG/leagues.sql" ] && run_sql "$SQLDIR_MIG/leagues.sql"
+[ -r "$SQLDIR_MIG/leaderboards.sql" ] && run_sql "$SQLDIR_MIG/leaderboards.sql"
 [ -r "$SQLDIR_MIG/settings.sql" ] && run_sql "$SQLDIR_MIG/settings.sql"
 [ -r "$SQLDIR_MIG/account.sql" ] && run_sql "$SQLDIR_MIG/account.sql"
 
@@ -128,6 +134,16 @@ if [ -r "$SQLDIR_MIG/steal.sql" ]; then
     TESTS="$TESTS -f '$SQLDIR_TEST/08-steal-test.sql'"
   else
     echo "NOTE: supabase/steal.sql is applied but 08-steal-test.sql is missing — steal contract NOT tested" >&2
+  fi
+fi
+# And the same for the global boards: the migration and its suite are written by
+# different hands, so a missing suite is a loud NOTE rather than a broken run —
+# and never silence, which would be a green run that proves nothing.
+if [ -r "$SQLDIR_MIG/leaderboards.sql" ]; then
+  if [ -r "$SQLDIR_TEST/09-leaderboards-test.sql" ]; then
+    TESTS="$TESTS -f '$SQLDIR_TEST/09-leaderboards-test.sql'"
+  else
+    echo "NOTE: supabase/leaderboards.sql is applied but 09-leaderboards-test.sql is missing — leaderboards contract NOT tested" >&2
   fi
 fi
 psql_run "-d $DB $TESTS" 2>&1 | sed 's/^psql.*NOTICE:  //'

@@ -195,7 +195,7 @@ console.log('[the removed panels are gone from the DOM, not hidden]');
      'the Copy link button is gone with it');
   const body = (await p.textContent('body')) || '';
   ok(!/Public Profile/i.test(body), 'the words "Public Profile" are nowhere on the page');
-  ok(!/Your Leagues/i.test(body),   'the words "Your Leagues" are nowhere on the page');
+  ok(!/Your Leagues|Your Clans/i.test(body), 'no clan list heading is anywhere on the page');
   ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
   await ctx.close();
 }

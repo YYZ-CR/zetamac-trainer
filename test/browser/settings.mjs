@@ -595,11 +595,11 @@ for (const theme of ['zetamac', 'dark']) {
        'it says the daily attempts go');
     ok(said.includes('including past days'),
        'it says past daily leaderboards too, not just today');
-    ok(said.includes('you leave every league you are in'),
-       'it says leagues are left');
+    ok(said.includes('you leave every clan you are in'),
+       'it says clans are left');
     ok(said.includes('handed to its longest-standing remaining member'),
-       'it names who an owned league goes to');
-    ok(said.includes('if you were its only member, the league is deleted with you'),
+       'it names who an owned clan goes to');
+    ok(said.includes('if you were its only member, the clan is deleted with you'),
        'and what happens when there is nobody to hand it to');
     ok(said.includes('duels you created are deleted'),
        'it says duels you created go');

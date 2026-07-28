@@ -28,7 +28,7 @@ for (const signedIn of [true,false]) {
     await p.goto((process.env.ZT_BASE||'http://127.0.0.1:8099')+'/'+pg,{waitUntil:'networkidle'});
     await p.waitForTimeout(450);
     const bar=(await p.textContent('#top-bar'))||'';
-    const want=['Play','Duel','Leagues','Dashboard', signedIn?'Settings':null, signedIn?'Log out':'Log in'].filter(Boolean);
+    const want=['Play','Duel','Leaderboards','Dashboard', signedIn?'Settings':null, signedIn?'Log out':'Log in'].filter(Boolean);
     const missing=want.filter(w=>!bar.includes(w));
     const theme=/Light|Dark/i.test(bar);
     console.log(`  ${pg.padEnd(20)} [${bar.replace(/\s+/g,' ').trim()}]`);

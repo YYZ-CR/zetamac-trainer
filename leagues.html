@@ -3,35 +3,53 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Leagues — Arithmetic Trainer</title>
+  <title>Leaderboards — Arithmetic Trainer</title>
   <link rel="stylesheet" href="css/style.css">
   <script src="js/theme.js"></script>
 </head>
+<!-- The file is still leagues.html and the body class is still leagues-page.
+     The schema says "league" and the product says "clan"/"Leaderboards";
+     docs/leaderboards-design.md is where that gap is written down. Renaming
+     the file would break every invite link already sent, which is a real cost
+     for a name only the address bar shows. -->
 <body class="leagues-page">
 
   <div class="top-bar" id="top-bar"></div>
 
   <div class="league-wrap">
 
-    <!-- Only on a single league's page, so there is always a way back to the
+    <!-- Only on a single clan's page, so there is always a way back to the
          index without reaching for the browser's Back button. -->
-    <a class="league-back" id="league-back" href="leagues.html" style="display:none">&larr; Your leagues</a>
+    <a class="league-back" id="league-back" href="leagues.html" style="display:none">&larr; All leaderboards</a>
 
     <div class="league-head">
-      <h1 id="league-title">Leagues</h1>
+      <h1 id="league-title">Leaderboards</h1>
       <div class="league-meta" id="league-meta"></div>
     </div>
 
-    <!-- Shown until the state resolves one way or the other -->
+    <!-- The global boards. FIRST on the page, and shown on the index view
+         only: they need no account, they are the reason to land a stranger
+         here, and a clan's own page is about that clan. -->
+    <div class="panel" id="global-panel" style="display:none">
+      <div class="panel-head">
+        <h2>Global boards</h2>
+        <span class="panel-note" id="global-note"></span>
+      </div>
+      <p class="league-lede" id="global-lede"></p>
+      <div class="league-scopes" id="global-scopes" role="group" aria-label="Which global board"></div>
+      <div id="global-board"></div>
+    </div>
+
+    <!-- Shown until the clan state resolves one way or the other -->
     <div class="league-loading" id="league-loading">Loading…</div>
 
-    <!-- Signed out, unknown code, left the league, or the RPCs are not deployed -->
+    <!-- Signed out, unknown code, left the clan, or the RPCs are not deployed -->
     <div class="league-notice" id="league-notice" style="display:none"></div>
 
-    <!-- Your leagues, the join screen, or the confirmation after creating one -->
+    <!-- Your clans, the join screen, or the confirmation after creating one -->
     <div class="panel" id="league-panel" style="display:none"></div>
 
-    <!-- The board itself: members only -->
+    <!-- The clan's own board: members only -->
     <div class="panel" id="league-board-panel" style="display:none">
       <div class="panel-head">
         <h2>Leaderboard</h2>
@@ -42,7 +60,7 @@
     </div>
 
     <!-- The invite code and its link. Below the board, because for a member
-         who is already in the league the board is the thing they came for. -->
+         who is already in the clan the board is the thing they came for. -->
     <div class="league-share" id="league-share" style="display:none">
       <label class="league-share-label" for="league-share-text">Invite people with this code</label>
       <div class="league-code" id="league-code"></div>
@@ -53,7 +71,7 @@
       <p class="league-share-status" id="league-share-status" role="status" aria-live="polite"></p>
     </div>
 
-    <!-- Create a league / join with a code. Index page only. -->
+    <!-- Create a clan / join with a code. Index page only. -->
     <div id="league-forms" style="display:none"></div>
 
     <!-- Leaving, and what leaving actually does. Board page only. -->

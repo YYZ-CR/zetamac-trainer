@@ -2,7 +2,7 @@
 //
 // Someone arriving for the first time sees a configuration screen and a Start
 // button. Nothing on it says the run will be analysed afterwards, that there is
-// a daily puzzle everyone plays, or that duels and leagues exist — every feature
+// a daily puzzle everyone plays, or that duels and clans exist — every feature
 // that makes this different from Zetamac is *behind* a run they have not done.
 //
 // Four things about this file are load-bearing:
@@ -36,7 +36,13 @@
 // '2': a welcome step was added at the front, and the last step now says where
 // the tour can be reopened from. Both change what the tour tells you, so
 // somebody who dismissed '1' has not read either of them.
-const TOUR_VERSION = '2';
+//
+// '3': Leagues became Leaderboards. The step that described a private league
+// now describes a page with global boards on it that anybody can read signed
+// out, and a league became a clan. Somebody who dismissed '2' was told the nav
+// item was called something it is no longer called, and was not told the
+// global boards exist at all — that is a different tour, not a typo fix.
+const TOUR_VERSION = '3';
 const TOUR_KEY     = 'zt_tour_seen';
 
 // Ordered by what is most different from the thing they already know, not by
@@ -67,8 +73,8 @@ const TOUR_STEPS = [
          for the thirty-second version of what is here.</p>
       <p><strong>You do not need an account to play.</strong> Press Start and go;
          practice mode and accepting somebody&rsquo;s duel work signed out too.
-         Signing in is what saves your run history, puts you on the daily and
-         league boards, and gives you a profile page.</p>`,
+         Signing in is what saves your run history, puts you on the
+         leaderboards, and gives you a profile page.</p>`,
   },
   {
     title: 'It tells you why',
@@ -108,12 +114,17 @@ const TOUR_STEPS = [
          answer takes the point and both of you jump to the next question.</p>`,
   },
   {
-    title: 'Private leagues',
+    // The href is still leagues.html — the page was renamed, the file was not,
+    // so that invite links already sent keep resolving.
+    title: 'Leaderboards and clans',
     target: '#top-bar a[href="leagues.html"]',
     html: `
-      <p>An invite code, a named group, and a board over the day&rsquo;s puzzle &mdash;
-         today, the week&rsquo;s average, or best ever.</p>
-      <p>Being 3rd of 6 behind people you know beats being 4,000th behind strangers.</p>`,
+      <p>Three global boards &mdash; today&rsquo;s daily, today&rsquo;s best and
+         all-time best &mdash; over 120-second runs the server scored itself. No
+         account needed to read them.</p>
+      <p>Below them, <strong>clans</strong>: an invite code, a named group, and a
+         board over the day&rsquo;s puzzle. Being 3rd of 6 behind people you know
+         beats being 4,000th behind strangers.</p>`,
   },
   {
     title: 'A profile worth sharing',

@@ -1608,6 +1608,22 @@ const STEAL_HINT_LOOKAHEAD = 25;
 const STEAL_START_MAX_MS = 60000;
 const STEAL_START_MIN_MS = -5000;
 
+// Shown while this client's index and the server's disagree. See
+// stealBeginResync().
+const STEAL_RESYNC_MSG =
+  'Out of step with the server — points may not be counted until the next question is decided.';
+
+// The scoreline sits in the top-right of a full-bleed run, opposite the timer,
+// and a username is up to 40 characters of somebody else's choosing. Bounding
+// and ellipsizing it here is what stops a long name wrapping the HUD onto two
+// lines or pushing the timer off the left.
+//
+// Inline rather than a class because css/style.css is owned elsewhere on this
+// branch. It resolves to no colour of its own, so both themes are unaffected.
+const STEAL_NAME_STYLE =
+  'display:inline-block;max-width:9em;overflow:hidden;text-overflow:ellipsis;' +
+  'white-space:nowrap;vertical-align:bottom';
+
 // ── State ─────────────────────────────────────────────────────
 
 let stealSide     = '';      // 'creator' | 'opponent' — which side this client is
@@ -1633,7 +1649,9 @@ let stealInputWired = false;
 let stealLaunching  = false;
 let stealEnding     = false;
 let stealEnded      = false;
-let stealResyncing  = false; // rejoined mid-run and not yet certain of the index
+let stealResyncing  = false; // this client and the server disagree about the index
+let stealServerIndex = null; // the server's own current index, when it told us
+let stealLineIndex  = null;  // which question #steal-line is currently about
 
 let stealGraceUntil = null;  // epoch ms the grace expires
 let stealGraceTimer = null;
@@ -1710,6 +1728,9 @@ function stealMyName() {
       stealNames[stealSide] = name;
       stealTrack();
       if (stealRoomOpen) renderStealRoom(duelPayload || {});
+      // The run's scoreline is named too, so a profile that arrives after the
+      // run has started still replaces "You" with the username.
+      if (stealRunLive()) stealRenderScore();
     }).catch(() => {});
   }
   return stealMyNameCache;
@@ -1964,6 +1985,8 @@ function enterStealRun(run) {
   stealIndex  = 0;
   stealEnded  = false;
   stealEnding = false;
+  stealServerIndex = null;
+  stealLineIndex   = null;
 
   const remaining = Math.max(0, duelNumber(run.seconds_remaining) ?? stealRun.duration);
   stealDeadline = performance.now() + remaining * 1000;
@@ -2054,6 +2077,8 @@ function wireStealInput() {
 function stealCommit() {
   const index = stealIndex;
   const ms    = Math.max(0, Math.round(performance.now() - stealQuestionAt));
+  const q     = stealRun ? stealRun.questions[index] : null;
+  const answer = q ? q.answer : null;
 
   // Optimistic, and shown as such: muted until the server confirms it.
   stealSetPoint(index, stealSide, 'optimistic', ms);
@@ -2061,7 +2086,7 @@ function stealCommit() {
   stealAdvanceTo(index + 1);
 
   stealSend('advance', { index, by: stealSide, ms });
-  stealClaim(index, ms);
+  stealClaim(index, ms, answer);
 }
 
 // The question only ever moves FORWARD. An out-of-order hint, a duplicate
@@ -2076,41 +2101,72 @@ function stealAdvanceTo(next) {
   stealRenderScore();
 }
 
-async function stealClaim(index, ms) {
+// The one place a point is written from, and the rule it enforces is: **only a
+// winner the SERVER named is ever scored.**
+//
+// This used to read a refusal as "then it must have been them" and award the
+// point to the other side. A refusal says no such thing. It says this claim did
+// not win; it does not say who did. That guess produced the worst bug this mode
+// has had: one refused claim leaves the client's index ahead of the server's,
+// every later claim then comes back `stale_index`, and each one handed out
+// another invented point — a player who answered nine questions alone watched
+// all nine go to an opponent who was not there, "Stolen — they took it" each
+// time.
+//
+// So there are exactly three outcomes here:
+//
+//   * a payload naming a winner — an award, whoever it went to, including the
+//     `point_taken` shape, which loses the race but still carries `winner`,
+//     `elapsed_ms` and `provisional`. That is the server's word and it scores.
+//   * a refusal naming nobody — `stale_index`, `wrong`, or a RAISE. Our
+//     optimistic point comes off, the index is marked UNKNOWN, and it counts
+//     for neither side. A scoreline that is briefly short is honest; one that
+//     is confidently wrong is not, and the server recounts from duel_points at
+//     the end anyway.
+//   * no answer at all (Realtime or the RPC missing) — nothing is touched.
+//
+// `stale_index` gets one thing more: it is a statement that this client and
+// the server disagree about where the game is, which is a resync condition
+// rather than a scoring event. See stealBeginResync().
+//
+// The fourth argument is the answer. claim_duel_point checks the answer on the
+// server (supabase/steal.sql §6) and a claim carrying none is 'wrong' by
+// definition, so it must be sent. js/db.js's claimDuelPoint() currently drops
+// it — see the report on this change — and passing it from here is inert until
+// that is fixed, which is the right way round: this file must not stop sending
+// evidence it is asked for.
+async function stealClaim(index, ms, answer) {
   if (typeof claimDuelPoint !== 'function') return;
-  const res = await claimDuelPoint(duelKey, index, ms);
+  const res = await claimDuelPoint(duelKey, index, ms, answer);
 
-  // A RAISEd refusal. Losing the race, or claiming a question that has already
-  // been decided, both mean the point was not ours — which is a correction to
-  // the SCORE and to nothing else.
+  // A RAISEd refusal: an error object, no payload, and therefore no winner.
   if (!res) {
     const code = (typeof lastDuelCode !== 'undefined') ? lastDuelCode : null;
     if (code === 'point_taken' || code === 'stale_index') {
-      stealSetPoint(index, stealOther(), 'settled', null);
-      stealAnnounce(index, stealOther(), null);
-      if (code === 'stale_index') stealResyncing = true;
-    }
-    return;
-  }
-
-  // Or a returned refusal — the contract returns { ok:false, error:'wrong' }
-  // for a wrong answer, and does not say whether the others are RAISEd or
-  // returned, so both shapes are handled.
-  if (res.ok === false) {
-    const err = String(res.error || '');
-    if (err === 'point_taken' || err === 'stale_index') {
-      stealSetPoint(index, stealOther(), 'settled', null);
-      stealAnnounce(index, stealOther(), null);
+      stealSetUnknown(index);
+      if (code === 'stale_index') stealBeginResync(null);
     }
     return;
   }
 
   const winner = res.winner === 'creator' ? 'creator'
                : res.winner === 'opponent' ? 'opponent' : '';
+
+  // A returned refusal that names nobody. Nothing is inferred from it.
+  if (res.ok === false && !winner) {
+    stealSetUnknown(index);
+    if (String(res.error || '') === 'stale_index') {
+      stealBeginResync(duelNumber(res.current_index));
+    }
+    return;
+  }
+
   if (!winner) return;
 
   const settledMs = duelNumber(res.elapsed_ms);
   stealSetPoint(index, winner, res.provisional === true ? 'provisional' : 'settled', settledMs);
+  // The server answered about the index we asked about, so we are in step.
+  stealEndResync();
 
   // Arbitration went the other way. The score has just corrected; the question
   // stays exactly where it is.
@@ -2125,6 +2181,9 @@ async function stealClaim(index, ms) {
 //   provisional — the server awarded it, inside the 400ms window in which a
 //                 faster claim can still replace it
 //   settled     — as final as this client can know before the server's recount
+//   unknown     — the server refused our claim without naming a winner. The
+//                 question was decided by somebody; this client does not know
+//                 by whom, so it counts for NEITHER side.
 //
 // This map is the ONLY thing the scoreline is computed from, and the only
 // things that write to it are claim_duel_point's answers and this client's own
@@ -2145,6 +2204,50 @@ function stealSetPoint(index, winner, state, ms) {
   stealRenderScore();
 }
 
+// Our optimistic point for this index comes off, and the index is recorded as
+// decided-by-nobody-we-know-of. Deliberately NOT given to the other side: see
+// stealClaim(). A point the server has already named is not un-named by a
+// later refusal about the same index.
+function stealSetUnknown(index) {
+  if (!stealPoints) return;
+  const cur = stealPoints.get(index);
+  if (cur && cur.winner && cur.state === 'settled') return;
+  stealPoints.set(index, { winner: '', state: 'unknown', ms: null });
+
+  // The line is still saying we took this one. It has to stop saying that —
+  // and it must not start saying "Stolen", because nobody has been named.
+  if (stealLineIndex === index) {
+    stealSetLine('That one was not yours — waiting for the server to say who took it.', '');
+    stealLineIndex = null;
+  }
+  stealRenderScore();
+}
+
+// stale_index means this client and the server disagree about where the game
+// is. That is a resync condition, and it is self-perpetuating: while this
+// client is ahead, every claim it makes is stale too. Saying so on screen is
+// the point — the alternative is a player answering questions that nothing is
+// counting, with no way to tell.
+//
+// It clears the moment the server answers about an index we asked about, or an
+// `advance` hint lands at or ahead of us, which means the game has caught up.
+function stealBeginResync(serverIndex) {
+  const n = duelNumber(serverIndex);
+  if (n !== null) stealServerIndex = Math.max(0, Math.round(n));
+  if (stealResyncing) return;
+  stealResyncing = true;
+  // The grace countdown owns the banner while it is running; it is the more
+  // urgent of the two and it clears itself.
+  if (stealGraceUntil === null) stealBanner(STEAL_RESYNC_MSG);
+}
+
+function stealEndResync() {
+  if (!stealResyncing) return;
+  stealResyncing  = false;
+  stealServerIndex = null;
+  if (stealGraceUntil === null) stealBanner('');
+}
+
 function stealCountFor(side) {
   let n = 0;
   if (!stealPoints) return n;
@@ -2152,21 +2255,45 @@ function stealCountFor(side) {
   return n;
 }
 
+// The name to put on a side of the scoreline. Both are user-controlled: our own
+// is a username, and the other side's arrived over a broadcast channel from
+// another browser, which is why it is bounded to 40 characters on the way in
+// and escaped on the way out. A player with no username — every guest — gets a
+// short honest word rather than a blank or "undefined".
+function stealScoreName(side) {
+  const name = String(stealNames[side] || '').trim().slice(0, 40);
+  if (name) return name;
+  return side === stealSide ? 'You' : 'Them';
+}
+
 function stealRenderScore() {
   const you  = document.getElementById('steal-score-you');
   const them = document.getElementById('steal-score-them');
   if (!you || !them) return;
 
-  let mine = 0, theirs = 0, mineSoft = false, theirsSoft = false;
+  let mine = 0, theirs = 0, unknown = 0, mineSoft = false, theirsSoft = false;
   if (stealPoints) {
     for (const e of stealPoints.values()) {
       if (e.winner === stealSide)     { mine++;   if (e.state !== 'settled') mineSoft   = true; }
       else if (e.winner)              { theirs++; if (e.state !== 'settled') theirsSoft = true; }
+      else                            { unknown++; }
     }
   }
+  // An index whose owner the server has not named belongs to somebody, and
+  // this client does not know who. Both numbers are therefore incomplete, and
+  // both are muted to say so — the same signal a provisional point already
+  // uses, which is exactly what this is.
+  if (unknown) { mineSoft = true; theirsSoft = true; }
 
-  you.textContent  = 'You '  + mine;
-  them.textContent = 'Them ' + theirs;
+  const myName    = escapeHtml(stealScoreName(stealSide));
+  const theirName = escapeHtml(stealScoreName(stealOther()));
+  const tag       = stealNames[stealSide] ? '<span class="steal-score-tag"> (you)</span>' : '';
+
+  // "(you)" sits OUTSIDE the truncating span so a long name loses its own tail
+  // rather than the marker that says whose it is.
+  you.innerHTML  = `<span class="steal-score-name" style="${STEAL_NAME_STYLE}">${myName}</span>${tag} ${mine}`;
+  them.innerHTML = `<span class="steal-score-name" style="${STEAL_NAME_STYLE}">${theirName}</span> ${theirs}`;
+
   // Muted while a point could still move, firm once it cannot. A point is
   // never shown and then snatched away without the display having said, the
   // whole time, that it was not final yet.
@@ -2188,6 +2315,7 @@ function stealAnnounce(index, winner, ms) {
     ? (secs === null ? 'Stolen — you took it'        : `Stolen — you had it in ${secs}s`)
     : (secs === null ? 'Stolen — they took it'       : `Stolen — they had it in ${secs}s`);
 
+  stealLineIndex = duelNumber(index) === null ? null : Math.round(duelNumber(index));
   stealSetLine(text, mine ? 'is-you' : 'is-them');
   if (!mine) stealFlashLoss();
 }
@@ -2323,7 +2451,8 @@ function stealOnAdvance(payload) {
 
   stealAnnounce(target, by, duelNumber(payload && payload.ms));
   stealAdvanceTo(target + 1);
-  stealResyncing = false;
+  // A hint at or ahead of our own index means the game has caught up with us.
+  stealEndResync();
 }
 
 // Arbitration disagreed with somebody's optimistic view. Same rule: it can
@@ -2398,6 +2527,9 @@ function stealSyncPresence(delta) {
   if (stealRunLive()) {
     if (wasHere && !nowHere) stealBeginGrace();
     if (!wasHere && nowHere) stealStopGrace(true);
+    // A presence payload carries the other player's name, and the scoreline is
+    // named — so it is redrawn here rather than only when a point moves.
+    stealRenderScore();
   }
   if (stealRoomOpen) renderStealRoom(duelPayload || {});
 }
@@ -2433,7 +2565,10 @@ function stealTickGrace() {
 function stealStopGrace(clearBanner) {
   if (stealGraceTimer) { clearInterval(stealGraceTimer); stealGraceTimer = null; }
   stealGraceUntil = null;
-  if (clearBanner) stealBanner('');
+  // The grace borrows the banner. Handing it back means restoring whatever it
+  // covered up, not blanking it — a resync warning that a returning opponent
+  // silently erased would be a lie by omission.
+  if (clearBanner) stealBanner(stealResyncing ? STEAL_RESYNC_MSG : '');
 }
 
 function stealBanner(text) {
@@ -2605,6 +2740,8 @@ function stealTeardown() {
   stealEnding     = false;
   stealEnded      = false;
   stealResyncing  = false;
+  stealServerIndex = null;
+  stealLineIndex   = null;
   stealPresent = { creator: false, opponent: false };
   stealReady   = { creator: false, opponent: false };
   stealNames   = { creator: '', opponent: '' };

@@ -191,14 +191,18 @@ async function logout() {
 // two appeared depending on which page you were on, which reads as links
 // randomly disappearing. Every page calls this now; if a page needs a
 // different link, it belongs in NAV, not in a second copy of this function.
-// Game modes first, then the account. Duel and Leagues live here rather than
-// on the config page because they are places you go, not options you set
+// Game modes first, then the account. Duel and Leaderboards live here rather
+// than on the config page because they are places you go, not options you set
 // before pressing Start — and a mode buried behind Play is a mode nobody
 // discovers.
+//
+// The Leaderboards item still points at leagues.html: the page was renamed,
+// the file was not, because every invite link already sent carries that name.
+// docs/leaderboards-design.md has the reasoning.
 const NAV = [
   { href: 'index.html',     label: 'Play' },
   { href: 'duel.html',      label: 'Duel' },
-  { href: 'leagues.html',   label: 'Leagues' },
+  { href: 'leagues.html',   label: 'Leaderboards' },
   { href: 'dashboard.html', label: 'Dashboard' },
   // Nothing to configure without an account, so this one is conditional.
   { href: 'settings.html',  label: 'Settings', authOnly: true },

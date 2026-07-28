@@ -12,7 +12,7 @@ Read `CLAUDE.md` first (conventions, security posture, sandbox gotchas), then
 
 Built and tested: the game, run analysis, adaptive practice, public profiles +
 percentiles, the share card, Zetamac Daily, duels with a real two-player pace graph,
-steal mode, private leagues, a settings page with account deletion, and the first-run
+steal mode, leaderboards and clans, a settings page with account deletion, and the first-run
 walkthrough.
 
 **Nothing below is blocked on more code.** What is left is the deploy checklist in
@@ -25,7 +25,7 @@ npm test                                    # unit + the username-rule parity ch
 npm run test:sql                            # 8 SQL contract suites
 npm run test:browser                        # 9 browser suites
 supabase/test/race-duel-claim.sh            # concurrent duel-slot claim
-supabase/test/race-league-cap.sh            # concurrent league-cap race
+supabase/test/race-league-cap.sh            # concurrent clan-cap race (schema: league)
 supabase/test/race-steal-point.sh           # concurrent steal claims, with a control
 ```
 
@@ -68,13 +68,38 @@ Still worth doing by hand, because no test here can reach them:
 
 ---
 
-## 1b. Leaderboards and clans — designed, not built
+## 1b. Leaderboards and clans — CLIENT BUILT, server side pending
 
-Contract: **`docs/leaderboards-design.md`**. Nothing is blocking it.
+Contract: **`docs/leaderboards-design.md`**.
 
-Leagues become **Leaderboards** in the nav and **clans** as the noun; the page holds
-the global boards and your clans. Three global boards: today's daily, today's best,
-all-time best, all fixed at 120 seconds.
+**The client half is done.** Leagues are **Leaderboards** in the nav and **clans** as
+the noun everywhere a person reads. `leagues.html` now shows the three global boards
+first — Today's Daily, Today's Best, All-Time Best, behind a tab control — and your
+clans below them. `getGlobalBoard(scope, limit)` in `js/db.js` calls
+`get_global_board(p_scope, p_limit)`; the page renders signed out, treats an empty
+board as an invitation and a failed call as a visibly different error state, and
+escapes every username. `test/browser/leagues.mjs` covers it (629 assertions,
+including a walk of every page's rendered text for the word "league"), `tour.mjs`
+was re-pointed and `TOUR_VERSION` bumped to `'3'` (400 assertions).
+
+**What is still outstanding:**
+
+- Deploying `supabase/leaderboards.sql` (written in parallel — it holds
+  `get_global_board` and three indexes, and goes **after `steal.sql`**). Until it is
+  applied the page renders its error state, which is the intended behaviour for a
+  missing migration and is covered by a test.
+- **The design doc contradicts itself on linking a username** and the client had to
+  pick. The payload is specified as `{rank, username, score}` with no `is_public`,
+  but the prose says "the row's name links there only when it is [public]". The
+  client links **nothing** on a global board, so that a linked username on this site
+  always means a published profile. If the server ever adds `is_public` to the row,
+  `globalBoardRow()` in `js/leagues.js` is the one place to change.
+- **The error payload shape for an unknown scope is unspecified.** The doc says an
+  unknown scope is "an error payload, not an exception". `getGlobalBoard()` treats
+  any payload without a `rows` array as a failure, which covers whatever shape it
+  turns out to be, but the doc should name it.
+- Nothing here renames the schema. `league` in the database still means `clan` in
+  the product, and that is written down rather than left to be found.
 
 **The decision the whole design turns on:** global boards are built only from
 `daily_attempts` and `duel_runs`, which the server scores itself. `game_sessions` is
@@ -100,11 +125,11 @@ questions for every run, the way the daily does — a real feature, not a patch.
 ## 2. ~~First-run walkthrough~~ — BUILT
 
 `js/tour.js`, contract in `docs/walkthrough-design.md`, tested by
-`test/browser/tour.mjs` (393 assertions). **Seven** steps in one array — a welcome,
+`test/browser/tour.mjs` (400 assertions). **Seven** steps in one array — a welcome,
 then the six features — a modal on
 `index.html` only — but never `index.html?key=…`, which is a shared configuration
 link somebody followed to play that config — `localStorage['zt_tour_seen']` holding
-`TOUR_VERSION` (now `'2'`), five
+`TOUR_VERSION` (now `'3'`), five
 dismissal routes that all mark it seen, and a "How this works" link in the footer
 that re-opens it.
 
@@ -164,7 +189,7 @@ the whole thing in one transaction, in the order the doc states, with the
       after `settings.sql` — its body reads tables from every earlier file and
       plpgsql resolves those names at call time, so applying it early looks fine and
       fails on the first real deletion.
-- [ ] **Delete a throwaway account against the real project**, one that owns a league
+- [ ] **Delete a throwaway account against the real project**, one that owns a clan
       with other members in it. Local Postgres cannot exercise the `auth.users`
       cascade Supabase actually has (`auth.identities`, `auth.sessions`,
       `auth.refresh_tokens`), and the function's own `DELETE FROM auth.users` depends
@@ -173,8 +198,8 @@ the whole thing in one transaction, in the order the doc states, with the
 
 Two things not to "simplify" later:
 
-- **The league rule is duplicated from `leave_league` on purpose** — same removal,
-  same "last member out deletes the league", same successor tie-break
+- **The clan rule is duplicated from `leave_league` on purpose** — same removal,
+  same "last member out deletes the clan", same successor tie-break
   (`ORDER BY joined_at ASC, user_id ASC`). `05-leagues-test.sql` and the account
   suite each assert one copy; change one and the other must change.
 - **`game_sessions` are deleted, not orphaned.** The FK is `ON DELETE SET NULL`, and
@@ -238,7 +263,7 @@ host, jsDelivr — which sees an IP on every page load), the `localStorage` keys
 name, opt-in public profiles, and a deletion section that agrees with
 `docs/account-deletion.md` line for line. **If `account.sql` ever changes what
 survives a deletion, `privacy.html` changes in the same commit** — the test asserts
-the league-succession rule and the duel rule by name, so it will tell you.
+the clan-succession rule and the duel rule by name, so it will tell you.
 
 ---
 
@@ -292,10 +317,10 @@ Five things to keep true rather than rediscover:
   the clipboard's failure modes, not three. `navigator.clipboard` is **undefined**
   outside a secure context and the unguarded call throws there, which is why that
   helper exists at all.
-- **The dashboard no longer holds the public-profile link or the leagues list.** The
-  link and the public/private toggle live in `settings.html`; leagues live in
+- **The dashboard no longer holds the public-profile link or the clans list.** The
+  link and the public/private toggle live in `settings.html`; clans live in
   `leagues.html`. Both panels were removed on request, and `leagues.mjs` now guards
-  against the leagues one reappearing.
+  against the clans one reappearing.
 
 - [ ] **The public profile no longer offers a Share Image.** It went with the panel it
       sat in. `js/sharecard.js` is still loaded by `results.html`, so the card itself is
@@ -322,8 +347,9 @@ Five things to keep true rather than rediscover:
       background tabs, so the condition could not be reproduced. Needs a real browser,
       backgrounded, mid-run.
 - [ ] **Cold start.** Percentiles suppress below 5 players and hide below 20; the
-      global board will be uninteresting for a while. The daily and private leagues
-      are the two mechanics that work at low player counts — lead with those.
+      global boards will be thin for a while — the client already treats that as an
+      invitation rather than a failure, and never draws a placeholder row. The daily
+      and clans are the two mechanics that work at low player counts — lead with those.
 
 ---
 
@@ -339,7 +365,7 @@ Each is enforced by a test; if you change one, the test should fail first.
    run into a chase.
 4. **A duel's creator cannot play both sides.** Enforced in the RPC *and* by a CHECK
    constraint.
-5. **A league invite code is not a directory.** Non-members see the name, the owner
+5. **A clan invite code is not a directory.** Non-members see the name, the owner
    and a count — never the roster.
 6. **`profiles.username` is not writable by the client.** `set_username` is the only
    path, enforced by column-level grants rather than by a policy.

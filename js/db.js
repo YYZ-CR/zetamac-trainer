@@ -685,15 +685,27 @@ async function submitDuelRun(key, answers) {
 // released, so the worst a cheat can claim is the physics the server saw.
 // Sending a wrong answer is pointless — the server checks it and awards
 // nothing — so duel.js only ever calls this for an answer it knows is right.
-async function claimDuelPoint(key, index, elapsedMs) {
+// p_answer is not optional in practice, whatever its DEFAULT says. The server
+// checks the answer against the stored question and returns {ok:false,
+// error:'wrong'} when it does not match — and a missing argument arrives as
+// NULL, which is the first branch of that check. Omitting it therefore made
+// EVERY claim wrong: no point was ever inserted, the server's next-expected
+// index stayed at 0 forever, and from the second question on every claim came
+// back stale_index. Steal mode could not score at all, in a two-player game or
+// alone. It is sent explicitly rather than left to a default for that reason.
+async function claimDuelPoint(key, index, elapsedMs, answer) {
   if (!key) { lastDuelCode = 'duel_not_found'; lastDuelError = DUEL_REFUSALS.duel_not_found; return null; }
   const i  = Number(index);
   const ms = Number(elapsedMs);
+  const a  = Number(answer);
   return duelRpc('claim_duel_point', {
     p_key: String(key),
     p_guest_token: duelGuestToken(key) || null,
     p_index:      Number.isFinite(i)  ? Math.max(0, Math.round(i))  : 0,
     p_elapsed_ms: Number.isFinite(ms) ? Math.max(0, Math.round(ms)) : 0,
+    // Null rather than 0 when there is nothing to send: 0 is a real answer to
+    // real questions, and claiming it would be a guess at somebody's point.
+    p_answer:     Number.isFinite(a)  ? a : null,
   });
 }
 
@@ -760,16 +772,26 @@ function duelChannel(key, presenceKey) {
   }
 }
 
-// ── Private leagues ──────────────────────────────────────────
+// ── Clans (schema name: leagues) ──────────────────────────────
 // A named group, an invite code, and its own leaderboard over the daily.
 // Every call here is a SECURITY DEFINER RPC from supabase/leagues.sql; the
-// exact payload shapes are pinned in docs/leagues-design.md. Three properties
-// of that design decide the shape of this section:
+// exact payload shapes are pinned in docs/leagues-design.md.
 //
-//   * Accounts only. Every league RPC is granted to `authenticated` and to
+// The product calls these CLANS. The schema still calls them leagues, and
+// docs/leaderboards-design.md explains why: renaming nine live functions and
+// re-pointing eight suites buys nothing a user can see. So every identifier
+// below — function names, RPC names, error codes — says `league`, and every
+// STRING a person reads says `clan`. The error codes in particular are wire
+// identifiers: `league_full` is what the database raises, and the value beside
+// it here is the sentence somebody reads.
+//
+// Three properties of that design decide the shape of this section:
+//
+//   * Accounts only. Every clan RPC is granted to `authenticated` and to
 //     nothing else, and each one re-checks auth.uid() — so a signed-out caller
 //     gets `league_requires_account` rather than an empty list. There is no
-//     anonymous path to fall back to, unlike duels.
+//     anonymous path to fall back to, unlike duels and unlike the global
+//     boards below.
 //   * Refusals are RAISEd, not returned. `league_forbidden`, `league_full`,
 //     `league_limit_reached` and the rest arrive as `error` on the Supabase
 //     response — NOT as a thrown JS exception — so a client that only wrapped
@@ -782,7 +804,7 @@ function duelChannel(key, presenceKey) {
 // Same reason as lastSocialError / lastDailyError / lastDuelError for recording
 // the failure rather than throwing: null is a legitimate answer from getLeague()
 // (no such code) and leagues.html has to word that very differently from
-// "leagues are not deployed". lastLeagueCode is the machine-readable half —
+// "clans are not deployed". lastLeagueCode is the machine-readable half —
 // null means the last call succeeded and any null payload was a real answer.
 
 // The refusals supabase/leagues.sql raises, each as the sentence somebody
@@ -790,23 +812,27 @@ function duelChannel(key, presenceKey) {
 // puts in error.message; the HINT is deliberately not shown, because it is
 // written for whoever is reading the database and not for the person holding
 // the invite code.
+//
+// Keys say `league` because the database says `league`. Values say `clan`
+// because that is the word on the page. Nothing here maps one to the other by
+// string surgery — the mapping is this table, and it is meant to be read.
 const LEAGUE_REFUSALS = {
   league_requires_account:
-    'Leagues need an account — sign in and try again.',
+    'Clans need an account — sign in and try again.',
   league_bad_name:
-    'A league name has to be between 1 and 60 characters.',
+    'A clan name has to be between 1 and 60 characters.',
   league_key_unavailable:
-    "Couldn't allocate a code for this league. Try again in a moment.",
+    "Couldn't allocate a code for this clan. Try again in a moment.",
   league_not_found:
-    'There is no league with that code.',
+    'There is no clan with that code.',
   league_forbidden:
-    'Only members can see this league. Join it with its code to see the board.',
+    'Only members can see this clan. Join it with its code to see the board.',
   league_not_member:
-    "You're not in this league, so there's nothing to leave.",
+    "You're not in this clan, so there's nothing to leave.",
   league_full:
-    'This league is full — it already has the maximum of 100 members.',
+    'This clan is full — it already has the maximum of 100 members.',
   league_limit_reached:
-    "You're already in the maximum of 20 leagues. Leave one to make room.",
+    "You're already in the maximum of 20 clans. Leave one to make room.",
   league_bad_scope:
     'That leaderboard view does not exist.',
 };
@@ -865,7 +891,7 @@ async function leagueRpc(fn, args, unwrap = true) {
 
   if (!dbReady()) {
     lastLeagueCode  = 'league_unavailable';
-    lastLeagueError = 'Leagues are unavailable right now.';
+    lastLeagueError = 'Clans are unavailable right now.';
     return null;
   }
 
@@ -874,7 +900,7 @@ async function leagueRpc(fn, args, unwrap = true) {
     if (error) {
       const code = leagueErrorCode(error);
       lastLeagueCode  = code;
-      lastLeagueError = LEAGUE_REFUSALS[code] || 'Leagues are unavailable right now.';
+      lastLeagueError = LEAGUE_REFUSALS[code] || 'Clans are unavailable right now.';
       console.warn(fn + ':', error.message, '→', code);
       return null;
     }
@@ -882,7 +908,7 @@ async function leagueRpc(fn, args, unwrap = true) {
   } catch (e) {
     console.warn(fn + ' threw:', e);
     lastLeagueCode  = 'league_unavailable';
-    lastLeagueError = 'Leagues are unavailable right now.';
+    lastLeagueError = 'Clans are unavailable right now.';
     return null;
   }
 }
@@ -986,6 +1012,82 @@ async function getLeagueBoard(key, scope) {
     p_key:   k,
     p_scope: (s === 'week' || s === 'best') ? s : 'today',
   });
+}
+
+// ── Global leaderboards ──────────────────────────────────────
+// get_global_board(p_scope, p_limit) → { scope, duration_seconds, generated_at,
+//   rows: [{ rank, username, score }] }. The contract is
+// docs/leaderboards-design.md.
+//
+// Four things separate this from the clan wrappers above, and each of them is
+// the reason it is not simply another leagueRpc() caller:
+//
+//   * It is granted to `anon`. A leaderboard nobody can read while signed out
+//     is not a leaderboard, and this is the one page worth landing a stranger
+//     on — so there is no account check here and no signed-out branch to write.
+//   * It has its OWN error slot. The Leaderboards page renders a global board
+//     and the clan list at the same time, from two calls in flight together.
+//     Sharing lastLeagueError would let whichever failed second describe the
+//     other one's failure, which is how a working clan list ends up reporting
+//     a leaderboard outage.
+//   * The scope is passed through as it was given, never coerced to a default.
+//     The contract says an unknown scope is an error and never a silent
+//     fallback to a different board; a client that quietly rewrote it would
+//     hide exactly the bug that rule exists to catch.
+//   * An unusable payload is a FAILURE, not an empty board. `rows: []` is a
+//     real and currently common answer — nobody has played today — and it must
+//     reach the page as an empty board. A payload with no `rows` array at all
+//     (the error payload an unknown scope returns) must not, or a broken
+//     deployment renders as an unpopular site.
+//
+// Nothing here is user-controlled except `username`, which the caller escapes.
+
+// The scopes get_global_board accepts. Exported as a constant so the page's
+// tab control and this file cannot drift apart.
+const GLOBAL_BOARD_SCOPES = ['daily', 'today', 'all_time'];
+
+// A sentence for the user when the last getGlobalBoard() failed; null when it
+// succeeded. Only ever one sentence — the database's own message is logged and
+// shown to nobody.
+let lastGlobalBoardError = null;
+
+async function getGlobalBoard(scope, limit) {
+  lastGlobalBoardError = null;
+
+  if (!dbReady()) {
+    lastGlobalBoardError = 'Leaderboards are unavailable right now.';
+    return null;
+  }
+
+  const n = Number(limit);
+  const args = {
+    p_scope: String(scope ?? '').toLowerCase().trim(),
+    // Always sent, so this works whether or not p_limit has a default. The
+    // server clamps it; asking for a million rows is the server's problem to
+    // refuse, not this function's to pre-empt.
+    p_limit: Number.isFinite(n) && n > 0 ? Math.round(n) : 25,
+  };
+
+  try {
+    const { data, error } = await supabaseClient.rpc('get_global_board', args);
+    if (error) {
+      lastGlobalBoardError = 'Leaderboards are unavailable right now.';
+      console.warn('get_global_board:', error.message);
+      return null;
+    }
+
+    const payload = unwrapRpc(data);
+    if (!payload || !Array.isArray(payload.rows)) {
+      lastGlobalBoardError = 'Leaderboards are unavailable right now.';
+      console.warn('get_global_board: unusable payload for scope', args.p_scope, payload);
+      return null;
+    }
+    return payload;
+  } catch (e) {
+    console.warn('get_global_board threw:', e);
+    lastGlobalBoardError = 'Leaderboards are unavailable right now.';
+    return null;
+  }
 }
 
 // ── Usernames ────────────────────────────────────────────────

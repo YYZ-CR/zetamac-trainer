@@ -149,8 +149,19 @@ leaderboard, and it is the one page worth landing a stranger on.
   another duration, and `daily_puzzles.duration_seconds` is a real column.
 - A player whose profile is **private is still on the board.** The board shows a
   username and a score, which is what a leaderboard is; `is_public` governs whether
-  the *profile page* is readable, and the row's name links there only when it is.
-  This is a deliberate distinction and the test suite pins it.
+  the *profile page* is readable, not whether the score counts. The test suite pins
+  this.
+- **The board links no username at all**, and that follows from the row shape rather
+  than contradicting it. The payload carries no `is_public` — by design it carries no
+  field beyond `rank`, `username`, `score` — so the page cannot tell a published
+  profile from a private one, and public is opt-in and off by default. Linking every
+  row would send most clicks to "this profile is private", and a link that usually
+  fails teaches people not to press the ones that work. So one rule holds site-wide:
+  **a linked username always means a published profile.** A clan board has the flag
+  and does link; a global board does not and does not.
+- An unknown scope returns `{ok: false, error: 'invalid_scope', scope: <echoed>}` and
+  no `rows` key. A client should treat **any payload without a `rows` array** as a
+  failure rather than as an empty board — the two must never look alike.
 
 ### What the suite must prove
 
@@ -185,5 +196,9 @@ the invite copy. The RPC error codes themselves (`league_not_found`,
 client maps them to sentences that say "clan".
 
 A clan board and a global board should look like the same object at two scales —
-same row shape, same type, same ranking rules. If a clan board still shows a metric
-the global boards do not, that is a difference worth having a reason for.
+same row shape, same type, same numbering. They are not identical and should not be:
+a clan board ranks a fixed roster over the day's puzzle and offers a seven-day mean,
+which no global board does, and it can show an owner tag, a highlighted own-row and
+members who have not played, because it has a roster and an `is_you` to work from.
+Every one of those has a reason a global board cannot have. **A difference without
+one is a drift.**

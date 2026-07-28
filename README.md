@@ -33,9 +33,28 @@ Arbitration runs on time-since-the-question-appeared, clamped against what the
 server itself observed, because awarding the point to whoever's packet arrived
 first would make it a contest of who has the better connection.
 
-**Private leagues** — an invite code, a named group, and a board over the day's
-puzzle. Being 3rd of 6 behind people you know is a better reason to practice than
-being 4,000th behind strangers.
+**Leaderboards** at `/leagues.html` — the global boards first, then your clans.
+
+Three global boards behind a tab control: **Today's Daily** (rank on today's puzzle),
+**Today's Best** and **All-Time Best** (the best run per player, today or ever). All
+three are fixed at **120-second runs**, and only runs the **server** scored are
+eligible — daily attempts and duel runs. Ordinary solo and practice runs are written
+straight to `game_sessions` by the client with the public anon key, so the moment they
+fed a public ranking the top of it would be whoever first typed a large number; they
+still drive your own dashboard. The boards need **no account** and render signed out.
+Nobody having played yet is a normal state and reads as an invitation, never as a
+failure, and no placeholder row is ever drawn.
+
+**Clans** — an invite code, a named group, and a board over the day's puzzle, below
+the global boards on the same page. Being 3rd of 6 behind people you know is a better
+reason to practice than being 4,000th behind strangers. Clans need an account, because
+one attempt each cannot be enforced against somebody who can come back as somebody
+else.
+
+> The schema still says `league` — `leagues`, `league_members`, `create_league`, the
+> `league_*` error codes — and `leagues.html` is still the file name, so invite links
+> already sent keep resolving. `docs/leaderboards-design.md` is where that gap is
+> written down: **`league` in the schema means `clan` in the product.**
 
 **Your dashboard** opens on a five-tile record of everything you have done — total
 games, questions answered, your best score, days practiced and current day streak —
@@ -67,7 +86,7 @@ offered at the end of a run.
 one place. The public/private toggle lives here rather than on the dashboard: the
 dashboard is about what you have scored, and this is about who may see it.
 
-A username is the identity every leaderboard, league board and duel names you by, so
+A username is the identity every leaderboard, clan board and duel names you by, so
 it is held to it: 3–20 characters of `A-Za-z0-9_-`, no name that collides with an
 existing one by case alone, and **one change every 30 days** — the first one you set
 is free. The rules are the database's, not the page's. `set_username` is the only way
@@ -87,15 +106,15 @@ set one), and the button stays disabled until that matches. The delete itself is
 always the caller's. On success the page signs you out before it navigates, because
 the access token stays valid until it expires on its own.
 
-Deletion is not a `DELETE FROM auth.users`: a league you own would take every other
+Deletion is not a `DELETE FROM auth.users`: a clan you own would take every other
 member's board down with it, and your old sessions would keep feeding everybody's
-percentile. So each row has a stated fate — leagues you own are handed to their
+percentile. So each row has a stated fate — clans you own are handed to their
 longest-standing remaining member, duels you created go with you, duels you only
 played in stay and show you as a deleted account, and your username is released.
 `docs/account-deletion.md` is the contract, and `supabase/account.sql` implements it.
 
 **A first-run walkthrough.** A first visit to the home page opens a seven-step tour:
-a welcome, then the analysis, practice mode, the daily, duels, leagues and the
+a welcome, then the analysis, practice mode, the daily, duels, the leaderboards and the
 profile — because all of it sits *behind* a run the visitor has not done yet. The
 welcome step answers the two questions that come before any feature — **playing needs
 no account**, and signing in is what saves your history, puts you on the boards and
@@ -158,11 +177,12 @@ Apply these **by hand** in the Supabase SQL editor, in this order:
 | `supabase/daily.sql` | Zetamac Daily, server-authoritative scoring |
 | `supabase/duels.sql` | duels — **depends on `daily.sql`** for the question generator |
 | `supabase/steal.sql` | steal mode — must go **immediately after `duels.sql`** |
-| `supabase/leagues.sql` | private leagues |
+| `supabase/leagues.sql` | clans — invite codes, membership, clan boards (schema name: leagues) |
+| `supabase/leaderboards.sql` | `get_global_board` — the three global boards; **after `steal.sql` and `leagues.sql`** |
 | `supabase/settings.sql` | `set_username`, rename cooldown, column-level grants |
 | `supabase/account.sql` | `delete_account` — the ordered cascade for deleting an account |
 
-Four ordering constraints, all real:
+Five ordering constraints, all real:
 
 - `duels.sql` calls functions defined in `daily.sql`, so daily comes first.
 - **`steal.sql` goes immediately after `duels.sql`, and `duels.sql` is never applied
@@ -171,6 +191,10 @@ Four ordering constraints, all real:
   afterwards puts that original back, and `create_duel(120)` then matches two
   functions and fails as ambiguous. Re-apply `steal.sql` straight after any
   re-application of `duels.sql`.
+- **`leaderboards.sql` goes after `steal.sql`.** It reads `duel_runs` and `duels`,
+  and `steal.sql` is the last file that changes their shape. It replaces nothing —
+  every object in it is new — so re-applying an earlier file cannot disturb it and
+  re-applying it cannot disturb an earlier one.
 - **`settings.sql` goes after every file that touches `profiles`.** It revokes the
   client's column grants on `profiles` and replaces `username_available`. Re-running
   `hardening.sql` after it would hand those grants back and undo half of it. If you
@@ -189,7 +213,7 @@ Supabase's SQL editor will warn *"this query includes destructive operations"* o
 most of these. It is a static scan: the files contain `REVOKE` (removing default
 grants from tables the same file just created), `ALTER TABLE … ENABLE ROW LEVEL
 SECURITY`, and `DELETE` statements that sit **inside function bodies** and only run
-when a user leaves a league or deletes their own account. There is no `DROP TABLE`
+when a user leaves a clan or deletes their own account. There is no `DROP TABLE`
 or `TRUNCATE` anywhere.
 
 ## Testing
@@ -237,7 +261,7 @@ project.
 
 `supabase/test/race-*.sh` drive real concurrent sessions at the three places where a
 check-then-act bug would hide: claiming the single opponent slot in a duel, the last
-seat in a full league, and two steal-mode players answering the same question at
+seat in a full clan, and two steal-mode players answering the same question at
 once. Each ends with a **negative control** — the same race with the guard removed —
 because a race test that has never failed proves nothing.
 
@@ -277,7 +301,12 @@ stored questions, and anything else the client attaches is discarded.
 
 `docs/` holds the contracts the client and database were both built against —
 `social-api.md`, `daily-design.md`, `duels-design.md`, `steal-mode-design.md`,
-`leagues-design.md`, `account-deletion.md`, `walkthrough-design.md`. Settle the shape there first, then build both sides against it.
+`leagues-design.md`, `leaderboards-design.md`, `account-deletion.md`,
+`walkthrough-design.md`. Settle the shape there first, then build both sides against it.
+
+`leaderboards-design.md` supersedes the naming in `leagues-design.md` and adds the
+global boards; the clan mechanics in `leagues-design.md` are unchanged and still
+authoritative.
 
 `account-deletion.md` is the one to read before touching a foreign key: it states the
 fate of every row that mentions an account, and `supabase/account.sql` is that list in
