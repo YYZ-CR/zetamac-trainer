@@ -33,6 +33,11 @@ Serve with `python3 -m http.server 8099 --bind 127.0.0.1` — never `npx serve`.
 
 ## 1. Blocking deploy
 
+- [ ] **Re-apply `supabase/daily.sql` and `supabase/duels.sql`** — they carry a
+      scoring fix. Any daily or duel score recorded before it is wrong (too low):
+      every question a player fumbled scored zero. Existing rows are not corrected
+      by re-applying; if the leaderboard already has real scores on it, they were
+      computed under the old rule.
 - [ ] **Apply `supabase/settings.sql`** in the Supabase SQL editor. It must go
       **last**, after `leagues.sql`. It revokes the client's column grants on
       `profiles` and replaces `username_available`; re-running `hardening.sql`

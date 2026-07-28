@@ -154,6 +154,37 @@ BEGIN
   RAISE NOTICE '--- submit_daily scoring OK ---';
 END $$;
 
+-- ── A fumbled question still counts ─────────────────────────────
+-- Same defect as duels: the client logs a wrong attempt then the correction
+-- under one `i`, and scoring only the first entry threw every correction away.
+DO $$
+DECLARE a JSONB; qs JSONB; ans JSONB; r JSONB;
+BEGIN
+  PERFORM pg_temp.as_user('player12');
+  a  := public.start_daily();
+  qs := a->'questions';
+
+  SELECT jsonb_agg(e ORDER BY ord) INTO ans FROM (
+    SELECT (i*2)     AS ord,
+           jsonb_build_object('i', i, 'value', (qs->i->>'answer')::INT + 3,
+                              'elapsed_ms', (i*2+1)*500) AS e
+      FROM generate_series(0, 9) i
+    UNION ALL
+    SELECT (i*2 + 1) AS ord,
+           jsonb_build_object('i', i, 'value', (qs->i->>'answer')::INT,
+                              'elapsed_ms', (i*2+2)*500) AS e
+      FROM generate_series(0, 9) i
+  ) z;
+
+  r := public.submit_daily(ans);
+  PERFORM pg_temp.ok((r->>'score')::INT = 10,
+    'daily: a question answered wrong then right still scores');
+  PERFORM pg_temp.ok((r->>'total_answered')::INT = 10,
+    'daily: counted as ten answered, not twenty');
+
+  RAISE NOTICE '--- daily fumbled answers OK ---';
+END $$;
+
 -- ── Expiry ──────────────────────────────────────────────────────
 DO $$
 DECLARE a JSONB; r JSONB; ok BOOLEAN;

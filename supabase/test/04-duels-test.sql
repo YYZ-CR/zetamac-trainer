@@ -246,6 +246,71 @@ BEGIN
   RAISE NOTICE '--- scoring OK ---';
 END $$;
 
+-- ── A fumbled question still counts ─────────────────────────────
+-- The client logs a wrong attempt and then the correction under the SAME `i`.
+-- Scoring only the first entry per index scored the wrong attempt and threw the
+-- right one away, so every question a player fumbled scored zero. Ten questions,
+-- all eventually correct, scored 0 — the run graph showed a pace of 62 and the
+-- final score came back 45.
+DO $$
+DECLARE k TEXT; run JSONB; qs JSONB; ans JSONB; r JSONB;
+BEGIN
+  PERFORM pg_temp.as_user('hexadecimal');
+  k   := (public.create_duel(120))->>'duel_key';
+  run := public.start_duel_run(k, NULL);
+  qs  := run->'questions';
+
+  SELECT jsonb_agg(e ORDER BY ord) INTO ans FROM (
+    SELECT (i*2)     AS ord,
+           jsonb_build_object('i', i, 'value', (qs->i->>'answer')::INT + 7,
+                              'elapsed_ms', (i*2+1)*500) AS e
+      FROM generate_series(0, 9) i
+    UNION ALL
+    SELECT (i*2 + 1) AS ord,
+           jsonb_build_object('i', i, 'value', (qs->i->>'answer')::INT,
+                              'elapsed_ms', (i*2+2)*500) AS e
+      FROM generate_series(0, 9) i
+  ) z;
+
+  r := public.submit_duel_run(k, NULL, ans);
+  PERFORM pg_temp.ok((r->>'score')::INT = 10,
+    'a question answered wrong then right scores — all 10 count');
+  PERFORM pg_temp.ok((r->>'total_answered')::INT = 10,
+    'and counts as ten questions answered, not twenty');
+  PERFORM pg_temp.ok((r->>'accuracy')::NUMERIC = 1,
+    'accuracy is 1 when every question was eventually right');
+
+  RAISE NOTICE '--- fumbled answers OK ---';
+END $$;
+
+-- A question answered wrong and never corrected must still score 0.
+DO $$
+DECLARE k TEXT; run JSONB; qs JSONB; ans JSONB; r JSONB;
+BEGIN
+  PERFORM pg_temp.as_user('hexadecimal');
+  k   := (public.create_duel(120))->>'duel_key';
+  run := public.start_duel_run(k, NULL);
+  qs  := run->'questions';
+
+  -- 6 questions: the first 3 corrected, the last 3 left wrong.
+  SELECT jsonb_agg(e ORDER BY ord) INTO ans FROM (
+    SELECT (i*2) AS ord,
+           jsonb_build_object('i', i, 'value', (qs->i->>'answer')::INT + 7,
+                              'elapsed_ms', (i*2+1)*400) AS e
+      FROM generate_series(0, 5) i
+    UNION ALL
+    SELECT (i*2 + 1) AS ord,
+           jsonb_build_object('i', i, 'value', (qs->i->>'answer')::INT,
+                              'elapsed_ms', (i*2+2)*400) AS e
+      FROM generate_series(0, 2) i
+  ) z;
+
+  r := public.submit_duel_run(k, NULL, ans);
+  PERFORM pg_temp.ok((r->>'score')::INT = 3,
+    'only the corrected questions score — a wrong answer is still wrong');
+  PERFORM pg_temp.ok((r->>'total_answered')::INT = 6, 'all six count as answered');
+END $$;
+
 -- ── Malformed input must not 500 ────────────────────────────────
 DO $$
 DECLARE k TEXT; bad JSONB; threw BOOLEAN;

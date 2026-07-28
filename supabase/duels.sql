@@ -1015,6 +1015,9 @@ DECLARE
   v_prev_ms  NUMERIC := -1;
   v_i        INTEGER;
   v_seen     BOOLEAN[];
+  -- Separate from v_seen: a question is ANSWERED once however many
+  -- attempts arrive, but it is CORRECT if any one of them was right.
+  v_right    BOOLEAN[];
   v_kept     JSONB := '[]'::JSONB;
   v_kept_arr JSONB[] := ARRAY[]::JSONB[];
   v_score    INTEGER := 0;
@@ -1099,7 +1102,8 @@ BEGIN
   END IF;
 
   IF v_total_q > 0 THEN
-    v_seen := array_fill(FALSE, ARRAY[v_total_q]);
+    v_seen  := array_fill(FALSE, ARRAY[v_total_q]);
+    v_right := array_fill(FALSE, ARRAY[v_total_q]);
   END IF;
 
   -- Walked in order rather than aggregated, because the non-decreasing
@@ -1143,22 +1147,36 @@ BEGIN
     -- of an otherwise ordered run.
     CONTINUE WHEN v_ms < v_prev_ms;
 
-    -- The same question answered twice would otherwise score twice.
-    CONTINUE WHEN COALESCE(v_seen[v_i + 1], FALSE);
-    v_seen[v_i + 1] := TRUE;
+    -- Do NOT skip a repeated index. The client logs a wrong attempt and
+    -- then the correction, both under the same `i` — that is how a
+    -- fumbled keystroke reaches the server. Skipping everything after
+    -- the first entry scored the wrong attempt and discarded the right
+    -- one, so every question a player fumbled scored zero even though
+    -- they answered it and the game advanced. A run of ten questions,
+    -- all eventually correct, scored 0.
+    --
+    -- So: a question counts toward `answered` once, and scores if ANY
+    -- attempt at it was correct. Scoring twice is prevented by v_right,
+    -- not by refusing to look.
+    IF NOT COALESCE(v_seen[v_i + 1], FALSE) THEN
+      v_seen[v_i + 1] := TRUE;
+      v_answered := v_answered + 1;
+    END IF;
 
     -- Accepted. It counts as answered whatever `value` turned out to
     -- be: a non-numeric value is a wrong answer, not a free pass, or a
     -- client could inflate its accuracy by sending junk it knows will
     -- be discarded.
-    v_answered := v_answered + 1;
     v_prev_ms  := v_ms;
 
     IF jsonb_typeof(v_elem->'value') = 'number'
        AND jsonb_typeof(v_d.questions->v_i->'answer') = 'number'
        AND (v_elem->>'value')::NUMERIC
            = (v_d.questions->v_i->>'answer')::NUMERIC THEN
-      v_score := v_score + 1;
+      IF NOT COALESCE(v_right[v_i + 1], FALSE) THEN
+        v_right[v_i + 1] := TRUE;
+        v_score := v_score + 1;
+      END IF;
     END IF;
 
     -- Rebuilt from the three fields this function actually read, so
