@@ -964,4 +964,80 @@ BEGIN
   RAISE NOTICE '--- standing invariants OK ---';
 END $$;
 
+-- ════════════════════════════════════════════════════════════════
+-- 7. A finished duel does not put its opponent side back on the market
+--
+-- LAST on purpose. This assertion currently FAILS, and \set
+-- ON_ERROR_STOP aborts the file at the first failure — put anywhere
+-- else it would mask the ~30 assertions after it. Everything above
+-- this line passes.
+--
+-- docs/account-deletion.md §4 keeps a duel the caller played as the
+-- opponent, and says the caller's run "keeps its score and loses its
+-- owner — user_id is ON DELETE SET NULL, so the cascade already does
+-- the right thing here, and the opponent renders as a deleted account
+-- rather than vanishing mid-comparison."
+--
+-- The cascade nulls duels.opponent_id too, and to start_duel_run a
+-- duel with a NULL opponent_id is an UNCLAIMED duel. So the finished
+-- side goes back on the market: the next signed-in visitor to the
+-- creator's link is handed side='opponent', adopts the existing run
+-- row, and is rendered — to the creator and to themselves — as having
+-- scored the deleted player's score on a duel they never played.
+--
+-- The opponent does not render as a deleted account. It renders as
+-- whoever opened the link next.
+-- ════════════════════════════════════════════════════════════════
+
+DO $$
+DECLARE
+  maker    UUID; leaver UUID; stranger UUID;
+  k        TEXT; did    UUID; v JSONB;
+BEGIN
+  maker    := pg_temp.acct_new('acct_fin_c');
+  leaver   := pg_temp.acct_new('acct_fin_o');
+  stranger := pg_temp.acct_new('acct_fin_x');
+
+  PERFORM pg_temp.acct_as(maker);
+  k := (public.create_duel(120))->>'duel_key';
+  SELECT id INTO did FROM public.duels WHERE duel_key = k;
+  PERFORM pg_temp.acct_play(k, 11);
+
+  PERFORM pg_temp.acct_as(leaver);
+  PERFORM pg_temp.acct_play(k, 6);
+
+  PERFORM pg_temp.ok((SELECT d.status FROM public.duels d WHERE d.id = did) = 'complete',
+    'fixture: both sides played, the duel is complete');
+  PERFORM pg_temp.ok(
+    (SELECT rr.score FROM public.duel_runs rr
+      WHERE rr.duel_id = did AND rr.side = 'opponent') = 6,
+    'fixture: the opponent scored exactly 6');
+
+  PERFORM pg_temp.acct_as(leaver);
+  PERFORM pg_temp.ok((public.delete_account('acct_fin_o')->>'ok')::BOOLEAN IS TRUE,
+    'fixture: the opponent deletes their account');
+
+  -- The stranger has never seen this duel before.
+  PERFORM pg_temp.acct_as(stranger);
+  BEGIN
+    v := public.start_duel_run(k, NULL);
+  EXCEPTION WHEN OTHERS THEN
+    v := NULL;   -- refusing by raising is a perfectly good refusal
+  END;
+
+  PERFORM pg_temp.ok(
+    (SELECT d.opponent_id FROM public.duels d WHERE d.id = did) IS NULL,
+    'a stranger cannot claim the opponent side of a FINISHED duel whose opponent was deleted');
+  PERFORM pg_temp.ok(
+    (SELECT rr.user_id FROM public.duel_runs rr
+      WHERE rr.duel_id = did AND rr.side = 'opponent') IS NULL,
+    'and cannot adopt the deleted opponent''s finished run row');
+
+  v := public.get_duel_by_key(k, NULL);
+  PERFORM pg_temp.ok(v->'opponent'->>'username' IS NULL,
+    'the finished duel still renders its opponent as a deleted account, not as the stranger');
+
+  RAISE NOTICE '--- finished-duel reclaim OK ---';
+END $$;
+
 SELECT 'ALL ACCOUNT CONTRACT TESTS PASSED' AS result;

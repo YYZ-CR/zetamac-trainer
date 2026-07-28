@@ -336,6 +336,37 @@ $$;
 
 REVOKE ALL ON FUNCTION public.duel_role(UUID, UUID, TEXT, UUID, TEXT) FROM PUBLIC;
 
+-- Is the opponent side of this duel already spoken for by a RUN,
+-- regardless of what duels.opponent_id currently says?
+--
+-- duel_role answers "who is this caller" from the ids alone, which is
+-- correct for every path that sets them. It is not enough on its own,
+-- because duels.opponent_id is ON DELETE SET NULL: when an opponent
+-- deletes their account, their id is cleared while their finished run
+-- stays — deliberately, so the creator keeps their result — and the
+-- duel then looks unclaimed. It is not. The next stranger to open the
+-- link would be handed the side AND the deleted player's score, and
+-- the creator's result page would silently change who they played.
+--
+-- So the occupancy question is asked of duel_runs, which is where the
+-- fact actually lives: a side that has a run row has a player, past
+-- tense or present. This also covers an opponent run left behind by
+-- any future path that clears the id.
+CREATE OR REPLACE FUNCTION public.duel_side_played(p_duel_id UUID, p_side TEXT)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.duel_runs r
+    WHERE r.duel_id = p_duel_id AND r.side = p_side
+  );
+$$;
+
+REVOKE ALL ON FUNCTION public.duel_side_played(UUID, TEXT) FROM PUBLIC;
+
 -- When a run's clock stops.
 --
 -- LEAST() is the load-bearing part. A run started five seconds before
@@ -569,6 +600,14 @@ BEGIN
 
   v_role := public.duel_role(v_d.creator_id, v_d.opponent_id,
                              v_d.opponent_guest_token, p_uid, p_token);
+
+  -- The page must not offer a duel that only LOOKS open. An opponent
+  -- who deleted their account leaves their run behind and their id
+  -- cleared, and start_duel_run will refuse the claim — so telling a
+  -- visitor the side is free would offer them a button that errors.
+  IF v_role = 'open' AND public.duel_side_played(v_d.id, 'opponent') THEN
+    v_role := 'spectator';
+  END IF;
 
   -- The outcome block exists so a walkover is legible AS a walkover.
   -- "You won 84–0" and "they never turned up" are different social
@@ -916,6 +955,11 @@ BEGIN
     WHERE id = v_d.id
       AND opponent_id IS NULL
       AND opponent_guest_token IS NULL
+      -- A side that already has a run row has a player, whatever the
+      -- id column says — see duel_side_played. Written into the
+      -- statement rather than checked above it so that "you cannot
+      -- inherit somebody else's run" is true of the write itself.
+      AND NOT public.duel_side_played(id, 'opponent')
       -- Unreachable given duel_role's first branch, and written down
       -- anyway. This is the predicate that makes "the creator cannot
       -- occupy the opponent slot" true of the statement rather than
@@ -931,6 +975,14 @@ BEGIN
     SELECT * INTO v_d FROM public.duels WHERE id = v_d.id;
     v_role := public.duel_role(v_d.creator_id, v_d.opponent_id,
                                v_d.opponent_guest_token, v_uid, v_token);
+
+    -- Still 'open' after the update means the guard above refused it,
+    -- and the only guard that can refuse without a competing claim is
+    -- the abandoned-run one. Naming it 'spectator' here makes the
+    -- refusal below fire for the right reason.
+    IF v_role = 'open' AND public.duel_side_played(v_d.id, 'opponent') THEN
+      v_role := 'spectator';
+    END IF;
 
     IF v_role <> 'opponent' THEN
       RAISE EXCEPTION 'duel_already_has_opponent'

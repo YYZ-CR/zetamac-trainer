@@ -101,6 +101,14 @@ account is gone and everything above is settled, or nothing happened.
    `ON DELETE SET NULL`, so the cascade already does the right thing here, and the
    opponent renders as a deleted account rather than vanishing mid-comparison.
 
+   **`duels.opponent_id` is nulled by that same cascade, and a duel with a null
+   `opponent_id` used to read as unclaimed.** A stranger opening the creator's link
+   was handed the side *and* the deleted player's finished run, and the creator's
+   result page silently changed who they had played. The fix is in `duels.sql`, not
+   here: occupancy is a question for `duel_runs`, where the fact actually lives — a
+   side with a run row has a player, past tense or present. See
+   `duel_side_played()`.
+
    A duel the caller had claimed but never finished releases the slot:
    `opponent_id` is cleared and the unfinished run row is deleted, so the creator's
    link is live again for whatever remains of its 48 hours.
@@ -134,7 +142,14 @@ account is gone and everything above is settled, or nothing happened.
 ```
 
 Counts, not because anyone needs them, but because a test that asserts on them
-catches a step that silently did nothing. On `{ok: false}` only `error` is present.
+catches a step that silently did nothing. **They are never rendered** — success is
+followed immediately by a sign-out and a redirect, so there is no screen left on
+which a summary could be shown. On `{ok: false}` only `error` is present.
+
+`leagues_left` counts membership rows removed, not leagues processed. A league owned
+but never joined — unreachable through `leagues.sql` today, and the exact row the
+`owner_id` cascade would destroy — is transferred correctly and leaves the count at
+zero.
 
 ### What it must not do
 
@@ -157,8 +172,17 @@ to happen.
   attempts gone, leagues owned handed on or removed, duels created removed, the
   username released, and **this cannot be undone**.
 - On success: `supabase.auth.signOut()` immediately — the JWT stays valid until it
-  expires otherwise — then redirect to the home page. Signing out is not optional
-  and not deferred to the next page load.
+  expires otherwise — then redirect to `index.html`. Signing out is not optional and
+  not deferred to the next page load.
+- The client's match must be the **same trim-and-case-fold the server does**, not
+  `===`. A button that enables on a string the server will reject is a lie; one that
+  stays disabled on a string the server would accept is a dead end with no way out
+  of it.
+- Every `ok:false` code needs its own copy: `confirm_mismatch`,
+  `account_requires_account`, and whatever the client's own wrapper produces for a
+  missing migration or a dead network. A client that branches only on
+  `confirm_mismatch` renders a network sentence for the rest and blames the network
+  for something else.
 - On `confirm_mismatch`: an inline message, no navigation.
 - On any network failure: say the account was **not** deleted. An ambiguous message
   after a failed delete is the worst possible copy.

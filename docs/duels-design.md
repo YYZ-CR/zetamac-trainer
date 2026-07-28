@@ -116,6 +116,23 @@ All `SECURITY DEFINER`, `SET search_path = public`, matching `social.sql`.
 - A guest returning with the same token resumes their own run rather than being
   treated as a third party. That token is the only identity they have.
 
+## A side with a run has a player
+
+`duels.opponent_id` says who claimed the opponent side. It is not, on its own, the
+answer to "is that side taken", because the column is `ON DELETE SET NULL`: when an
+opponent deletes their account the id is cleared while the run stays — deliberately,
+so the creator keeps their result.
+
+For a while that made a finished duel look unclaimed. A stranger opening the
+creator's link was handed the side *and* the deleted player's completed run, and the
+creator's result page silently changed who they had played.
+
+So occupancy is asked of `duel_runs`, where the fact lives: `duel_side_played()`. A
+side with a run row has a player, past tense or present. The claim in
+`start_duel_run` carries that as a predicate on the UPDATE itself rather than as a
+check above it, and `get_duel_by_key` reports such a side as taken so the page never
+offers a button that would error.
+
 ## Expiry
 
 48 hours from creation. An unplayed duel expires and the creator is told plainly;
