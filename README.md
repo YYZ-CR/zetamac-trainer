@@ -73,6 +73,17 @@ longest-standing remaining member, duels you created go with you, duels you only
 played in stay and show you as a deleted account, and your username is released.
 `docs/account-deletion.md` is the contract, and `supabase/account.sql` implements it.
 
+**A first-run walkthrough.** A first visit to the home page opens a six-step tour of
+everything above — the analysis, practice mode, the daily, duels, leagues and the
+profile — because all of it sits *behind* a run the visitor has not done yet. It is
+shown once and closes five ways (Esc, ×, Skip, the backdrop, or finishing), every one
+of which counts as seen, and it is offered again from "How this works" in the footer.
+"Seen it" is a `localStorage` key holding the tour's version, so bumping that version
+shows a materially changed tour again; the cost is that it reappears on a second
+device, which is the right trade when most first-time visitors have no account to
+hang it on. `docs/walkthrough-design.md` is the contract, and the step list is one
+array at the top of `js/tour.js`.
+
 Two themes: the original Zetamac light palette, reproduced value for value, and a
 Monkeytype-flavoured dark one.
 
@@ -217,18 +228,11 @@ demo videos.
 
 ## Planned
 
-`docs/TODO.md` is the full work list. In short:
-
-**A first-run walkthrough.** Someone arriving for the first time sees a config
-screen and a Start button, and nothing tells them the daily, duels, leagues,
-practice mode or the per-operation analysis exist. A one-time popup should walk
-through each feature, be dismissible, and never appear twice.
-
-Worth building **last**, deliberately: a walkthrough is a description of the
-product, so every feature added before it is written is a feature the tour has to
-be rewritten for. It also needs a decision on where "seen it" is stored —
-localStorage means it reappears on a second device, a profile column means it
-follows the account but does nothing for signed-out visitors.
+`docs/TODO.md` is the full work list. No feature is outstanding. What is left there
+is deployment — the newer migrations still have to be applied by hand against the
+real project, in the order of the table above — plus the demo video below and the
+known gaps that file lists (`config_key` is still a 32-bit content hash, and
+background-tab timer drift has never been reproduced in headless Chromium).
 
 ## Licence
 

@@ -2954,3 +2954,218 @@ body.settings-page {
   background: none;
   border-color: var(--c-border-soft);
 }
+
+/* ============ FIRST-RUN WALKTHROUGH ============
+   docs/walkthrough-design.md. A modal, not a strip: a banner on the config
+   screen is something a first-time visitor's eye slides past on the way to the
+   Start button, which is the same as not building it. It is small, escapable
+   four ways, and shown once.
+
+   No new tokens are declared here — every colour below is one of the tokens at
+   the top of this file, so both themes are covered by construction rather than
+   by remembering to edit two blocks. */
+
+.tour-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--c-scrim-dark);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  /* Above the auth modal (999): the tour opens on first load and the log-in
+     modal must not be able to surface through it. */
+  z-index: 1000;
+}
+
+.tour-modal {
+  position: relative;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  width: 100%;
+  max-width: 420px;
+  padding: 24px 26px 18px;
+  /* The copy differs in length step to step; a fixed height stops the panel
+     jumping around under the cursor as somebody clicks Next. */
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 40px);
+  animation: tour-in 140ms ease-out;
+}
+
+@keyframes tour-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tour-modal { animation: none; }
+}
+
+.tour-eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--c-ink-faint);
+  margin-bottom: 6px;
+}
+
+.tour-title {
+  font-size: 19px;
+  line-height: 1.25;
+  color: var(--c-ink-max);
+  margin-bottom: 12px;
+  /* Room for the close button. */
+  padding-right: 24px;
+}
+
+.tour-body {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--c-ink-body);
+  flex: 1 1 auto;
+  overflow-y: auto;
+}
+
+.tour-body p {
+  margin-bottom: 10px;
+}
+
+.tour-body code {
+  color: var(--c-ink-strong);
+  font-size: 13px;
+}
+
+/* The worked example from the run analysis, quoted so it reads as output of
+   the product rather than as more prose. */
+.tour-example {
+  background: var(--c-banner-bg);
+  border-left: 3px solid var(--c-banner-border);
+  color: var(--c-ink-strong);
+  padding: 7px 10px;
+  font-size: 13px;
+}
+
+.tour-dots {
+  display: flex;
+  gap: 5px;
+  margin: 14px 0 12px;
+}
+
+.tour-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--c-ink-dim2);
+}
+
+.tour-dot.active {
+  background: var(--c-accent);
+}
+
+.tour-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tour-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tour-counter {
+  font-size: 12px;
+  color: var(--c-ink-faint);
+  margin-right: 2px;
+}
+
+.tour-back,
+.tour-next {
+  font-family: inherit;
+  font-size: 13px;
+  padding: 6px 12px;
+  cursor: pointer;
+  border: 1px solid var(--c-border);
+  background: none;
+  color: var(--c-ink-strong);
+}
+
+.tour-back:hover:not(:disabled) {
+  border-color: var(--c-ink-muted);
+}
+
+.tour-back:disabled {
+  color: var(--c-ink-dim);
+  border-color: var(--c-border-soft);
+  cursor: not-allowed;
+}
+
+.tour-next {
+  background: var(--c-accent);
+  color: var(--c-on-accent);
+  border-color: var(--c-accent);
+}
+
+.tour-next:hover {
+  background: var(--c-ink-muted);
+  border-color: var(--c-ink-muted);
+}
+
+.tour-skip {
+  font-family: inherit;
+  font-size: 12px;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--c-ink-faint);
+  text-decoration: underline;
+}
+
+.tour-skip:hover {
+  color: var(--c-ink-strong);
+}
+
+.tour-close {
+  position: absolute;
+  top: 6px;
+  right: 9px;
+  background: none;
+  border: none;
+  font-size: 22px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+  color: var(--c-ink-soft);
+}
+
+.tour-close:hover {
+  color: var(--c-ink-max);
+}
+
+/* The quiet way back in once the tour has been dismissed, so dismissing it is
+   not permanent. */
+.site-footer {
+  text-align: center;
+  font-size: 12px;
+  padding: 22px 15px 26px;
+  color: var(--c-ink-faint);
+}
+
+.site-footer a {
+  color: var(--c-link);
+  text-decoration: none;
+}
+
+.site-footer a:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 520px) {
+  .tour-modal { padding: 20px 18px 14px; min-height: 0; }
+  .tour-controls { flex-wrap: wrap; }
+}

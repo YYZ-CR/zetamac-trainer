@@ -91,11 +91,20 @@
     </div>
   </div>
 
+  <footer class="site-footer">
+    <a href="#" id="tour-link">How this works</a>
+  </footer>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/util.js"></script>
   <script src="js/config.js"></script>
   <script src="js/db.js"></script>
   <script src="js/auth.js"></script>
   <script src="js/index.js"></script>
+  <!-- Last, after the page's own script: the walkthrough is a description of
+       the product and must never be between a returning player and the Start
+       button. It reads localStorage before it renders anything, so a second
+       visit costs one string comparison and paints nothing. -->
+  <script src="js/tour.js"></script>
 </body>
 </html>

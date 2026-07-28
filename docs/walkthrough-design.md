@@ -26,8 +26,8 @@ and the first thing to go stale. Two consequences baked into the design:
 
 **A modal, not a strip.** It interrupts, and that is the point: the alternative is a
 banner that a first-time visitor's eye slides past on the way to the Start button,
-which is the same as not building it. It is small, escapable four ways (Esc, the
-close button, Skip, clicking the backdrop), and shown once.
+which is the same as not building it. It is small, escapable five ways — Esc, the
+close button, Skip, clicking the backdrop, and finishing it — and shown once.
 
 **`localStorage`, not a profile column.** Most first-time visitors have no account —
 that is what "first-time" means — so a profile column would miss exactly the people
@@ -35,15 +35,18 @@ the tour is for. The cost is that it reappears on a second device, which is a mi
 annoyance rather than a defect. Key: `zt_tour_seen`, value the version string it was
 dismissed at.
 
-**Versioned.** The value stored is `TOUR_VERSION`, not `true`. When the tour changes
-materially, bumping the constant shows it again to people who have seen the old one.
-Not bumped for typo fixes — a tour that reappears for no reason trains people to
-dismiss it unread.
+**Versioned, by exact match.** The value stored is `TOUR_VERSION`, not `true`, and
+the check is equality — anything that is not the current version means show, which
+covers a bump, a downgrade and a junk value alike without needing a version ordering
+that nothing here defines. Bump it when the tour changes materially, never for a typo
+fix: a tour that reappears for no reason trains people to dismiss it unread.
 
-**Home page only.** `index.html`. Someone landing on `/duel.html?d=…` came for a
-specific duel; a product tour in front of it is an obstacle. The tour is offered
-again from a quiet "How this works" link in the footer, so dismissing it is not
-permanent.
+**Home page only, and not even all of it.** `index.html` — but not
+`index.html?key=…`, which is a shared configuration link. Someone landing on
+`/duel.html?d=…` came for a specific duel and someone following a config link came to
+play that config; a product tour in front of either is an obstacle. The tour is
+offered again from a quiet "How this works" link in the footer, so dismissing it is
+never permanent.
 
 **It never blocks a returning player.** If `localStorage` says seen, nothing renders
 at all — no flash, no layout shift. The check runs before the first paint of the
@@ -95,6 +98,27 @@ the tour's job is to get somebody to their first run.
 - It must not appear on any page other than `index.html`, and must not delay first
   paint of the game itself.
 
+## The DOM contract
+
+Pinned here so the implementation and its test can be built against the same thing,
+the way every other design doc in this folder pins a shape.
+
+| id | what it is |
+|---|---|
+| `tour-overlay` | the backdrop; its presence in the DOM *is* "the tour is showing" |
+| `tour-panel` | `role="dialog"`, `aria-modal="true"`, `aria-labelledby="tour-heading"` |
+| `tour-heading` | the current step's title |
+| `tour-body` | the current step's copy |
+| `tour-dots` | one element per step, the current one marked |
+| `tour-count` | the counter, rendered `n / total` |
+| `tour-back` / `tour-next` | step controls; `tour-next` reads "Start playing" on the last step |
+| `tour-skip` / `tour-close` | the two explicit dismissals |
+| `tour-link` | the footer "How this works" link, present on every load |
+
+`localStorage['zt_tour_seen']` holds the exact `TOUR_VERSION` string and nothing else.
+
+The tour's `z-index` sits above the log-in modal's, which is on the same page.
+
 ## The test
 
 `test/browser/tour.mjs`:
@@ -102,11 +126,11 @@ the tour's job is to get somebody to their first run.
 1. Appears on a first visit to `index.html`, with step 1 showing.
 2. **Does not appear on the second visit** — the assertion the whole feature turns
    on, driven by a persisted `localStorage`, not by a page variable.
-3. Each of the four dismissal routes marks it seen and, on reload, stays gone.
+3. Each of the five dismissal routes marks it seen and, on reload, stays gone.
 4. Next / Back walk the steps, the counter matches, and the step count equals the
    length of the step array.
 5. It does not appear on `dashboard.html`, `daily.html`, `duel.html`, `leagues.html`
-   or `practice.html`.
+   or `practice.html`, nor on `index.html?key=…`.
 6. The footer link re-opens it after it has been dismissed.
-7. Bumping `TOUR_VERSION` past a stored older value shows it again.
+7. A stored value that is not the current `TOUR_VERSION` shows it again.
 8. No uncaught page errors, in both themes.
