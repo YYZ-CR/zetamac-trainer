@@ -64,20 +64,36 @@ games. The Best tile is the best at the duration you play most and says which
 single figure pooled across them would just be your longest run every time. A line
 under the tiles carries the average of your last 10 games.
 
-**Public profiles** at `/@username` are the same page for somebody else to read: the
-same five tiles, the same chart and the same per-operation breakdown
-(`+ 1.42s · − 1.66s · × 1.98s · ÷ 2.31s`), with a percentile in the line under the
-tiles. Private by default.
-**Recent games are the dashboard's alone** — `get_public_profile` returns no
-per-session rows, and a public page listing them would be a cross-user data exposure.
+**Public profiles** at `/@username` are the dashboard for somebody else to read: the
+same five tiles, the same Score Over Time chart with the same Last 20 / Last 100 /
+All Time range buttons, the same per-operation breakdown
+(`+ 1.42s · − 1.66s · × 1.98s · ÷ 2.31s`), and the same Recent Games table — with a
+percentile in the line under the tiles. Private by default.
 
-**A Share button** sits beside the username on the dashboard and on a profile page and
-hands out that `/@username` link — the native share sheet on a phone, the clipboard
-everywhere else (`Copied!` on the button for two seconds). Sharing a profile that is
-still private says so in the same breath — *"Copied — your profile is private, so only
-you can see it. Make it public in Settings."* — because the alternative is quietly
-handing somebody a link that tells them the profile does not exist. It is not shown at
-all for an account that has no username yet: there is no `/@` nothing.
+**What crosses the boundary to get there is per-session figures, not sessions.** The
+dashboard reads `game_sessions` directly; the public page cannot, so
+`get_public_profile` returns a `history` array of date, score, duration and a
+**server-computed accuracy percent**. The questions those figures came from never
+leave the server — computing accuracy in the client would have meant shipping them.
+Both pages read the same 500-session window, so "All Time" means the same span on
+each.
+
+**The Review column is the one thing a visitor does not get.** Its link needs a
+session key, and a session key opens `results.html`, which renders that game's whole
+question list. So `history[].key` is non-null only for the profile's owner, and the
+column is removed outright rather than rendered as a row of dashes — a visitor gets a
+four-column table, the owner five.
+
+**A copy-link icon** sits beside the username on the dashboard and on a profile page
+and puts that `/@username` link on the clipboard. That is all it does: it used to
+offer the platform share sheet first, which on a phone is a full-screen modal between
+a person and the one thing they wanted. The glyph becomes a tick for two seconds, and
+its accessible name changes with it, so the confirmation is not colour-only. Copying a
+link to a profile that is still private says so in the same breath — *"Copied — your
+profile is private, so only you can see it. Make it public in Settings."* — because
+the alternative is quietly handing somebody a link that tells them the profile does
+not exist. It is not shown at all for an account that has no username yet: there is no
+`/@` nothing.
 
 **A share card** rendered client-side to a canvas, in whichever theme you are using,
 offered at the end of a run.
@@ -239,11 +255,15 @@ come back.
 `test/browser/dashboard.mjs` and `test/browser/profile.mjs` are a pair: they render the
 same stubbed payload through both pages and assert the same numbers out of each, so a
 change that moves one and not the other fails. `profile.mjs` also asserts, positively,
-that the public page never reads `game_sessions` and has no per-game table in it.
-Both stub `navigator.share` and `navigator.clipboard` to cover the Share button's four
-paths — native sheet, clipboard, dismissed sheet, and the insecure context where
-`navigator.clipboard` is simply undefined — and both take the button's position from
-`getBoundingClientRect()` rather than from markup order.
+that the public page never reads `game_sessions` — its Recent Games table is built
+from `get_public_profile`'s `history` instead.
+Both stub `navigator.share` and `navigator.clipboard` to cover the copy-link button's
+paths, including the insecure context where `navigator.clipboard` is simply undefined
+and **the assertion that `navigator.share` is never called even where it exists** —
+that one is the whole point of the control, so it is tested positively rather than by
+its absence. Both take the button's position from `getBoundingClientRect()` rather
+than from markup order, and assert its `aria-label` rather than its text, because an
+icon button has no text and the label is the only name it has.
 
 All three run on every push, as three jobs in `.github/workflows/ci.yml`. The SQL job
 brings up its own `postgres:16` service, so nothing there touches a real project.

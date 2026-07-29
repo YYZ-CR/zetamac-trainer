@@ -58,7 +58,7 @@ function escapeHtml(value) {
 }
 
 // ── Sharing a profile link ────────────────────────────────────
-// One implementation of "hand this URL to somebody else", used by the Share
+// One implementation of "hand this URL to somebody else", used by the copy-link
 // control beside the username on the dashboard and on a profile page, and by
 // the Copy link button in Settings. It lives here because js/util.js is the
 // one file every page loads, and because the clipboard has enough failure
@@ -66,6 +66,11 @@ function escapeHtml(value) {
 
 // How long "Copied!" sits on a button before it goes back to its own label.
 const SHARE_COPIED_MS = 2000;
+
+// The copy-link icon button has no text, so these are its accessible name in
+// each of its two states rather than a visible label.
+const SHARE_LABEL_IDLE = 'Copy link to profile';
+const SHARE_LABEL_DONE = 'Link copied';
 
 // Copy `text`, calling onCopied() only when the write actually lands.
 //
@@ -95,40 +100,6 @@ function copyLinkToClipboard(text, onCopied, onFallback) {
   }
 }
 
-// Hand `url` to the platform share sheet when there is one, and fall back to
-// the clipboard when there is not.
-//
-// Separate callbacks rather than one "done": a native share and a silent
-// clipboard write are different events to the person who triggered them — the
-// sheet is its own confirmation, a copy is not — and the caller words them
-// differently.
-//
-// A dismissed sheet rejects with AbortError. That is somebody changing their
-// mind, not a failure: it must produce no message, and no copy they did not
-// ask for. Any other rejection is a share that did not happen, so the
-// clipboard is tried instead of leaving the click with no effect at all.
-function shareOrCopyLink(url, opts) {
-  const o    = opts || {};
-  const copy = () => copyLinkToClipboard(url, o.onCopied, o.onFallback);
-
-  let p = null;
-  if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
-    const payload = { url: String(url) };
-    if (o.title) payload.title = String(o.title);
-    // navigator.share throws synchronously when the data is rejected outright.
-    try { p = navigator.share(payload); } catch (_) { p = null; }
-  }
-
-  if (!p || typeof p.then !== 'function') { copy(); return; }
-
-  p.then(() => { if (typeof o.onShared === 'function') o.onShared(); })
-   .catch((err) => {
-     if (err && err.name === 'AbortError') return;
-     console.warn('share failed, copying instead:', err);
-     copy();
-   });
-}
-
 // The public profile URL for a username, absolute — the copied form is going
 // somewhere else entirely, so a relative one is worthless. /@name is what
 // vercel.json rewrites to profile.html?u=name, and it is the form worth
@@ -143,15 +114,34 @@ function profileShareUrl(username) {
   return new URL('/@' + encodeURIComponent(name), window.location.href).toString();
 }
 
-// The Share control beside the username on the dashboard and on a profile
+// The two glyphs the copy-link control swaps between. Static markup from this
+// file — no interpolation ever reaches them, which is what makes the innerHTML
+// below safe. `currentColor` rather than a hex so both themes get it for free,
+// and aria-hidden because the accessible name lives on the button.
+const SHARE_ICON_LINK =
+  '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" ' +
+  'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' +
+  '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>' +
+  '<path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>';
+
+const SHARE_ICON_DONE =
+  '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" ' +
+  'stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' +
+  '<polyline points="20 6 9 17 4 12"/></svg>';
+
+// The copy-link control beside the username on the dashboard and on a profile
 // page. Both carry the same two empty slots — #share-slot next to the name,
 // #share-note under it — and this fills them.
 //
 //   username  the profile being shared
 //   isPrivate true only when the link works for nobody but the viewer, i.e.
-//             it is the viewer's own profile and it is not public. Sharing is
+//             it is the viewer's own profile and it is not public. Copying is
 //             still allowed — it is a trap only if nobody says so.
-//   title     share-sheet title; ignored by the clipboard path
+//
+// It copies, and that is all it does. It used to offer the platform share
+// sheet first, which on a phone put a full-screen modal between a person and
+// the one thing they wanted; a link icon that puts the URL on the clipboard is
+// the whole job, and it behaves the same on every device.
 //
 // Renders nothing at all without a username. Registration with email
 // confirmation can leave an account without one, there is no /@ nothing, and a
@@ -169,12 +159,15 @@ function renderShareControl(opts) {
   if (!url) return null;
 
   const btn = document.createElement('button');
-  btn.type        = 'button';
-  btn.className   = 'btn share-btn';
-  btn.id          = 'share-profile-btn';
-  // Text, not an icon: "Share" is the accessible name as well as the label,
-  // and it is what changes to "Copied!" when there is nothing else to show.
-  btn.textContent = 'Share';
+  btn.type      = 'button';
+  btn.className = 'share-btn';
+  btn.id        = 'share-profile-btn';
+  // An icon has no text to be read out, so the accessible name is carried by
+  // aria-label — and by `title`, which is also the hover tooltip that tells a
+  // sighted person what the glyph does before they click it.
+  btn.setAttribute('aria-label', SHARE_LABEL_IDLE);
+  btn.title     = SHARE_LABEL_IDLE;
+  btn.innerHTML = SHARE_ICON_LINK;
   slot.appendChild(btn);
 
   // Static strings from this file, never interpolated profile data — the link
@@ -184,10 +177,21 @@ function renderShareControl(opts) {
     'Make it public in <a href="settings.html">Settings</a>.';
 
   let revert = null;
+  // The confirmation the text label used to give. The glyph becomes a tick and
+  // the accessible name changes with it, so the change is not colour-only and
+  // is not silent to a screen reader.
   const flashCopied = () => {
-    btn.textContent = 'Copied!';
+    btn.innerHTML = SHARE_ICON_DONE;
+    btn.classList.add('is-copied');
+    btn.setAttribute('aria-label', SHARE_LABEL_DONE);
+    btn.title = SHARE_LABEL_DONE;
     clearTimeout(revert);
-    revert = setTimeout(() => { btn.textContent = 'Share'; }, SHARE_COPIED_MS);
+    revert = setTimeout(() => {
+      btn.innerHTML = SHARE_ICON_LINK;
+      btn.classList.remove('is-copied');
+      btn.setAttribute('aria-label', SHARE_LABEL_IDLE);
+      btn.title = SHARE_LABEL_IDLE;
+    }, SHARE_COPIED_MS);
   };
 
   const showNote = (html) => {
@@ -198,15 +202,13 @@ function renderShareControl(opts) {
 
   btn.addEventListener('click', () => {
     clearShareNote(note);
-    shareOrCopyLink(url, {
-      title: o.title,
-      // The sheet already told them it went; the caveat has not.
-      onShared:   () => { if (o.isPrivate) showNote('Shared — ' + CAVEAT); },
-      onCopied:   () => { flashCopied(); if (o.isPrivate) showNote('Copied — ' + CAVEAT); },
+    copyLinkToClipboard(
+      url,
+      () => { flashCopied(); if (o.isPrivate) showNote('Copied — ' + CAVEAT); },
       // Nothing was copied on this path — the URL is sitting in a prompt — so
       // the button must not claim it was.
-      onFallback: () => { if (o.isPrivate) showNote('Also worth knowing: ' + CAVEAT); },
-    });
+      () => { if (o.isPrivate) showNote('Also worth knowing: ' + CAVEAT); },
+    );
   });
 
   return btn;

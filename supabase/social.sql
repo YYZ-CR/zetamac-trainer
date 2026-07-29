@@ -13,9 +13,21 @@
 --  minimal projection that fits on one screen and can be audited as
 --  a unit.
 --
---  Consequently: nothing below ever emits user_id, session_key, an
---  auth.users column, or the raw `questions` payload. Only aggregates
---  computed from questions leave these functions.
+--  Consequently: nothing below ever emits user_id, an auth.users
+--  column, or the raw `questions` payload. Only aggregates computed
+--  from questions leave these functions.
+--
+--  session_key has exactly one exception, and it is written as one:
+--  history[].key is emitted only when v_is_owner, i.e. only to the
+--  authenticated user whose sessions they are. It exists so the
+--  owner's Recent Games table can offer a Review link on their own
+--  /@name, the same one the dashboard has. It is not a widening —
+--  the recipient is the only person who could already read those
+--  rows through sessions_select_own — but it IS the one place this
+--  file emits an identifier at all, so it is guarded by a CASE that
+--  is visible in the same screen as the projection it sits in. A
+--  stranger's copy of that field is SQL NULL and the key is absent
+--  from the JSON entirely.
 --
 --  SET search_path = public on every function is not decoration. A
 --  SECURITY DEFINER function without it resolves unqualified names
@@ -198,23 +210,71 @@ BEGIN
   ) t;
 
   -- ---- history -----------------------------------------------------------
-  -- Up to 60 most recent sessions, returned oldest-first so the client
-  -- can feed it straight to a sparkline. Selected newest-first with a
-  -- LIMIT (to get the most recent 60) and re-ordered inside jsonb_agg
+  -- Up to 500 most recent sessions, returned oldest-first so the client
+  -- can feed it straight to a chart. Selected newest-first with a
+  -- LIMIT (to get the most recent 500) and re-ordered inside jsonb_agg
   -- (to hand them back chronologically) — two different orderings on
   -- purpose.
+  --
+  -- 500, not 60, and the number is not arbitrary: it is SESSION_WINDOW
+  -- in js/dashboard.js. The public profile draws the same chart and the
+  -- same Recent Games table as the dashboard, so it has to see the same
+  -- window, or "All Time" would mean two different spans on two pages
+  -- showing the same player. Raising it here and not there — or the
+  -- reverse — is the bug this comment exists to prevent.
+  --
+  -- `acc` is computed here rather than client-side because the client
+  -- would need the `questions` payload to do it, and handing a third
+  -- party someone's questions is the whole thing this file refuses to
+  -- do. A percentage is an aggregate; the questions it came from do not
+  -- leave the server.
+  --
+  -- Cost: this unnests `questions` over 500 sessions, where the `ops`
+  -- block above is bounded to 200. It is the most expensive part of
+  -- this function. It stays bounded, and the bound is the LIMIT in the
+  -- subquery below — applied before the LATERAL, because a LIMIT on the
+  -- joined result would cap questions rather than sessions.
   SELECT COALESCE(jsonb_agg(jsonb_build_object(
            'd',        to_char(h.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD'),
            'score',    h.score,
-           'duration', h.duration_seconds
+           'duration', h.duration_seconds,
+           'acc',      h.acc,
+           -- The one identifier this file emits, and only ever back to
+           -- the person it belongs to. For everyone else the CASE falls
+           -- through to SQL NULL, which jsonb_build_object renders as
+           -- JSON null — the key is PRESENT and null, not absent
+           -- (jsonb_build_object keeps null values; only
+           -- jsonb_strip_nulls would drop them). Either way there is no
+           -- key to follow, which is the property that matters, and the
+           -- client tests `typeof key === 'string'` rather than testing
+           -- for presence.
+           'key',      CASE WHEN v_is_owner THEN h.session_key END
          ) ORDER BY h.created_at), '[]'::JSONB)
   INTO v_history
   FROM (
-    SELECT s.created_at, s.score, s.duration_seconds
+    SELECT
+      s.created_at,
+      s.score,
+      s.duration_seconds,
+      s.session_key,
+      -- Whole percent, 0–100, or NULL for a session that stored no
+      -- questions — which the client renders as an em dash rather than
+      -- as 0%, because "no data" and "got everything wrong" are not the
+      -- same claim.
+      (
+        SELECT CASE WHEN COUNT(*) = 0 THEN NULL ELSE
+          round(100.0 * COUNT(*) FILTER (WHERE (elem->'hadMistake') IS DISTINCT FROM 'true'::JSONB)
+                / COUNT(*))::INTEGER
+        END
+        FROM jsonb_array_elements(
+               CASE WHEN jsonb_typeof(s.questions) = 'array'
+                    THEN s.questions ELSE '[]'::JSONB END) AS elem
+        WHERE jsonb_typeof(elem) = 'object'
+      ) AS acc
     FROM public.game_sessions s
     WHERE s.user_id = v_id
     ORDER BY s.created_at DESC
-    LIMIT 60
+    LIMIT 500
   ) h;
 
   -- ---- days_practiced and streak -----------------------------------------

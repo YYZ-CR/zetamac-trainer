@@ -607,10 +607,10 @@ body.results-page {
 }
 
 /* ============ SHARE CONTROL ============
-   The Share button beside the username, on the dashboard and on a profile
+   The copy-link icon beside the username, on the dashboard and on a profile
    page. Same markup on both — js/util.js renders it into #share-slot — so the
    two heads cannot drift into two different controls. No new colour token:
-   it is the ordinary .btn on the ordinary muted note colour. */
+   the glyph is drawn in currentColor on the ordinary muted note colour. */
 
 .identity-row {
   display: flex;
@@ -632,15 +632,46 @@ body.results-page {
   display: inline-flex;
 }
 
-/* Smaller than a page-level .btn: it sits against 13px subtitle text on the
-   dashboard, and a full-size button beside that line reads as the main
-   action of the page rather than a control attached to the name. */
-.btn.share-btn {
-  padding: 3px 12px;
-  font-size: 13px;
-  line-height: 1.6;
-  white-space: nowrap;
+/* A bare glyph, not a .btn: it sits against 13px subtitle text on the
+   dashboard, and button chrome beside that line reads as the main action of
+   the page rather than a control attached to the name.
+
+   Sized to the 24px minimum a finger can hit even though the icon inside is
+   15px — the padding is the target, and a 15px tap area on a phone is not
+   one. `title` on the button supplies the hover tooltip that explains the
+   glyph, so nothing here has to carry the meaning. */
+.share-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
   flex: none;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: var(--c-ink-faint2);
+  border-radius: 3px;
+}
+
+.share-btn:hover {
+  color: var(--c-ink);
+  background: var(--c-rule);
+}
+
+/* Removing the border took the default focus ring's backing with it, so the
+   ring is restored explicitly: this is the only way a keyboard user knows
+   where they are. */
+.share-btn:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 1px;
+}
+
+/* Confirmation is the tick glyph plus the accessible name js/util.js swaps in;
+   the colour is on top of both, never on its own. */
+.share-btn.is-copied {
+  color: var(--c-accent);
 }
 
 /* The private-profile caveat. A full-width line under the row, not part of

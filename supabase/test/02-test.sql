@@ -103,10 +103,80 @@ BEGIN
 
   -- ── History ───────────────────────────────────────────────────
   n := jsonb_array_length(p->'history');
-  PERFORM pg_temp.ok(n > 0 AND n <= 60, 'history is capped at 60 entries');
+  PERFORM pg_temp.ok(n > 0 AND n <= 500, 'history is capped at 500 entries');
   PERFORM pg_temp.ok(
     (p->'history'->0->>'d')::DATE <= (p->'history'->(n-1)->>'d')::DATE,
     'history is ordered oldest first');
+  -- hexadecimal has exactly 40 sessions and the cap is 500, so the cap must
+  -- not be truncating here. Asserted as an exact number rather than "<= 500",
+  -- which a cap of 1 would also satisfy.
+  PERFORM pg_temp.ok(n = 40, 'all 40 of hexadecimal''s sessions are returned, not a slice');
+
+  -- ── History: per-session accuracy ─────────────────────────────
+  -- accplayer's three sessions are hand-counted in 01-seed.sql, oldest
+  -- first: accs1 (10 questions, 2 mistakes), accs2 (4, none), accs3 (empty).
+  q := public.get_public_profile('accplayer');
+  PERFORM pg_temp.ok(jsonb_array_length(q->'history') = 3,
+    'accplayer has exactly the three seeded sessions');
+  PERFORM pg_temp.ok((q->'history'->0->>'acc')::INT = 80,
+    '2 mistakes in 10 questions is 80, not 0.8 and not 20');
+  PERFORM pg_temp.ok((q->'history'->1->>'acc')::INT = 100,
+    'a clean session is 100');
+  -- The distinction that matters: no questions is not the same claim as
+  -- every question wrong.
+  PERFORM pg_temp.ok(jsonb_typeof(q->'history'->2->'acc') = 'null',
+    'a session with no questions reports acc null, not 0');
+  PERFORM pg_temp.ok((q->'history'->0->>'score')::INT = 31
+                     AND (q->'history'->0->>'duration')::INT = 120,
+    'the entry carries score and duration alongside acc');
+
+  -- ── History: a malformed questions payload ────────────────────
+  -- `questions` is client-supplied with no shape constraint beyond "is an
+  -- array", so this must neither abort the function nor miscount.
+  q := public.get_public_profile('malformed');
+  PERFORM pg_temp.ok(jsonb_array_length(q->'history') = 2,
+    'a malformed payload still yields its history entries');
+  PERFORM pg_temp.ok((q->'history'->0->>'acc')::INT = 100,
+    'non-object entries are skipped, and a STRING "true" hadMistake is not a mistake');
+  PERFORM pg_temp.ok(jsonb_typeof(q->'history'->1->'acc') = 'null',
+    'an array with no objects in it scores null rather than dividing by zero');
+
+  -- ── History: the session key is owner-only ────────────────────
+  -- This is the one identifier get_public_profile emits. A stranger must
+  -- never receive one: it is the argument to results.html, which renders the
+  -- whole question list of that game.
+  PERFORM pg_temp.as_anon();
+  q := public.get_public_profile('hexadecimal');
+  PERFORM pg_temp.ok(
+    NOT EXISTS (SELECT 1 FROM jsonb_array_elements(q->'history') AS e
+                WHERE (e->>'key') IS NOT NULL),
+    'anon receives no session key on any history entry');
+  -- Belt and braces: assert the key never appears anywhere in the serialised
+  -- payload, so a key smuggled under a different name is caught too.
+  PERFORM pg_temp.ok(q::TEXT NOT LIKE '%hex1%',
+    'no session_key string appears anywhere in an anonymous payload');
+
+  PERFORM pg_temp.as_user('hexadecimal');
+  q := public.get_public_profile('hexadecimal');
+  PERFORM pg_temp.ok(
+    (SELECT COUNT(*) FROM jsonb_array_elements(q->'history') AS e
+     WHERE (e->>'key') IS NOT NULL) = 40,
+    'the owner receives a key on every one of their 40 entries');
+  PERFORM pg_temp.ok(
+    EXISTS (SELECT 1 FROM jsonb_array_elements(q->'history') AS e
+            WHERE e->>'key' = 'hex1'),
+    'and the keys are the real session_key values, not a hash or an index');
+
+  -- A signed-in user looking at SOMEBODY ELSE's public profile is still a
+  -- stranger to it. is_owner is per-profile, not "is logged in".
+  PERFORM pg_temp.as_user('sixtyonly');
+  q := public.get_public_profile('hexadecimal');
+  PERFORM pg_temp.ok(
+    NOT EXISTS (SELECT 1 FROM jsonb_array_elements(q->'history') AS e
+                WHERE (e->>'key') IS NOT NULL),
+    'a signed-in visitor gets no session keys from a profile that is not theirs');
+
+  PERFORM pg_temp.as_anon();
 
   -- ── Streak ────────────────────────────────────────────────────
   PERFORM pg_temp.ok((p->>'streak')::INT = 6,

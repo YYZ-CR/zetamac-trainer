@@ -4,12 +4,17 @@ import { chromium } from 'playwright';
 // Two things this suite exists to hold still:
 //
 //   1. It must look like the dashboard. Same five tiles in the same order,
-//      same panels in the same order, rendered by the same js/stats.js.
-//   2. It must NOT grow the dashboard's Recent Games list. get_public_profile
-//      returns a fixed, minimal projection with no per-session rows in it, and
-//      publishing per-game history on a public URL is a cross-user data
-//      exposure. That absence is asserted positively below, including that the
-//      page never reads game_sessions at all.
+//      same panels in the same order — strip, Score Over Time with its three
+//      range buttons, By Operation, Recent Games — rendered by the same
+//      js/stats.js.
+//   2. It must get there WITHOUT reading game_sessions. Everything on the
+//      page comes through get_public_profile, which returns a fixed, minimal
+//      projection: per-session figures (date, score, duration, a
+//      server-computed accuracy percent) and never the questions those
+//      figures were computed from. That is asserted positively below, as is
+//      the one thing the projection withholds from a visitor — the session
+//      key, which is what a Review link would need and what would open
+//      somebody else's whole question list.
 const EXE = process.env.ZT_CHROMIUM || undefined;
 const BASE = process.env.ZT_BASE || 'http://127.0.0.1:8099';
 const SHOTS = process.env.ZT_SHOTS || '/tmp/shots';
@@ -37,10 +42,29 @@ const PUBLIC_PROFILE = {
     multiplication: { avg_ms: 1980, count: 4000, accuracy: 0.93 },
     division:       { avg_ms: 2310, count: 3000, accuracy: 0.90 },
   },
+  // `key` is deliberately absent from every entry: this fixture is somebody
+  // else's profile (is_owner false), and get_public_profile emits a non-null
+  // key only to a profile's owner. OWNER_PROFILE below is the same history
+  // with keys on it, so the two Recent Games shapes are both exercised.
+  //
+  // acc: 94, 100 and null — the third is a session that stored no questions,
+  // which must render as an em dash rather than as 0%.
   history: [
-    { d: '2026-07-20', score: 70, duration: 120 },
-    { d: '2026-07-21', score: 75, duration: 120 },
-    { d: '2026-07-22', score: 80, duration: 120 },
+    { d: '2026-07-20', score: 70, duration: 120, acc: 94,   key: null },
+    { d: '2026-07-21', score: 75, duration: 120, acc: 100,  key: null },
+    { d: '2026-07-22', score: 80, duration: 120, acc: null, key: null },
+  ],
+};
+
+// The same profile seen by its owner: identical figures, plus the session
+// keys that make the Review column possible.
+const OWNER_PROFILE = {
+  ...PUBLIC_PROFILE,
+  is_owner: true,
+  history: [
+    { d: '2026-07-20', score: 70, duration: 120, acc: 94,   key: 'sess-a' },
+    { d: '2026-07-21', score: 75, duration: 120, acc: 100,  key: 'sess-b' },
+    { d: '2026-07-22', score: 80, duration: 120, acc: null, key: 'sess-c' },
   ],
 };
 
@@ -66,7 +90,13 @@ window.supabase={createClient:()=>({
    if(n==='get_score_percentile') return PCT?{data:PCT,error:null}:{data:null,error:{message:'no fn'}};
    return {data:null,error:{message:'no fn'}}; },
 })};
-window.Chart=function(){window.__charts.made++;
+window.Chart=function(ctx,cfg){window.__charts.made++;
+  // The points the page asked for, captured at construction. The range
+  // buttons destroy and rebuild rather than mutate, so this is always the
+  // currently drawn series — which is the only way to tell "Last 20" from
+  // "All Time" through a stub.
+  try{window.__chartData=cfg.data.datasets[0].data.slice();}catch(e){window.__chartData=null;}
+  try{window.__chartLabels=cfg.data.labels.slice();}catch(e){window.__chartLabels=null;}
   this.destroy=()=>{window.__charts.destroyed++;};this.update=()=>{};
   this.data={labels:[],datasets:[{},{}]};this.options={scales:{x:{ticks:{}}}};};
 window.Chart.defaults={font:{}};
@@ -211,9 +241,19 @@ console.log('[no accuracy tile, and no Personal Bests panel in the DOM]');
   const tiles = await p.evaluate(TILES);
   ok(!tiles.some(t => /accuracy/i.test(t[1])), 'no tile is labelled Accuracy');
   ok(!tiles.some(t => t[0].includes('%')), 'no tile shows a percentage');
+  // Scoped to the strip, not the whole page. This assertion used to read
+  // "the word appears nowhere", which was true only while the page had no
+  // Recent Games table — that table has an Accuracy COLUMN, and so does the
+  // dashboard's. What this block protects is the absence of an accuracy TILE
+  // in the strip, so that is what it now says.
+  const strip = (await p.textContent('#stat-strip')) || '';
+  ok(!/accuracy/i.test(strip), 'the word "accuracy" appears nowhere in the stat strip');
+  // The payload's all-time accuracy (0.962) must still be nowhere on the
+  // page. The Recent Games column carries PER-SESSION accuracy — 94%, 100%,
+  // an em dash — so 96.2 appearing would mean the removed tile came back
+  // somewhere else, which is exactly what this block is for.
   const body = (await p.textContent('body')) || '';
-  ok(!/accuracy/i.test(body), 'the word "accuracy" appears nowhere on the public page');
-  ok(!body.includes('96.2'), "and neither does the payload's accuracy figure");
+  ok(!body.includes('96.2'), "and the payload's all-time accuracy figure is nowhere on the page");
   ok(await p.evaluate(() => document.getElementById('bests-panel') === null),
      'no #bests-panel element exists at all');
   ok(await p.evaluate(() => document.getElementById('best-row') === null),
@@ -239,11 +279,11 @@ console.log('[no percentile -> the note is still a whole sentence]');
 }
 
 // ── Order ─────────────────────────────────────────────────────
-console.log('[panel order matches the dashboard, minus Recent Games]');
+console.log('[panel order matches the dashboard]');
 {
   const { ctx, p, errs } = await page({ publicProfile: PUBLIC_PROFILE, percentile: PERCENTILE });
-  ok(await p.evaluate(ORDERED, ['stat-strip', 'chart-panel', 'ops-panel']),
-     'stats → Score Over Time → By Operation, in document order');
+  ok(await p.evaluate(ORDERED, ['stat-strip', 'chart-panel', 'ops-panel', 'games-panel']),
+     'stats → Score Over Time → By Operation → Recent Games, in document order');
   ok(await p.evaluate(ORDERED, ['stat-strip', 'stats-note', 'chart-panel']),
      'and the note sits between the strip and the chart, where the bests panel was');
   // Negative control: the same helper must refuse an order that is wrong,
@@ -264,22 +304,136 @@ console.log('[panel order matches the dashboard, minus Recent Games]');
   await ctx.close();
 }
 
-// ── No per-game history, asserted positively ──────────────────
-console.log('[the public page carries no per-game history]');
+// ── Recent Games, and where its rows came from ────────────────
+// The table exists now, but the boundary it is on the far side of does not
+// move: it is built from get_public_profile's `history`, and game_sessions is
+// never read. Both halves are asserted, because the table looking right
+// proves nothing about where the rows came from.
+const ROWS = () => Array.from(document.querySelectorAll('#games-tbody tr'))
+  .map(tr => Array.from(tr.querySelectorAll('td')).map(td => td.textContent.trim()));
+
+console.log('[Recent Games renders the history, newest first]');
 {
   const { ctx, p, errs } = await page({ publicProfile: PUBLIC_PROFILE, percentile: PERCENTILE });
-  ok(await p.evaluate(() => document.getElementById('games-panel') === null),
-     'no #games-panel element exists');
-  ok(await p.evaluate(() => document.querySelectorAll('.games-table, #games-tbody, .view-session-link').length === 0),
-     'no games table, no table body, no per-session links');
-  const body = (await p.textContent('body')) || '';
-  ok(!/Recent Games/i.test(body), 'the words "Recent Games" appear nowhere');
-  ok(!/results\.html/.test(await p.content()), 'and nothing links to a single run');
+  ok(await p.isVisible('#games-panel'), 'the Recent Games panel is shown');
+  const rows = await p.evaluate(ROWS);
+  ok(rows.length === 3, `three rows, one per history entry (got ${rows.length})`);
+  // Newest first: history arrives oldest-first for the chart, so a table that
+  // forgot to reverse would lead with Jul 20 and nobody would notice.
+  ok(rows[0] && rows[0][1] === '80',
+     `the newest game leads the table (got score "${rows[0] && rows[0][1]}")`);
+  ok(rows[2] && rows[2][1] === '70',
+     `and the oldest is last (got score "${rows[2] && rows[2][1]}")`);
+  ok(rows[0] && /^Jul 22, 2026$/.test(rows[0][0]),
+     `the date carries the year and does not slide a day (got "${rows[0] && rows[0][0]}")`);
+  ok(rows[0] && rows[0][2] === '120s', `duration reads "120s" (got "${rows[0] && rows[0][2]}")`);
+  ok(rows[1] && rows[1][3] === '100%', `accuracy reads as a percent (got "${rows[1] && rows[1][3]}")`);
+  // The distinction the SQL goes out of its way to preserve: a session that
+  // stored no questions has no accuracy, and must not be reported as 0%.
+  ok(rows[0] && rows[0][3] === '—',
+     `a null accuracy is an em dash, not 0% (got "${rows[0] && rows[0][3]}")`);
+  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+  await ctx.close();
+}
+
+console.log('[a visitor gets no Review column at all — not a column of dashes]');
+{
+  const { ctx, p, errs } = await page({ publicProfile: PUBLIC_PROFILE, percentile: PERCENTILE });
+  const heads = await p.evaluate(() =>
+    Array.from(document.querySelectorAll('.games-table thead th')).map(th => th.textContent.trim()));
+  ok(heads.length === 4 && heads.join('|') === 'Date|Score|Duration|Accuracy',
+     `four columns, no Review header (got ${JSON.stringify(heads)})`);
+  const rows = await p.evaluate(ROWS);
+  ok(rows.every(r => r.length === 4), 'and every row has four cells to match');
+  ok(await p.evaluate(() => document.querySelectorAll('.view-session-link').length === 0),
+     'no per-session link exists');
+  ok(!/results\.html/.test(await p.content()),
+     'and nothing on the page links to a single run');
+  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+  await ctx.close();
+}
+
+console.log('[the owner gets the Review column, linking to their own runs]');
+{
+  const { ctx, p, errs } = await page({ publicProfile: OWNER_PROFILE, percentile: PERCENTILE,
+                                        signedIn: true });
+  const heads = await p.evaluate(() =>
+    Array.from(document.querySelectorAll('.games-table thead th')).map(th => th.textContent.trim()));
+  ok(heads.length === 5 && heads[4] === 'Review',
+     `five columns, Review last (got ${JSON.stringify(heads)})`);
+  const links = await p.evaluate(() =>
+    Array.from(document.querySelectorAll('.view-session-link')).map(a => ({
+      text: a.textContent.trim(), href: a.getAttribute('href'),
+    })));
+  ok(links.length === 3, `one link per row (got ${links.length})`);
+  // Newest first, so the first link is the newest session's key.
+  ok(links[0] && links[0].href === 'results.html?session=sess-c',
+     `the link carries that row's own session key (got ${links[0] && links[0].href})`);
+  ok(links[0] && links[0].text === 'View', 'and reads "View"');
+  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+  await ctx.close();
+}
+
+console.log('[a hostile session key cannot break out of the href]');
+{
+  const XSS  = '"><img src=x onerror=window.__pwned=1>';
+  const { ctx, p, errs } = await page({
+    publicProfile: { ...OWNER_PROFILE,
+                     history: [{ d: '2026-07-22', score: 80, duration: 120, acc: 90, key: XSS }] },
+    percentile: PERCENTILE, signedIn: true });
+  ok(await p.evaluate(() => window.__pwned !== 1), 'nothing executed');
+  ok(await p.evaluate(() => document.querySelectorAll('.games-table img').length === 0),
+     'and it did not become an element');
+  const href = await p.evaluate(() => {
+    const a = document.querySelector('.view-session-link');
+    return a ? a.getAttribute('href') : null;
+  });
+  ok(href === 'results.html?session=' + encodeURIComponent(XSS),
+     `the key is percent-encoded into the query string (got ${href})`);
+  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+  await ctx.close();
+}
+
+console.log('[every figure came through the RPC — game_sessions is never read]');
+{
+  const { ctx, p, errs } = await page({ publicProfile: PUBLIC_PROFILE, percentile: PERCENTILE });
   ok(await p.evaluate(() => !window.__tables.includes('game_sessions')),
-     'the page never reads game_sessions — every figure came through the RPC');
+     'the page never reads game_sessions — the table above was built from the RPC payload');
+  ok(await p.evaluate(() => window.__tables.length === 0),
+     'in fact it reads no table at all');
   ok(await p.evaluate(() => window.__rpc.every(c =>
        c[0] === 'get_public_profile' || c[0] === 'get_score_percentile')),
      'and it called nothing but the two functions the contract names');
+  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+  await ctx.close();
+}
+
+console.log('[the chart range buttons slice the history]');
+{
+  // 25 entries so "Last 20" is a real cut rather than the whole set.
+  const many = Array.from({ length: 25 }, (_, i) => ({
+    d: `2026-06-${String(i + 1).padStart(2, '0')}`, score: 50 + i, duration: 120, acc: 90, key: null,
+  }));
+  const { ctx, p, errs } = await page({ publicProfile: { ...PUBLIC_PROFILE, history: many },
+                                        percentile: PERCENTILE });
+  const btns = await p.evaluate(() =>
+    Array.from(document.querySelectorAll('.chart-range-btn')).map(b => ({
+      range: b.dataset.range, text: b.textContent.trim(), active: b.classList.contains('active'),
+    })));
+  ok(btns.length === 3 && btns.map(b => b.range).join('|') === '20|100|all',
+     `three range buttons, same as the dashboard (got ${JSON.stringify(btns.map(b => b.range))})`);
+  ok(btns[0] && btns[0].active, 'Last 20 is the one selected on load');
+
+  const count = () => window.__chartData ? window.__chartData.length : null;
+  ok(await p.evaluate(count) === 20,
+     `the default draws the last 20 of 25 (got ${await p.evaluate(count)})`);
+  await p.click('.chart-range-btn[data-range="all"]');
+  await p.waitForTimeout(150);
+  ok(await p.evaluate(count) === 25, `All Time draws all 25 (got ${await p.evaluate(count)})`);
+  ok(await p.evaluate(() =>
+       document.querySelector('.chart-range-btn[data-range="all"]').classList.contains('active') &&
+       !document.querySelector('.chart-range-btn[data-range="20"]').classList.contains('active')),
+     'and the active class moved with it');
   ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
   await ctx.close();
 }
@@ -341,7 +495,7 @@ console.log('[both themes render without an uncaught error]');
 for (const theme of ['zetamac', 'dark']) {
   const { ctx, p, errs } = await page({ publicProfile: PUBLIC_PROFILE, percentile: PERCENTILE, theme });
   ok(await p.isVisible('#stat-strip'), `${theme}: the strip is visible`);
-  ok(await p.isVisible('#share-profile-btn'), `${theme}: the Share button is visible`);
+  ok(await p.isVisible('#share-profile-btn'), `${theme}: the copy-link button is visible`);
   ok(errs.length === 0, `${theme}: no uncaught errors (${errs[0] ?? ''})`);
   await p.screenshot({ path: `${SHOTS}/profile-${theme}.png`, fullPage: true });
   await p.screenshot({ path: `${SHOTS}/profile-share-${theme}.png`,
@@ -349,12 +503,12 @@ for (const theme of ['zetamac', 'dark']) {
   await ctx.close();
 }
 
-// ── The Share button ──────────────────────────────────────────
+// ── The copy-link button ──────────────────────────────────────
 // PUBLIC_PROFILE is somebody else's public profile (is_owner: false), which
-// is the ordinary case here: sharing the page you are looking at is normal,
-// and that link works, so it carries no caveat. The private case below is the
-// owner previewing their own — the only profile this page ever renders that
-// nobody else can open.
+// is the ordinary case here: copying the link to the page you are looking at
+// is normal, and that link works, so it carries no caveat. The private case
+// below is the owner previewing their own — the only profile this page ever
+// renders that nobody else can open.
 const ORIGIN    = new URL(BASE).origin;
 const SHARE_URL = ORIGIN + '/@hexadecimal';
 const MINE_PRIVATE = { ...PUBLIC_PROFILE, is_public: false, is_owner: true };
@@ -373,7 +527,25 @@ const GEOM = () => {
   };
 };
 
-console.log('[the Share button sits to the right of the username]');
+// The accessible name in each of its two states. An icon button has no text,
+// so this IS its label as far as anything but a sighted mouse user is
+// concerned, and asserting on it is asserting on the label.
+const NAME_IDLE = 'Copy link to profile';
+const NAME_DONE = 'Link copied';
+
+const SHAPE = () => {
+  const b = document.getElementById('share-profile-btn');
+  return {
+    tag: b.tagName, type: b.type, text: b.textContent.trim(),
+    name: (b.getAttribute('aria-label') || '').trim(),
+    title: (b.getAttribute('title') || '').trim(),
+    copied: b.classList.contains('is-copied'),
+    svgs: b.querySelectorAll('svg').length,
+    svgHidden: b.querySelector('svg')?.getAttribute('aria-hidden') === 'true',
+  };
+};
+
+console.log('[the copy-link button sits to the right of the username]');
 {
   const { ctx, p, errs } = await page({ publicProfile: PUBLIC_PROFILE, percentile: PERCENTILE,
                                         share: 'none', clipboard: 'ok' });
@@ -385,7 +557,11 @@ console.log('[the Share button sits to the right of the username]');
      'and it overlaps that line vertically, so it is beside the name rather than under it');
   ok(g && g.btnLeft - g.nameRight >= 6 && g.btnLeft - g.nameRight <= 24,
      `with a real gap and not a stranded one (${g && (g.btnLeft - g.nameRight).toFixed(1)}px)`);
-  ok(g && g.btnW > 40 && g.btnH > 16, `the button has size (${g && g.btnW}×${g && g.btnH})`);
+  // 24px each way is the smallest thing a finger reliably hits. The icon
+  // inside is 15px; the padding is what makes the target, so asserting on the
+  // icon's own size would pass a control nobody can tap.
+  ok(g && g.btnW >= 24 && g.btnH >= 24,
+     `the button is at least a 24px tap target (${g && g.btnW}×${g && g.btnH})`);
 
   // The name is still its own element, and the button is not inside it — the
   // hostile-username block below asserts #profile-name is exactly the name.
@@ -393,62 +569,27 @@ console.log('[the Share button sits to the right of the username]');
                               .contains(document.getElementById('share-profile-btn'))),
      'the button is a sibling of the name, not part of it');
 
-  const shape = await p.evaluate(() => {
+  const shape = await p.evaluate(SHAPE);
+  const focus = await p.evaluate(() => {
     const b = document.getElementById('share-profile-btn');
     b.focus();
-    return {
-      tag: b.tagName, type: b.type, text: b.textContent.trim(),
-      name: (b.getAttribute('aria-label') || b.textContent).trim(),
-      tabindex: b.getAttribute('tabindex'),
-      focused: document.activeElement === b,
-    };
+    return { tabindex: b.getAttribute('tabindex'), focused: document.activeElement === b };
   });
   ok(shape.tag === 'BUTTON' && shape.type === 'button', 'it is a real <button type=button>');
-  ok(shape.text === 'Share', `labelled "Share" (got "${shape.text}")`);
-  ok(shape.name.length > 1 && !/^[^A-Za-z]+$/.test(shape.name),
-     `its accessible name is words, not an icon ("${shape.name}")`);
-  ok(shape.focused && shape.tabindex === null,
+  ok(shape.svgs === 1, `it draws one inline SVG glyph (got ${shape.svgs})`);
+  ok(shape.text === '', `and carries no text label (got "${shape.text}")`);
+  ok(shape.svgHidden, 'the glyph is aria-hidden, so the label is not announced twice');
+  ok(shape.name === NAME_IDLE, `its accessible name is "${NAME_IDLE}" (got "${shape.name}")`);
+  ok(shape.title === NAME_IDLE,
+     `and the same words are the hover tooltip, so the glyph is explained (got "${shape.title}")`);
+  ok(focus.focused && focus.tabindex === null,
      'it takes keyboard focus and is not removed from the tab order');
   ok(!(await p.isVisible('#share-note')), 'nothing is claimed under it before it is used');
   ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
   await ctx.close();
 }
 
-console.log('[navigator.share is used once, with the absolute /@name URL]');
-{
-  const { ctx, p, errs } = await page({ publicProfile: PUBLIC_PROFILE, percentile: PERCENTILE,
-                                        share: 'ok', clipboard: 'ok' });
-  await p.click('#share-profile-btn');
-  await p.waitForTimeout(300);
-  const calls = await p.evaluate(() => window.__share);
-  ok(calls.length === 1, `navigator.share was called exactly once (got ${calls.length})`);
-  ok(calls[0] && calls[0].url === SHARE_URL,
-     `with ${SHARE_URL} (got ${calls[0] && calls[0].url})`);
-  ok(calls[0] && calls[0].title === 'hexadecimal — Arithmetic Trainer',
-     `and a title naming the profile (got ${JSON.stringify(calls[0] && calls[0].title)})`);
-  ok((await p.evaluate(() => window.__copied)).length === 0,
-     'the clipboard was left alone — the sheet is the share');
-  ok((await p.textContent('#share-profile-btn')).trim() === 'Share',
-     'the label does not claim a copy that did not happen');
-  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
-  await ctx.close();
-}
-
-console.log('[the button works from the keyboard]');
-{
-  const { ctx, p, errs } = await page({ publicProfile: PUBLIC_PROFILE, percentile: PERCENTILE,
-                                        share: 'ok', clipboard: 'ok' });
-  await p.focus('#share-profile-btn');
-  await p.keyboard.press('Enter');
-  await p.waitForTimeout(300);
-  const calls = await p.evaluate(() => window.__share);
-  ok(calls.length === 1 && calls[0].url === SHARE_URL,
-     `Enter on the focused button shares the same URL (got ${calls.length} call(s))`);
-  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
-  await ctx.close();
-}
-
-console.log('[no navigator.share -> the URL is copied and the label says so, then reverts]');
+console.log('[a click copies the absolute /@name URL, confirms, and reverts]');
 {
   const { ctx, p, errs } = await page({ publicProfile: PUBLIC_PROFILE, percentile: PERCENTILE,
                                         share: 'none', clipboard: 'ok' });
@@ -457,16 +598,51 @@ console.log('[no navigator.share -> the URL is copied and the label says so, the
   const copied = await p.evaluate(() => window.__copied);
   ok(copied.length === 1, `one clipboard write (got ${copied.length})`);
   ok(copied[0] === SHARE_URL, `of ${SHARE_URL} (got ${copied[0]})`);
-  ok((await p.textContent('#share-profile-btn')).trim() === 'Copied!',
-     'the label confirms it in place');
+  const done = await p.evaluate(SHAPE);
+  ok(done.name === NAME_DONE, `the accessible name confirms it (got "${done.name}")`);
+  ok(done.copied, 'and the tick state is on the button');
   await p.waitForTimeout(2300);
-  ok((await p.textContent('#share-profile-btn')).trim() === 'Share',
-     'and reverts about two seconds later');
+  const back = await p.evaluate(SHAPE);
+  ok(back.name === NAME_IDLE, `it reverts about two seconds later (got "${back.name}")`);
+  ok(!back.copied, 'and drops the tick state with it');
   ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
   await ctx.close();
 }
 
-console.log('[insecure context: no share, no clipboard -> the URL is still offered, nothing throws]');
+// The point of the change: copying is the whole behaviour. A platform share
+// sheet is a full-screen modal between a person and the one thing they wanted,
+// so the button must not open one even where the API exists.
+console.log('[navigator.share is never called, even on a platform that has one]');
+{
+  const { ctx, p, errs } = await page({ publicProfile: PUBLIC_PROFILE, percentile: PERCENTILE,
+                                        share: 'ok', clipboard: 'ok' });
+  await p.click('#share-profile-btn');
+  await p.waitForTimeout(300);
+  ok((await p.evaluate(() => window.__share)).length === 0,
+     'the share sheet was not opened');
+  const copied = await p.evaluate(() => window.__copied);
+  ok(copied.length === 1 && copied[0] === SHARE_URL,
+     `the URL went to the clipboard instead (got ${JSON.stringify(copied)})`);
+  ok((await p.evaluate(SHAPE)).name === NAME_DONE, 'and the button says so');
+  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+  await ctx.close();
+}
+
+console.log('[the button works from the keyboard]');
+{
+  const { ctx, p, errs } = await page({ publicProfile: PUBLIC_PROFILE, percentile: PERCENTILE,
+                                        share: 'none', clipboard: 'ok' });
+  await p.focus('#share-profile-btn');
+  await p.keyboard.press('Enter');
+  await p.waitForTimeout(300);
+  const copied = await p.evaluate(() => window.__copied);
+  ok(copied.length === 1 && copied[0] === SHARE_URL,
+     `Enter on the focused button copies the same URL (got ${JSON.stringify(copied)})`);
+  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
+  await ctx.close();
+}
+
+console.log('[insecure context: no clipboard -> the URL is still offered, nothing throws]');
 {
   const { ctx, p, errs, dialogs } = await page({ publicProfile: PUBLIC_PROFILE, percentile: PERCENTILE,
                                                  share: 'none', clipboard: 'none' });
@@ -476,41 +652,10 @@ console.log('[insecure context: no share, no clipboard -> the URL is still offer
   ok(dialogs[0] && dialogs[0].type === 'prompt', 'it is a prompt, so the URL can be selected by hand');
   ok(dialogs[0] && dialogs[0].value === SHARE_URL,
      `carrying ${SHARE_URL} (got ${dialogs[0] && dialogs[0].value})`);
-  ok((await p.textContent('#share-profile-btn')).trim() === 'Share',
-     'and the label does not claim a copy that never happened');
-  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
-  await ctx.close();
-}
-
-console.log('[a dismissed share sheet is not a failure]');
-{
-  const { ctx, p, errs, dialogs } = await page({ publicProfile: PUBLIC_PROFILE, percentile: PERCENTILE,
-                                                 share: 'abort', clipboard: 'ok' });
-  await p.click('#share-profile-btn');
-  await p.waitForTimeout(400);
-  ok((await p.evaluate(() => window.__share)).length === 1, 'the sheet was opened');
-  ok((await p.evaluate(() => window.__copied)).length === 0,
-     'changing your mind does not copy something you did not ask for');
-  ok(dialogs.length === 0, 'and raises no dialog');
-  ok(!(await p.isVisible('#share-note')), 'no message is shown at all');
-  const head = (await p.textContent('.profile-head')) || '';
-  ok(!/couldn't|could not|error|failed|sorry/i.test(head),
-     `nothing in the head reads as a failure (got "${head.replace(/\s+/g, ' ').trim()}")`);
-  ok((await p.textContent('#share-profile-btn')).trim() === 'Share', 'the label is unchanged');
-  ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
-  await ctx.close();
-}
-
-console.log('[a share that genuinely fails falls back to the clipboard, still without an error]');
-{
-  const { ctx, p, errs } = await page({ publicProfile: PUBLIC_PROFILE, percentile: PERCENTILE,
-                                        share: 'reject', clipboard: 'ok' });
-  await p.click('#share-profile-btn');
-  await p.waitForTimeout(400);
-  const copied = await p.evaluate(() => window.__copied);
-  ok(copied.length === 1 && copied[0] === SHARE_URL,
-     `the click still ends with the link in hand (got ${JSON.stringify(copied)})`);
-  ok((await p.textContent('#share-profile-btn')).trim() === 'Copied!', 'and says so');
+  const shape = await p.evaluate(SHAPE);
+  ok(shape.name === NAME_IDLE,
+     `and the button does not claim a copy that never happened (got "${shape.name}")`);
+  ok(!shape.copied, 'nor show the tick');
   ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
   await ctx.close();
 }
@@ -534,8 +679,8 @@ console.log('[my own private profile says the link works for nobody else]');
   ok(link && link.text === 'Settings', `and reads "Settings" (got "${link && link.text}")`);
   ok(link && /\/settings\.html$/.test(link.resolved), `resolving to ${link && link.resolved}`);
   ok((await p.evaluate(() => window.__copied))[0] === SHARE_URL,
-     'the link was still copied — the caveat does not block the share');
-  ok((await p.textContent('#share-profile-btn')).trim() === 'Copied!', 'and the label still confirms');
+     'the link was still copied — the caveat does not block the copy');
+  ok((await p.evaluate(SHAPE)).name === NAME_DONE, 'and the button still confirms');
   await p.screenshot({ path: `${SHOTS}/profile-share-private.png`,
                        clip: { x: 0, y: 0, width: 1100, height: 300 } });
   ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
@@ -559,7 +704,7 @@ console.log("[somebody else's public profile shares the page, with no caveat]");
   await ctx.close();
 }
 
-console.log('[no username in the payload -> no Share button at all]');
+console.log('[no username in the payload -> no copy-link button at all]');
 {
   const { ctx, p, errs } = await page({ publicProfile: { ...PUBLIC_PROFILE, username: '' },
                                         percentile: PERCENTILE, share: 'none', clipboard: 'ok' });
@@ -569,8 +714,8 @@ console.log('[no username in the payload -> no Share button at all]');
   ok(await p.evaluate(() => document.getElementById('share-slot').children.length === 0),
      'the slot is empty rather than holding a disabled control');
   ok(!(await p.isVisible('#share-note')), 'and no note either');
-  ok(!/\bShare\b/.test((await p.textContent('.profile-head')) || ''),
-     'the word "Share" appears nowhere in the head');
+  ok(await p.evaluate(() => document.querySelectorAll('.share-btn').length === 0),
+     'and no copy-link control is left anywhere on the page');
   ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
   await ctx.close();
 }
@@ -603,7 +748,7 @@ console.log('[a hostile username survives the URL and stays inert]');
   ok(parsed.origin === ORIGIN && parsed.path.startsWith('/@'),
      `it is still a /@name URL on this origin (${parsed.path})`);
   ok(parsed.back === XSS, 'and it decodes back to the username the profile actually has');
-  ok((await p.textContent('#share-profile-btn')).trim() === 'Copied!', 'the button behaved normally');
+  ok((await p.evaluate(SHAPE)).name === NAME_DONE, 'the button behaved normally');
   ok(errs.length === 0, 'no uncaught errors (' + (errs[0] ?? '') + ')');
   await ctx.close();
 }

@@ -100,6 +100,96 @@ SELECT 'broke' || i,
        NOW() - INTERVAL '10 days' - i * INTERVAL '1 day'
 FROM generate_series(1, 5) i;
 
+-- ── accplayer: history[].acc asserted against hand-counted values ─
+-- mk_questions above computes hadMistake from a formula, so a test built on
+-- it would re-derive the implementation rather than check it. These three
+-- payloads are written out so the expected accuracy can be counted by eye:
+--
+--   accs1  10 questions, 2 with hadMistake  → acc must be exactly 80
+--   accs2   4 questions, 0 with hadMistake  → acc must be exactly 100
+--   accs3   0 questions (empty array)       → acc must be NULL, not 0
+--
+-- accs3 is the one that matters most. "No data" and "got everything wrong"
+-- are different claims, and a function that reports 0 for a session with no
+-- questions puts a wrong number on somebody's public profile.
+--
+-- Every score below is >= 30 on purpose. The percentile population seeded
+-- above scores 30..89, and 02-test.sql asserts that a score of 20 sits at the
+-- 0th percentile — which holds only while no player's BEST 120s score is
+-- under 30. A score of 10 here would quietly move that boundary and fail a
+-- test in a different file about a different function.
+--
+-- accplayer and malformed are NEW users rather than renamed playerN ones.
+-- player1..player30 are addressed by name across 03-daily-test.sql,
+-- 04-duels-test.sql and 08-steal-test.sql — renaming one to give it a
+-- hand-built payload takes an opponent out from under forty-odd assertions in
+-- suites that have nothing to do with this one. They are created down here,
+-- AFTER the profile insert that numbers players by row_number() and after the
+-- percentile population block, so they disturb neither: they get exactly the
+-- sessions written below and no generated ones, which is also why there is no
+-- DELETE to undo.
+INSERT INTO auth.users (id, email)
+VALUES (gen_random_uuid(), 'accplayer@example.test'),
+       (gen_random_uuid(), 'malformed@example.test');
+
+INSERT INTO public.profiles (id, username, is_public, created_at)
+SELECT u.id,
+       CASE u.email WHEN 'accplayer@example.test' THEN 'accplayer'
+                    ELSE 'malformed' END,
+       TRUE,
+       NOW() - INTERVAL '120 days'
+FROM auth.users u
+WHERE u.email IN ('accplayer@example.test', 'malformed@example.test');
+
+INSERT INTO public.game_sessions
+  (session_key, user_id, score, duration_seconds, questions, created_at)
+VALUES
+  ('accs1',
+   (SELECT id FROM public.profiles WHERE username = 'accplayer'),
+   31, 120,
+   -- 10 entries, indexes 3 and 7 are the mistakes.
+   (SELECT jsonb_agg(jsonb_build_object(
+      'display', 'x', 'operation', 'addition', 'answer', 1, 'timeMs', 1500,
+      'hadMistake', i IN (3, 7)))
+    FROM generate_series(1, 10) i),
+   NOW() - INTERVAL '3 days'),
+  ('accs2',
+   (SELECT id FROM public.profiles WHERE username = 'accplayer'),
+   35, 120,
+   (SELECT jsonb_agg(jsonb_build_object(
+      'display', 'x', 'operation', 'addition', 'answer', 1, 'timeMs', 1500,
+      'hadMistake', FALSE))
+    FROM generate_series(1, 4) i),
+   NOW() - INTERVAL '2 days'),
+  ('accs3',
+   (SELECT id FROM public.profiles WHERE username = 'accplayer'),
+   40, 120, '[]'::jsonb,
+   NOW() - INTERVAL '1 day');
+
+-- ── malformed: a questions payload that is the wrong shape throughout ──
+-- `questions` is client-supplied JSONB with no shape constraint beyond "is an
+-- array" (hardening.sql §4), so every reader has to be total over garbage. An
+-- entry that is not an object, and a hadMistake that is a string rather than
+-- a boolean, must not abort get_public_profile or be counted as a mistake.
+-- The profile itself is created in the block above, alongside accplayer's.
+INSERT INTO public.game_sessions
+  (session_key, user_id, score, duration_seconds, questions, created_at)
+VALUES
+  -- 2 objects survive the shape filter; neither has a literal `true`
+  -- hadMistake, so acc must be exactly 100. The string "true" is NOT a
+  -- mistake: the convention in this file is that only literal JSON true is.
+  ('malf1',
+   (SELECT id FROM public.profiles WHERE username = 'malformed'),
+   45, 120,
+   '[42, "nope", null, {"operation":"addition","hadMistake":"true"}, {"operation":"addition"}]'::jsonb,
+   NOW() - INTERVAL '2 days'),
+  -- Nothing in the array is an object, so there is no question to score:
+  -- acc must be NULL rather than 100 over an empty count.
+  ('malf2',
+   (SELECT id FROM public.profiles WHERE username = 'malformed'),
+   50, 120, '[1, 2, 3]'::jsonb,
+   NOW() - INTERVAL '1 day');
+
 -- ── An anonymous session with an impossible score ────────────────
 -- user_id IS NULL, so it must not appear in any percentile population and must
 -- not be attributable to a profile. If a percentile ever reflects this row,

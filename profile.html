@@ -31,7 +31,7 @@
 
       <div class="profile-head">
         <!-- Same pair of slots as dashboard.html, filled by the same function
-             in js/util.js: the Share button beside the name, its note (the
+             in js/util.js: the copy-link icon beside the name, its note (the
              private-profile caveat) underneath. -->
         <div class="identity-row">
           <h1 id="profile-name"></h1>
@@ -47,9 +47,14 @@
 
       <!-- Same structure as dashboard.html, in the same order, rendered by the
            same functions in js/stats.js: strip → score over time → by
-           operation. The dashboard's Recent Games list has no counterpart
-           here on purpose — get_public_profile returns no per-session rows,
-           and publishing them would be a cross-user data exposure.
+           operation → recent games.
+
+           Recent Games is here now, drawn from get_public_profile's `history`
+           rather than from game_sessions, which a visitor cannot read. What
+           crosses that boundary is per-session figures only — date, score,
+           duration and a server-computed accuracy percent. The questions
+           those figures came from stay on the server, and so does the session
+           key, except back to the owner. See docs/social-api.md.
 
            The note under the strip is the dashboard's #stats-note element,
            and it carries the two figures the removed Personal Bests panel
@@ -57,9 +62,17 @@
       <div class="stat-strip" id="stat-strip" style="display:none"></div>
       <p class="stats-note" id="stats-note" style="display:none"></p>
 
+      <!-- Same three panels as dashboard.html, in the same order, drawn by
+           the same CSS. The dashboard reads game_sessions directly; this page
+           gets the identical figures from get_public_profile's `history`. -->
       <div class="panel" id="chart-panel" style="display:none">
         <div class="panel-head">
           <h2>Score Over Time</h2>
+          <div class="chart-range-controls">
+            <button class="chart-range-btn active" data-range="20">Last 20</button>
+            <button class="chart-range-btn" data-range="100">Last 100</button>
+            <button class="chart-range-btn" data-range="all">All Time</button>
+          </div>
         </div>
         <div class="chart-container">
           <canvas id="profile-chart"></canvas>
@@ -72,6 +85,43 @@
           <span class="panel-note">Average time per question, most recent 200 games</span>
         </div>
         <div class="op-bars" id="op-bars"></div>
+      </div>
+
+      <!-- The Review column is present only on your own profile: its link
+           needs a session key, and get_public_profile emits one only to the
+           owner. js/profile.js removes the <th> as well as the cells, so a
+           visitor gets a four-column table rather than a column of dashes. -->
+      <div class="panel" id="games-panel" style="display:none">
+        <div class="panel-head">
+          <h2>Recent Games</h2>
+          <div class="games-controls">
+            Show
+            <select id="page-size-select" class="page-size-select">
+              <option value="10">10</option>
+              <option value="20" selected>20</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+            per page
+          </div>
+        </div>
+        <table class="games-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Score</th>
+              <th>Duration</th>
+              <th>Accuracy</th>
+              <th id="games-review-th">Review</th>
+            </tr>
+          </thead>
+          <tbody id="games-tbody"></tbody>
+        </table>
+        <div class="pagination-row">
+          <button class="btn" id="prev-btn" disabled>&larr; Prev</button>
+          <span class="page-info" id="page-info"></span>
+          <button class="btn" id="next-btn">Next &rarr;</button>
+        </div>
       </div>
 
     </div>

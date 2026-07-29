@@ -46,7 +46,7 @@ preview it before publishing.
     "multiplication": { "avg_ms": 1980, "count": 1990, "accuracy": 0.951 },
     "division":       { "avg_ms": 2310, "count": 1990, "accuracy": 0.933 }
   },
-  "history": [ { "d": "2026-07-21", "score": 78, "duration": 120 } ],
+  "history": [ { "d": "2026-07-21", "score": 78, "duration": 120, "acc": 94 } ],
   "days_practiced": 44,
   "streak": 6
 }
@@ -58,7 +58,24 @@ preview it before publishing.
   `1 - (questions with hadMistake / count)`.
   **Computed over the most recent 200 sessions only**, because it unnests the whole
   `questions` payload. `total_games`, `bests` and `accuracy` are all-time.
-- `history` — up to the most recent 60 sessions, oldest first, for the sparkline.
+- `history` — up to the most recent **500** sessions, oldest first. It feeds both the
+  Score Over Time chart and the Recent Games table, which is why it carries per-session
+  figures rather than just a score. 500 is `SESSION_WINDOW` in `js/dashboard.js`: the
+  public profile draws the same two panels as the dashboard, so both pages must see the
+  same window or "All Time" means two different spans for the same player. Change one
+  and change the other.
+  - `acc` — whole percent, 0–100, of questions answered without a mistake. `null` for a
+    session that stored no questions; the client renders that as an em dash, because
+    "no data" and "got everything wrong" are different claims. Computed server-side —
+    the client cannot derive it, because deriving it needs the `questions` payload and
+    that never leaves the server.
+  - `key` — the session key, **non-null only when `is_owner` is true**. It is the one
+    identifier this API emits, and it goes only to the user whose sessions these are,
+    so their own `/@name` can offer the same Review link the dashboard does. On
+    anybody else's profile the field is present and `null` — `jsonb_build_object`
+    keeps null values, so do not read presence as permission. A client must test that
+    the key is a non-empty string, which is what makes the Recent Games table four
+    columns wide for a visitor and five for the owner.
 - `streak` — consecutive UTC days with at least one session, ending today or
   yesterday. Zero if the last session is older than that.
 

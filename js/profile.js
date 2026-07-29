@@ -25,8 +25,14 @@ const PROFILE_AVG_WINDOW = 10;
 
 // Kept so the chart can be rebuilt when the theme changes — Chart.js resolves
 // colours once, at construction.
-let profileChart   = null;
-let profileHistory = [];
+//
+// profileHistoryAll is every row the server sent, oldest-first;
+// profileHistory is the slice the range buttons have selected and the only
+// one drawHistoryChart ever reads. Keeping both means switching range is a
+// re-slice of data already in hand rather than another round trip.
+let profileChart      = null;
+let profileHistory    = [];
+let profileHistoryAll = [];
 
 // Which profile to show. Three URL shapes reach this page:
 //
@@ -174,15 +180,14 @@ async function renderProfile(profile) {
     renderOwnerBanner();
   }
 
-  // Share this profile's /@name. Sharing the page you are looking at is
-  // normal, so the button is here on somebody else's profile too — and a
+  // Copy a link to this profile's /@name. Linking the page you are looking at
+  // is normal, so the button is here on somebody else's profile too — and a
   // public profile, mine or not, gets no caveat. The only link that needs one
   // is the one nobody but its owner can open, which is exactly the case the
   // banner above covers, computed once and used by both.
   renderShareControl({
     username:  username,
     isPrivate: minePrivate,
-    title:     username ? `${username} — Arithmetic Trainer` : 'Arithmetic Trainer',
   });
 
   const totalGames = Number(profile.total_games) || 0;
@@ -191,12 +196,16 @@ async function renderProfile(profile) {
     return;
   }
 
-  // Same order as the dashboard: strip → note → score over time → by
-  // operation. Recent Games is the dashboard's alone.
+  // Same panels as the dashboard, in the same order: strip → note → score
+  // over time → by operation → recent games. The dashboard reads
+  // game_sessions directly; everything here comes out of `history`, which
+  // get_public_profile bounds to the same 500-session window the dashboard
+  // pulls. Two pages showing one player must not disagree about the span.
   renderStatStrip(document.getElementById('stat-strip'), profile);
   renderRecentAverage(profile);
   renderHistoryChart(profile.history);
   renderOps(profile.ops);
+  renderGamesPanel(profile.history, profile.is_owner === true);
   await renderPercentile(profile.bests);
 }
 
@@ -317,14 +326,39 @@ function renderHistoryChart(history) {
   // One point is not a line, and Chart.js may not have loaded at all.
   if (rows.length < 2 || typeof Chart === 'undefined') return;
 
-  profileHistory = rows;
+  profileHistoryAll = rows;
   show('chart-panel');
-  drawHistoryChart();
+
+  // The same three ranges as the dashboard, wired the same way. `history` is
+  // oldest-first, so a range is the LAST n rows — the dashboard slices the
+  // first n of a newest-first list and reverses, which is the same window
+  // written the other way round.
+  document.querySelectorAll('.chart-range-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const r = btn.dataset.range;
+      setProfileChartRange(r === 'all' ? 'all' : parseInt(r, 10));
+    });
+  });
+
+  setProfileChartRange(20);
 
   // Chart.js resolves colours at construction, so rebuild on theme change.
   window.addEventListener('zt-theme-change', () => {
     if (profileChart) { profileChart.destroy(); profileChart = null; }
     drawHistoryChart();
+  });
+}
+
+function setProfileChartRange(range) {
+  profileHistory = range === 'all'
+    ? profileHistoryAll
+    : profileHistoryAll.slice(-range);
+
+  if (profileChart) { profileChart.destroy(); profileChart = null; }
+  drawHistoryChart();
+
+  document.querySelectorAll('.chart-range-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.range === String(range));
   });
 }
 
@@ -388,9 +422,129 @@ function drawHistoryChart() {
   });
 }
 
+// ── Recent games ──────────────────────────────────────────────
+// The dashboard's table, over the same window, drawn from `history` instead
+// of from game_sessions — a visitor cannot read that table, which is the
+// whole reason get_public_profile exists.
+//
+// The Review column is the one difference between what the owner sees and
+// what a visitor sees, and it is a difference in the DATA, not in the CSS: a
+// review link needs a session key, and get_public_profile emits `key` only
+// when is_owner. So the column is removed outright rather than rendered
+// empty — a header over four hundred blank cells is a promise the page
+// cannot keep. `hasReview` is computed from the payload rather than from
+// is_owner alone, so an owner whose rows somehow arrive without keys gets
+// the four-column table rather than a column of broken links.
+function renderGamesPanel(history, isOwner) {
+  const rows = Array.isArray(history) ? history.filter(Boolean) : [];
+  if (!rows.length) return;
+
+  // Newest first, the order the table is read in. history arrives
+  // oldest-first because that is the order the chart wants.
+  const games     = [...rows].reverse();
+  const hasReview = isOwner && games.some(g => typeof g.key === 'string' && g.key);
+
+  const th = document.getElementById('games-review-th');
+  if (th && !hasReview) th.remove();
+
+  show('games-panel');
+
+  let currentPage = 0;
+  let pageSize    = 20;
+
+  const renderPage = () => {
+    const start = currentPage * pageSize;
+    renderGamesRows(games.slice(start, start + pageSize), hasReview);
+
+    // Math.max(1, …): an empty page count would render "Page 1 of 0".
+    const totalPages = Math.max(1, Math.ceil(games.length / pageSize));
+    document.getElementById('page-info').textContent =
+      `Page ${currentPage + 1} of ${totalPages} (${games.length} total)`;
+    document.getElementById('prev-btn').disabled = currentPage === 0;
+    document.getElementById('next-btn').disabled = currentPage >= totalPages - 1;
+  };
+
+  document.getElementById('page-size-select').addEventListener('change', e => {
+    pageSize    = parseInt(e.target.value, 10) || 20;
+    currentPage = 0;
+    renderPage();
+  });
+
+  document.getElementById('prev-btn').addEventListener('click', () => {
+    if (currentPage > 0) { currentPage--; renderPage(); }
+  });
+
+  document.getElementById('next-btn').addEventListener('click', () => {
+    if (currentPage < Math.ceil(games.length / pageSize) - 1) {
+      currentPage++;
+      renderPage();
+    }
+  });
+
+  renderPage();
+}
+
+function renderGamesRows(games, hasReview) {
+  const tbody = document.getElementById('games-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  for (const g of games) {
+    const score = numberOrNull(g.score);
+    const dur   = numberOrNull(g.duration);
+    // A null `acc` is a session that stored no questions. An em dash, not 0%
+    // — "no data" and "got everything wrong" are different claims.
+    const acc   = numberOrNull(g.acc);
+
+    const tr = document.createElement('tr');
+    // escapeHtml on every one of these: `d` and the numbers come from another
+    // user's row, and this page renders profiles that are not the viewer's.
+    tr.innerHTML = `
+      <td>${escapeHtml(formatGameDate(g.d))}</td>
+      <td><strong>${escapeHtml(score === null ? '—' : score)}</strong></td>
+      <td>${escapeHtml(dur === null ? '—' : dur + 's')}</td>
+      <td>${escapeHtml(acc === null ? '—' : acc + '%')}</td>
+    `;
+
+    if (hasReview) {
+      const td = document.createElement('td');
+      const key = typeof g.key === 'string' ? g.key : '';
+      if (key) {
+        const a = document.createElement('a');
+        a.className = 'view-session-link';
+        a.href      = 'results.html?session=' + encodeURIComponent(key);
+        a.textContent = 'View';
+        // Same handoff the dashboard uses: results.html reads the key from
+        // localStorage, so it has to be there before the navigation.
+        a.addEventListener('click', (e) => {
+          e.preventDefault();
+          localStorage.setItem('zt_pending_session', key);
+          window.location.href = a.href;
+        });
+        td.appendChild(a);
+      } else {
+        td.textContent = '—';
+      }
+      tr.appendChild(td);
+    }
+
+    tbody.appendChild(tr);
+  }
+}
+
 // ── Formatting ────────────────────────────────────────────────
 // numberOrNull, formatCount, formatPercent and formatSeconds live in
 // js/stats.js — the dashboard needs the same four.
+
+// The table's date carries the year; the chart's axis label does not, because
+// it is one tick among many. Same midday pinning as formatHistoryDate, for
+// the same reason.
+function formatGameDate(d) {
+  if (!d) return '—';
+  const date = new Date(String(d).length === 10 ? `${d}T12:00:00` : d);
+  if (isNaN(date.getTime())) return String(d);
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
 
 function formatHistoryDate(d) {
   if (!d) return '';
