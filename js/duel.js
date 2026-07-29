@@ -1178,14 +1178,37 @@ function showDuelResult(d, submitRes) {
   renderDuelExpiry(d);
   renderDuelPace({
     duration, myScore, theirScore, record, revealed, myLabel, themLabel,
+    // Which quantity the chart plots, not just which mode was played — see
+    // renderDuelPace. A steal duel gets actual score, a classic one gets
+    // projected.
+    steal:       stealModeOf(d),
     myPoints:    duelPointsOf(d, me),
     theirPoints: duelPointsOf(d, them),
   });
 }
 
 // ── The pace graph ────────────────────────────────────────────
-// Projected score over the run: banked × duration ÷ elapsed — the same curve,
-// and the same warm-up gates, as renderRunGraph() in js/results.js.
+// TWO DIFFERENT QUANTITIES, because the two modes are two different games.
+//
+//   Classic — PROJECTED score: banked × duration ÷ elapsed, the same curve and
+//             the same warm-up gates as renderRunGraph() in js/results.js. Both
+//             players work through the sequence alone and uncontested, so "at
+//             this rate you finish on 84" is a real prediction, and it is the
+//             only thing that makes two runs of different lengths comparable
+//             mid-flight.
+//
+//   Steal   — ACTUAL score, a step at each point won. A projection here would
+//             be a lie dressed as arithmetic: the points are a SHARED POOL that
+//             both players are racing for, so extrapolating one player's rate
+//             assumes the other stops competing. Worse, the two projections can
+//             sum to more points than the sequence contains — a chart claiming
+//             a total that could not exist. The actual score has none of those
+//             problems and is the number both players were watching anyway.
+//
+// The warm-up gates go with the projection and not with the mode: they exist
+// because banked ÷ elapsed is wild in the first few seconds, and an actual
+// score is exact from the first point. So a steal line starts at (0, 0) and
+// steps, and no point is ever withheld from it.
 //
 // WHAT THIS IS DRAWN FROM, stated because a chart people screenshot should not
 // be quietly interpolated:
@@ -1235,30 +1258,69 @@ function renderDuelPace(input) {
   const myPts    = Array.isArray(i.myPoints)    && i.myPoints.length    ? i.myPoints    : localPts;
   const themRaw  = Array.isArray(i.theirPoints) ? i.theirPoints : [];
 
-  // banked-so-far extrapolated to the full run, the same maths results.js uses.
+  const isSteal = i.steal === true;
+
+  // Steal: the running score, one step per point won. Classic: banked-so-far
+  // extrapolated to the full run, the same maths results.js uses.
+  //
+  // `n` is how many MEASURED points made it onto the line, kept separately
+  // because the array length also counts the synthetic (0, 0) origin and the
+  // terminal point — and "is this a real curve or a fallback" is a question
+  // about measurements, not about array length.
   const curve = (times, finalScore) => {
-    const out = [];
+    const pts = [];
+    let n = 0;
     for (let k = 0; k < times.length; k++) {
       const x = Number(times[k]);
+      // The server's array IS the ordered list of points won, so the index is
+      // the cumulative count. A time dropped below for being out of range was
+      // still a point won, which is why this is k + 1 and not a counter over
+      // the accepted ones.
       const banked = k + 1;
       if (!(x > 0) || x > duration) continue;
-      if (banked < DUEL_WARMUP_Q || x < DUEL_WARMUP_SEC) continue;
-      out.push({ x: duelRound1(x), y: duelRound1(banked * duration / x) });
+      // Warm-up gates belong to the projection, not to the mode. Skipping the
+      // first points of an ACTUAL score would draw a line that starts partway
+      // up and claims the player was there from the start.
+      if (!isSteal && (banked < DUEL_WARMUP_Q || x < DUEL_WARMUP_SEC)) continue;
+      n++;
+      pts.push({
+        x: duelRound1(x),
+        y: isSteal ? banked : duelRound1(banked * duration / x),
+      });
     }
+    // Every run starts on nothing. Without this the steal line begins at the
+    // first point won, which reads as though the player was already ahead
+    // before the duel started.
+    if (isSteal) pts.unshift({ x: 0, y: 0 });
     // Terminal point: the score actually finished on, so the line lands on the
     // number in the card above it.
-    if (finalScore !== null) out.push({ x: duration, y: finalScore });
-    return out;
+    if (finalScore !== null) pts.push({ x: duration, y: finalScore });
+    return { pts, n };
   };
 
-  const youPts = curve(myPts, i.myScore);
+  const you  = curve(myPts,   i.myScore);
+  const them = curve(themRaw, i.theirScore);
 
   panel.style.display = 'block';
 
-  // Fewer than three plotted points is not a curve.
-  const havePace  = youPts.length >= 3;
-  const themCurve = curve(themRaw, i.theirScore);
-  const haveThem  = themCurve.length >= 3;
+  // What counts as a real line, per mode.
+  //
+  // Classic: fewer than three plotted points is not a curve.
+  //
+  // Steal: one measured point is already an exact step, so one is enough. And
+  // a side that finished on ZERO with no times is not missing data — winning
+  // nothing is precisely a flat line at zero, and it is drawn solid because it
+  // is measured. That distinction is only available in this mode: a final
+  // score of 0 with an empty timeline is the one case where "no points" and
+  // "no record of the points" cannot be confused.
+  const real = (c, finalScore) => isSteal
+    ? (c.n >= 1 || finalScore === 0)
+    : c.pts.length >= 3;
+
+  const youPts    = you.pts;
+  const themCurve = them.pts;
+  const havePace  = real(you,  i.myScore);
+  const haveThem  = real(them, i.theirScore);
 
   // Their real pace when the server gave it, otherwise the one thing that IS
   // known about them — the score they finished on — held flat and labelled.
@@ -1272,25 +1334,40 @@ function renderDuelPace(input) {
     // viewer's would label a chart carrying a real opponent curve "Final
     // scores only", which is the one thing this caption exists not to do.
     note.textContent = (havePace || haveThem)
-      ? 'Projected score over the run'
+      ? (isSteal ? 'Score over the run' : 'Projected score over the run')
       : 'Final scores only';
   }
   if (caption) {
-    const bothReal =
-      'Both lines are projected score — questions banked so far, extrapolated to the full '
-      + duration + ' seconds. Where your line is above theirs, you were ahead on pace at that '
-      + 'moment. Only the times are shared, never the answers, and only once both runs are in.';
-    const yoursOnly =
-      'Your line is your projected score — questions banked so far, extrapolated to the full '
-      + duration + ' seconds. Their per-answer times were not recorded for this duel, so their '
-      + 'line is the score they finished on, held flat.';
-    const theirsOnly =
-      'Their line is projected score — questions banked so far, extrapolated to the full '
-      + duration + ' seconds. Your own per-answer times are not available for this run, so your '
-      + 'line is the score you finished on, held flat.';
-    const neither =
-      "The per-answer timeline for this run isn't available, so this is the honest "
-      + 'version: the two final scores, nothing interpolated between them.';
+    // Two sets of wording, because the two charts plot two different things
+    // and a caption that said "projected" over an actual score would be the
+    // chart lying about itself.
+    const bothReal = isSteal
+      ? 'Both lines are the running score — points won so far, stepping up the instant '
+        + 'each one was taken. Where your line is above theirs, you were actually ahead at '
+        + 'that moment. Only the times are shared, never the answers, and only once both '
+        + 'runs are in.'
+      : 'Both lines are projected score — questions banked so far, extrapolated to the full '
+        + duration + ' seconds. Where your line is above theirs, you were ahead on pace at that '
+        + 'moment. Only the times are shared, never the answers, and only once both runs are in.';
+    const yoursOnly = isSteal
+      ? 'Your line is your running score, stepping up as you took each point. Their '
+        + 'per-point times were not recorded for this duel, so their line is the score they '
+        + 'finished on, held flat.'
+      : 'Your line is your projected score — questions banked so far, extrapolated to the full '
+        + duration + ' seconds. Their per-answer times were not recorded for this duel, so their '
+        + 'line is the score they finished on, held flat.';
+    const theirsOnly = isSteal
+      ? 'Their line is their running score, stepping up as they took each point. Your own '
+        + 'per-point times are not available for this run, so your line is the score you '
+        + 'finished on, held flat.'
+      : 'Their line is projected score — questions banked so far, extrapolated to the full '
+        + duration + ' seconds. Your own per-answer times are not available for this run, so your '
+        + 'line is the score you finished on, held flat.';
+    const neither = isSteal
+      ? "The per-point timeline for this duel isn't available, so this is the honest "
+        + 'version: the two final scores, nothing interpolated between them.'
+      : "The per-answer timeline for this run isn't available, so this is the honest "
+        + 'version: the two final scores, nothing interpolated between them.';
 
     caption.textContent = havePace
       ? (haveThem ? bothReal  : yoursOnly)
@@ -1321,7 +1398,12 @@ function renderDuelPace(input) {
           // Same rule as the opponent's line below: dashed means "this is the
           // final score standing in for a curve", solid means measured.
           borderDash: havePace ? [] : [5, 4],
-          tension: havePace ? 0.3 : 0,
+          // A running score holds flat and then jumps: it is a step function,
+          // and smoothing it would draw the player creeping toward a point
+          // they took all at once. The projection is a genuine continuous
+          // curve and keeps its tension.
+          stepped: (isSteal && havePace) ? 'after' : false,
+          tension: (havePace && !isSteal) ? 0.3 : 0,
           pointRadius: 0,
           pointHoverRadius: 4,
           // The whole point of the chart: tint the gap between the two lines
@@ -1338,6 +1420,7 @@ function renderDuelPace(input) {
           // Dashed only when the line is the flat final-score fallback, so the
           // styling itself says whether it is a measured curve.
           borderDash: haveThem ? [] : [5, 4],
+          stepped: (isSteal && haveThem) ? 'after' : false,
           tension: 0,
           pointRadius: 0,
           pointHoverRadius: 4,
@@ -1372,10 +1455,19 @@ function renderDuelPace(input) {
           ticks: { font: { size: 11 }, maxTicksLimit: 12, color: cText },
         },
         y: {
-          beginAtZero: false,
-          min: Math.max(0, Math.floor(lo - pad)),
+          // An actual score is anchored at zero and the line genuinely starts
+          // there, so the axis must too — a cropped baseline would exaggerate
+          // every gap between the players. A projection is never near zero
+          // after the warm-up, so it keeps its padded window.
+          beginAtZero: isSteal,
+          min: isSteal ? 0 : Math.max(0, Math.floor(lo - pad)),
           max: Math.ceil(hi + pad),
-          title: { display: true, text: `Projected score (${duration}s)`, font: { size: 11 }, color: cText },
+          title: {
+            display: true,
+            text: isSteal ? 'Points won' : `Projected score (${duration}s)`,
+            font: { size: 11 },
+            color: cText,
+          },
           grid: { color: cGrid },
           ticks: { font: { size: 11 }, precision: 0, color: cText },
         },

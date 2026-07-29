@@ -870,6 +870,159 @@ const src = v => JSON.stringify(v);
     await ctx.close();
   }
 
+  // ── Steal mode plots the ACTUAL score, not a projection ─────
+  //
+  // The points in a steal duel are a shared pool both players race for, so
+  // extrapolating one player's rate assumes the other stops competing — and
+  // two such projections can sum to more points than the sequence contains.
+  // The chart therefore plots what each side had actually won at that instant.
+  //
+  // These fixtures are chosen so the two readings are impossible to confuse.
+  // The viewer's first point lands at 10s: actual is 1, projected would be
+  // 1 x 120 / 10 = 12. Their third lands at 30s: actual 3, projected 12. Every
+  // assertion below picks a value that a projection could not produce.
+  const STEAL_YOU  = [10, 20, 30, 40, 50];   // 5 points
+  const STEAL_THEM = [15, 25, 35];           // 3 points
+
+  const stealPayload = (over = {}) => duelPayload(Object.assign({
+    mode: 'steal',
+    your_side: 'creator', status: 'complete', scores_revealed: true,
+    outcome: { type: 'decided', winner: 'creator' },
+    creator:  { played: true, status: 'complete', submitted_at: '2026-07-28T00:05:00Z',
+                score: 5, is_you: true,  points: STEAL_YOU },
+    opponent: { played: true, status: 'complete', submitted_at: '2026-07-28T00:05:00Z',
+                score: 3, is_you: false, points: STEAL_THEM },
+  }, over));
+
+  {
+    console.log('[steal: the chart is the running score, not a projection]');
+    const rpc = { get_duel_by_key: `() => (${src(stealPayload())})` };
+    const { ctx, page, errors } = await newPage(browser, { session: SESSION, rpc });
+    await page.goto(`${BASE}/duel.html?d=${KEY}`, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(600);
+    const body = (await page.textContent('body')) || '';
+    const cfg = await page.evaluate(() => {
+      const c = window.__charts[window.__charts.length - 1];
+      const [you, them] = c.data.datasets;
+      const at = (d, x) => d.data.filter(p => p.x === x).map(p => p.y);
+      return {
+        youData: you.data.map(p => [p.x, p.y]),
+        first:   you.data[0],
+        lastYou: you.data[you.data.length - 1],
+        lastThem: them.data[them.data.length - 1],
+        youAt10: at(you, 10), youAt30: at(you, 30), themAt25: at(them, 25),
+        youMaxY: Math.max(...you.data.map(p => p.y)),
+        youStep: you.stepped, themStep: them.stepped,
+        youTension: you.tension,
+        youDash: you.borderDash, themDash: them.borderDash,
+        yTitle: c.options.scales.y.title.text,
+        yMin: c.options.scales.y.min,
+        fill: you.fill,
+      };
+    });
+
+    // The three discriminating values. Each is the actual score; each would be
+    // 12 under the projection the classic chart draws.
+    ok(cfg.youAt10.length === 1 && cfg.youAt10[0] === 1,
+       `one point won by 10s reads as 1, not 12 (got ${JSON.stringify(cfg.youAt10)})`);
+    ok(cfg.youAt30.length === 1 && cfg.youAt30[0] === 3,
+       `three points by 30s reads as 3, not 12 (got ${JSON.stringify(cfg.youAt30)})`);
+    ok(cfg.themAt25.length === 1 && cfg.themAt25[0] === 2,
+       `the opponent's second point reads as 2 (got ${JSON.stringify(cfg.themAt25)})`);
+    // A running score can never exceed the score it finished on. A projection
+    // routinely does, which is the whole objection to drawing one here.
+    ok(cfg.youMaxY === 5,
+       `no plotted value exceeds the final score of 5 (peak was ${cfg.youMaxY})`);
+
+    ok(cfg.first && cfg.first.x === 0 && cfg.first.y === 0,
+       `the line starts at (0, 0) — nobody has won anything yet (got ${JSON.stringify(cfg.first)})`);
+    ok(cfg.lastYou.x === 120 && cfg.lastYou.y === 5, 'and lands on the final score at the end');
+    ok(cfg.lastThem.x === 120 && cfg.lastThem.y === 3, 'as does theirs, on their own score');
+
+    // No warm-up gate: with DUEL_WARMUP_Q = 3 the first two points would be
+    // dropped, and the line would start partway up as though the player had
+    // been there all along.
+    ok(cfg.youData.length === 7,
+       `every point is plotted — origin + 5 + terminal (got ${cfg.youData.length})`);
+
+    ok(cfg.youStep === 'after' && cfg.themStep === 'after',
+       `both lines are stepped, because a score jumps rather than creeps (got ${cfg.youStep} / ${cfg.themStep})`);
+    ok(cfg.youTension === 0, 'and unsmoothed, so no point is drawn as a gradual climb');
+    ok(Array.isArray(cfg.youDash) && cfg.youDash.length === 0
+       && Array.isArray(cfg.themDash) && cfg.themDash.length === 0,
+       'both are solid, because both were measured');
+    ok(cfg.yMin === 0, 'the y-axis is anchored at zero rather than cropped');
+    ok(cfg.yTitle === 'Points won', `the axis says what it plots (got "${cfg.yTitle}")`);
+    ok(cfg.fill && cfg.fill.target === 1, 'the lead is still tinted between the two lines');
+
+    ok((await page.textContent('#duel-graph-note')) === 'Score over the run',
+       'the note does not say "projected"');
+    ok(/Both lines are the running score/.test(body), 'and neither does the caption');
+    ok(!/projected/i.test(body), 'the word "projected" appears nowhere on a steal result');
+    ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
+    await page.screenshot({ path: `${SHOTS}/duel-steal-pace.png` });
+    await ctx.close();
+  }
+
+  // Winning nothing is a measurement, not missing data — and it is the one
+  // case where the two can be told apart, because a final score of 0 is
+  // exactly what an empty timeline should produce.
+  {
+    console.log('[steal: a side that won nothing is a solid flat zero]');
+    const rpc = { get_duel_by_key: `() => (${src(stealPayload({
+      outcome: { type: 'decided', winner: 'creator' },
+      opponent: { played: true, status: 'complete', submitted_at: '2026-07-28T00:05:00Z',
+                  score: 0, is_you: false, points: [] },
+    }))})` };
+    const { ctx, page, errors } = await newPage(browser, { session: SESSION, rpc });
+    await page.goto(`${BASE}/duel.html?d=${KEY}`, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(600);
+    const cfg = await page.evaluate(() => {
+      const c = window.__charts[window.__charts.length - 1];
+      const [, them] = c.data.datasets;
+      return {
+        ys: [...new Set(them.data.map(p => p.y))],
+        dash: them.borderDash,
+        span: [them.data[0].x, them.data[them.data.length - 1].x],
+      };
+    });
+    ok(cfg.ys.length === 1 && cfg.ys[0] === 0,
+       `their line is flat at zero (got ${JSON.stringify(cfg.ys)})`);
+    ok(cfg.span[0] === 0 && cfg.span[1] === 120, 'and spans the whole run');
+    ok(Array.isArray(cfg.dash) && cfg.dash.length === 0,
+       'drawn SOLID — winning nothing was measured, it is not a missing timeline');
+    ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
+    await ctx.close();
+  }
+
+  // A steal duel from before the pace fix: no times on either side, and a
+  // non-zero score, so the flat fallback and its caption still apply.
+  {
+    console.log('[steal: no timeline at all still degrades honestly]');
+    const rpc = { get_duel_by_key: `() => (${src(stealPayload({
+      creator:  { played: true, status: 'complete', submitted_at: '2026-07-28T00:05:00Z',
+                  score: 8, is_you: true, points: [] },
+      opponent: { played: true, status: 'complete', submitted_at: '2026-07-28T00:05:00Z',
+                  score: 21, is_you: false, points: [] },
+      outcome: { type: 'decided', winner: 'opponent' },
+    }))})` };
+    const { ctx, page, errors } = await newPage(browser, { session: SESSION, rpc });
+    await page.goto(`${BASE}/duel.html?d=${KEY}`, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(600);
+    const body = (await page.textContent('body')) || '';
+    ok((await page.textContent('#duel-graph-note')) === 'Final scores only',
+       'it is labelled "Final scores only"');
+    ok(/The per-point timeline for this duel isn't available/.test(body),
+       'and the caption says per-POINT, the thing a steal duel actually records');
+    const dashed = await page.evaluate(() => {
+      const c = window.__charts[window.__charts.length - 1];
+      return c.data.datasets.every(d => Array.isArray(d.borderDash) && d.borderDash.length === 2);
+    });
+    ok(dashed, 'both lines are dashed, because neither was measured');
+    ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
+    await ctx.close();
+  }
+
   await browser.close();
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

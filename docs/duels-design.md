@@ -168,7 +168,7 @@ the score, and by the time the flag flips, the duel can no longer be replayed �
 De-duplicated per question index, so a question fumbled and then answered correctly
 contributes one point at the time it was finally banked, matching the score.
 
-### Steal mode draws the same curve from a different table
+### Steal mode plots a different quantity, from a different table
 
 In a steal duel `duel_runs.answers` is not the record of what happened. Both players
 answer the same question and only one of them banks it, so the answers array — the
@@ -198,10 +198,42 @@ matters:
 - It is one instant per question, shared by both sides, so the two lines sit on one
   time base — which is what makes the tinted lead-change fill mean anything.
 
-Each side is measured from its own `started_at`, because the curve is
-`banked × duration ÷ elapsed` through that player's own run. Both sides of a steal
-duel start off one shared countdown, so the two origins are normally the same
-instant.
+Each side is measured from its own `started_at`, because each line describes that
+player's own run. Both sides of a steal duel start off one shared countdown, so the
+two origins are normally the same instant.
+
+#### The y-axis is the actual score, not the projected one
+
+This is the one place the two modes genuinely diverge, and it is a product decision
+rather than a consequence of the data.
+
+A classic duel plots **projected** score — `banked × duration ÷ elapsed`. Both players
+work through the sequence alone and uncontested, so "at this rate you finish on 84" is
+a real prediction, and it is the only thing that makes two runs comparable while they
+are still in flight.
+
+A steal duel plots the **actual** score, stepping up at each point won. A projection
+here would be arithmetic dressed up as a claim:
+
+- The points are a **shared pool**. Extrapolating one player's rate assumes the other
+  stops competing for the rest of the run, which is precisely the thing that cannot
+  happen in this mode.
+- Two projections can **sum to more points than the sequence contains**, so the chart
+  would assert a total that could not exist.
+- The running score is the number both players were watching while they played. It
+  needs no defending.
+
+Three consequences in `js/duel.js`:
+
+- **The warm-up gates do not apply.** They exist because `banked ÷ elapsed` is wild in
+  the first seconds; an actual score is exact from the first point. Withholding the
+  early points would draw a line that starts partway up and implies the player was
+  there all along.
+- **The line starts at `(0, 0)` and is stepped, not smoothed.** A score holds and then
+  jumps. Smoothing would draw a player creeping toward a point they took at once.
+- **A final score of zero with an empty timeline is measured, not missing.** It is the
+  only case where those two can be told apart, so that line is drawn solid rather than
+  as the dashed fallback.
 
 The reveal gate is untouched and is the same one the score passes: no times leave the
 server until both runs are in. A steal duel reveals its timeline under exactly the

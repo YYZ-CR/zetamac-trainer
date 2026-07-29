@@ -31,9 +31,15 @@ without an account.
 point and *both* players jump to the next question, so every question is a race.
 Arbitration runs on time-since-the-question-appeared, clamped against what the
 server itself observed, because awarding the point to whoever's packet arrived
-first would make it a contest of who has the better connection. It ends on the same
-pace graph a classic duel does, drawn from the instant each point was actually won —
-the answers you typed are not the record of a steal duel, the points you took are.
+first would make it a contest of who has the better connection. It ends on a pace
+graph drawn from the instant each point was actually won — the answers you typed are
+not the record of a steal duel, the points you took are.
+
+That graph plots the **actual running score**, where a classic duel's plots the
+projected one. The difference is not cosmetic: steal points are a shared pool, so
+extrapolating one player's rate assumes the other stops competing, and two such
+projections can sum to more points than the sequence contains. The steps are the
+lead changes, and they are real.
 
 **Leaderboards** at `/leagues.html` — the global boards first, then your clans.
 
