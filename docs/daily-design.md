@@ -145,6 +145,11 @@ one thing the daily exists to provide.
 - **Config is the canonical Zetamac default** — addition 2–100 + 2–100,
   multiplication 2–12 × 2–100, subtraction and division as their reverses, 120
   seconds. Every other config stays unranked, which is what keeps the board honest.
+- **A division divides by the first multiplication range.** `(a×b) ÷ a`, answer
+  `b` — never `(a×b) ÷ b`. Under the default that is `876 ÷ 12`, not `876 ÷ 73`;
+  Zetamac only asks the former, and dividing by an arbitrary two-digit number is a
+  different skill. Subtraction may still take either operand, because its two
+  ranges are identical and the choice is not observable.
 
 ## Exact payload shapes
 

@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "dev": "python3 -m http.server 8099 --bind 127.0.0.1",
-    "test": "node test_practice.js && node test_db.js && node test_profile.js && node test_username.mjs",
+    "test": "node test_practice.js && node test_game.js && node test_db.js && node test_profile.js && node test_username.mjs",
     "test:sql": "supabase/test/run.sh",
     "test:browser": "for f in test/browser/*.mjs; do echo \"== $f\"; node \"$f\" || exit 1; done"
   },

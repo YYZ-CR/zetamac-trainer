@@ -286,6 +286,14 @@ icon button has no text and the label is the only name it has.
 All three run on every push, as three jobs in `.github/workflows/ci.yml`. The SQL job
 brings up its own `postgres:16` service, so nothing there touches a real project.
 
+`test_game.js` loads `js/game.js` into a sandbox and asserts the *shape* of what
+the generator draws, not just that it draws something. The check that matters is
+the divisor: a division question is a reversed product and the divisor must always
+be the first multiplication range, so under the default 2–12 × 2–100 the game asks
+`876 ÷ 12` and never `876 ÷ 73`. It once asked both. The same contract is asserted
+server-side in `supabase/test/03-daily-test.sql`, because the daily, duel and steal
+puzzles are generated in SQL rather than by this file.
+
 `npm test` includes a check that the client-side username rule in `js/util.js`
 matches the `CHECK` constraint in `supabase/settings.sql` exactly — the same rule
 stated in two languages is a rule that drifts, and a mismatch means registration

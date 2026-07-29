@@ -43,12 +43,19 @@ function generateQuestion() {
     answer  = a * b;
 
   } else { // division
-    // Generate a multiplication pair, then present one of the reverse divisions
+    // Generate a multiplication pair, then present it as a division.
+    //
+    // The divisor is ALWAYS the first-range operand, never the second.
+    // Zetamac does the same, and the difference is not cosmetic: under
+    // the default 2\u201312 \u00d7 2\u2013100 it is the difference between dividing by
+    // a times-table number and dividing by an arbitrary two-digit one.
+    // Flipping produced questions like "876 \u00f7 73", which the real game
+    // never asks and which are a different skill entirely.
     const a       = randInt(config.mulMin1, config.mulMax1);
     const b       = randInt(config.mulMin2, config.mulMax2);
     const product = a * b;
-    if (Math.random() < 0.5) { display = `${product} \u00f7 ${a}`; answer = b; }
-    else                      { display = `${product} \u00f7 ${b}`; answer = a; }
+    display = `${product} \u00f7 ${a}`;
+    answer  = b;
   }
 
   return { op, display, answer };

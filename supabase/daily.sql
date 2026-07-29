@@ -132,11 +132,17 @@ REVOKE ALL ON TABLE public.daily_attempts FROM anon, authenticated;
 --   addition        a + b
 --   subtraction     (a+b) − a  or  (a+b) − b     — a reversed addition
 --   multiplication  a × b
---   division        (a*b) ÷ a  or  (a*b) ÷ b     — a reversed product
+--   division        (a*b) ÷ a                     — a reversed product
 --
 -- Subtraction and division are generated as reverses so their
 -- operands stay inside the configured ranges and the answers stay
 -- whole. Drawing a dividend directly would produce fractions.
+--
+-- Division does NOT flip, and that asymmetry is deliberate: the
+-- divisor is always the first-range draw, matching Zetamac. Under the
+-- default 2–12 × 2–100 the flipped form asks "876 ÷ 73" — a question
+-- the real game never poses, and a different skill from dividing by a
+-- times-table number.
 --
 -- The display glyphs are U+2212 MINUS SIGN, U+00D7 MULTIPLICATION
 -- SIGN and U+00F7 DIVISION SIGN — the same three the client renders,
@@ -237,15 +243,12 @@ BEGIN
         'operation', 'multiplication',
         'answer',    d.ma * d.mb)
 
-      WHEN 'division' THEN CASE WHEN d.flip THEN jsonb_build_object(
-          'display',   (d.ma * d.mb) || ' ' || v_divide || ' ' || d.ma,
-          'operation', 'division',
-          'answer',    d.mb)
-        ELSE jsonb_build_object(
-          'display',   (d.ma * d.mb) || ' ' || v_divide || ' ' || d.mb,
-          'operation', 'division',
-          'answer',    d.ma)
-        END
+      -- The divisor is always `ma`, the first-range draw, and never
+      -- `mb`. See the shape note above: this one does not flip.
+      WHEN 'division' THEN jsonb_build_object(
+        'display',   (d.ma * d.mb) || ' ' || v_divide || ' ' || d.ma,
+        'operation', 'division',
+        'answer',    d.mb)
 
       -- An operation name that is not one of the four. Falling
       -- through to NULL would put a JSON null in the array and make

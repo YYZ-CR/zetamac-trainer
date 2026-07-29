@@ -63,6 +63,34 @@ BEGIN
        <> (e->>'answer')::INT;
   PERFORM pg_temp.ok(n = 0, 'every addition question''s answer matches its display');
 
+  -- Division is a reversed product, and WHICH factor becomes the divisor is
+  -- the contract: always the first multiplication range, never the second.
+  -- The daily config is the Zetamac default 2–12 × 2–100, so a divisor of 73
+  -- means the generator flipped the pair and asked a question the real game
+  -- never asks. Both halves are checked because a divisor inside 2–12 can
+  -- happen by luck when the second draw lands there.
+  SELECT COUNT(*) INTO n
+    FROM jsonb_array_elements(a->'questions') e
+   WHERE e->>'operation' = 'division'
+     AND (split_part(e->>'display', ' ' || U&'\00f7' || ' ', 2))::INT
+           NOT BETWEEN 2 AND 12;
+  PERFORM pg_temp.ok(n = 0, 'every divisor comes from the first multiplication range');
+
+  SELECT COUNT(*) INTO n
+    FROM jsonb_array_elements(a->'questions') e
+   WHERE e->>'operation' = 'division'
+     AND (split_part(e->>'display', ' ' || U&'\00f7' || ' ', 1))::INT
+       <> (split_part(e->>'display', ' ' || U&'\00f7' || ' ', 2))::INT
+        * (e->>'answer')::INT;
+  PERFORM pg_temp.ok(n = 0, 'every division question''s answer matches its display');
+
+  -- A generator pinned to one divisor would satisfy both checks above.
+  SELECT COUNT(DISTINCT (split_part(e->>'display', ' ' || U&'\00f7' || ' ', 2))::INT)
+    INTO n
+    FROM jsonb_array_elements(a->'questions') e
+   WHERE e->>'operation' = 'division';
+  PERFORM pg_temp.ok(n >= 8, 'divisors spread across the 2-12 range');
+
   PERFORM pg_temp.ok((a->>'duration_seconds')::INT = 120, 'duration is 120s');
   PERFORM pg_temp.ok((a->>'seconds_remaining')::NUMERIC > 0, 'a fresh attempt has time left');
   PERFORM pg_temp.ok(a->>'status' = 'in_progress', 'a fresh attempt is in_progress');
