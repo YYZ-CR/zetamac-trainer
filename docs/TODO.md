@@ -111,7 +111,8 @@ Contract: **`docs/leaderboards-design.md`**.
 
 **The client half is done.** Leagues are **Leaderboards** in the nav and **clans** as
 the noun everywhere a person reads. `leagues.html` now shows the three global boards
-first — Today's Daily, Today's Best, All-Time Best, behind a tab control — and your
+first — All-Time Best, Today's Best, Today's Daily, behind a tab control, All-Time
+Best landing — and your
 clans below them. `getGlobalBoard(scope, limit)` in `js/db.js` calls
 `get_global_board(p_scope, p_limit)`; the page renders signed out, treats an empty
 board as an invitation and a failed call as a visibly different error state, and

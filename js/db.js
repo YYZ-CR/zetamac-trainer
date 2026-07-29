@@ -1043,7 +1043,9 @@ async function getLeagueBoard(key, scope) {
 // Nothing here is user-controlled except `username`, which the caller escapes.
 
 // The scopes get_global_board accepts. Exported as a constant so the page's
-// tab control and this file cannot drift apart.
+// tab control and this file cannot drift apart. This is a SET, not an order —
+// the order the tabs are offered in is GLOBAL_BOARDS in js/leagues.js, and
+// reordering that must not require touching this.
 const GLOBAL_BOARD_SCOPES = ['daily', 'today', 'all_time'];
 
 // A sentence for the user when the last getGlobalBoard() failed; null when it

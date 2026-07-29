@@ -105,10 +105,30 @@ which is a worse failure than the one being accepted.
 One page, three tabs. Every row is `rank · username · score`, and nothing else — no
 user ids, no session keys, no dates that could identify a run.
 
+**They are offered in the order All-Time Best · Today's Best · Today's Daily, and
+All-Time Best is the landing board.** That is the board a stranger arriving here is
+asking about — who is best at this — and it is the only one of the three that is
+never empty once anybody has ever played. The tabs then narrow from left to right:
+ever, today, today's puzzle.
+
+Today's Daily led in an earlier revision, on the argument that it is the most
+defensible ranking on the site. That is still true, and it is still what its own
+footer says — but it is an argument about trustworthiness rather than about what
+somebody opened the page to see, and it put the narrowest board in front of the
+broadest.
+
+The order lives in `GLOBAL_BOARDS` in `js/leagues.js`, one array, and the default
+scope is read from its first entry rather than written out separately, so a reorder
+cannot leave the page rendering three tabs with none of them active.
+`GLOBAL_BOARD_SCOPES` in `js/db.js` is a validation **set** and carries no order.
+
+The boards are numbered below in the order they were designed, which is no longer the
+order they are shown in; the numbers are references, not positions.
+
 ### 1. Today's Daily
 
-Rank on today's puzzle. This is the most defensible board on the site: one puzzle,
-the same questions for everyone, one attempt.
+*Third tab.* Rank on today's puzzle. This is the most defensible board on the site:
+one puzzle, the same questions for everyone, one attempt.
 
 **It is not a projection of `get_daily_leaderboard`.** An earlier draft said it was,
 and that turned out to make the three tabs of one page behave differently:
@@ -124,16 +144,17 @@ and its suite still pins the shared ranks there. One page, one ranking rule.
 
 ### 2. Today's Best
 
-The best 120-second default-settings run today, one row per player, across daily
-attempts, duel runs and solo games. Distinct from board 1 because a duel you won at 91,
-or a practice-day best, belongs on a "today" board even though it was not the daily.
+*Second tab.* The best 120-second default-settings run today, one row per player,
+across daily attempts, duel runs and solo games. Distinct from board 1 because a duel
+you won at 91, or a practice-day best, belongs on a "today" board even though it was
+not the daily.
 
 Ties break on the earlier `submitted_at`: first to get there holds the higher rank.
 
 ### 3. All-Time Best
 
-The same, without the date filter. One row per player — a player's own second-best
-run never displaces somebody else.
+*First tab, and the one the page lands on.* The same, without the date filter. One row
+per player — a player's own second-best run never displaces somebody else.
 
 ---
 

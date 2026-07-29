@@ -35,8 +35,9 @@ first would make it a contest of who has the better connection.
 
 **Leaderboards** at `/leagues.html` — the global boards first, then your clans.
 
-Three global boards behind a tab control: **Today's Daily** (rank on today's puzzle),
-**Today's Best** and **All-Time Best** (the best run per player, today or ever). All
+Three global boards behind a tab control, narrowing left to right: **All-Time Best**
+(the landing board), **Today's Best** — both the best run per player, ever or today —
+and **Today's Daily**, rank on today's puzzle. All
 three rank **120-second runs on the default settings** — a custom game or a different
 clock is a different game and ranks nowhere. **Today's Best** and **All-Time Best**
 count your ordinary solo games alongside daily attempts and duel runs; **Today's
