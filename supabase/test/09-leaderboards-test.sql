@@ -43,22 +43,31 @@
 --   lbtieb       duel 120s 5500 today, submitted  5m ago     5500     5500
 --   lbprivate    daily attempt today, 5400, is_public FALSE  5400     5400
 --   lbslow       duel 300s 6800 + duel 120s 5300 today       5300     5300
---   lbforge      duel 120s 4900 today, plus forged
---                game_sessions rows of 9997 and 9995         4900     4900
+--   lbforge      duel 120s 4900 today, plus DEFAULT-config
+--                solo runs of 9997 today and 9995 three
+--                days ago — unverified, and ranking          9997     9997
+--   lbsolo       solo 120s default 5350 today                5350     5350
+--   lbsoloold    solo 120s default 5150 five days ago       absent    5150
 --   lbold        duel 120s 6100 six days ago                absent    6100
 --   lbonly300    duel 300s 6900 today                       absent   absent
 --   lbnoname     duel 120s 6600 today, NO profile row       absent   absent
 --   lbunfin      duel 120s 6500 today, status in_progress   absent   absent
 --   lbnodaily    daily attempt today, in_progress, no score absent   absent
+--   lbnocfg      solo 120s 9700 today, config_key NULL      absent   absent
+--   lbsolo300    solo 300s 9600 today                       absent   absent
 --   (a guest)    duel 120s 7777 today, user_id NULL         absent   absent
---   hexadecimal  its real daily attempt, plus a forged
---                game_sessions row of 9999                 real daily score
+--   hexadecimal  its real daily attempt, plus a CUSTOM-config
+--                solo run of 9999                          real daily score
 --   lb001..lb130 duel 120s 1001..1130 today            enough players that
 --                                                      the limit clamp bites
 --
--- Scores that must appear on NO board, at any scope: 9999, 9997, 9995
--- (forged game_sessions), 6900 and 6800 (300-second runs), 6600 (no
--- username), 6500 (unsubmitted), 7777 (a guest, no username).
+-- Scores that must appear on NO board, at any scope: 9999 (custom
+-- config), 9700 (no config), 9600 and 6900 and 6800 (300-second runs),
+-- 6600 (no username), 6500 (unsubmitted), 7777 (a guest, no username).
+--
+-- 9997 and 9995 DO appear, on 'today' and 'all_time' and never on
+-- 'daily'. They are numbers a client reported and nothing checked. See
+-- §1 before reading that as a bug.
 
 \set ON_ERROR_STOP on
 SET client_min_messages = NOTICE;
@@ -259,6 +268,48 @@ BEGIN
   RETURN acc;
 END $$;
 
+-- A solo run: one game_sessions row, written the way the browser writes
+-- it. p_cfg is the stored settings — pass daily_default_config() for a
+-- qualifying run, anything else for a custom game, NULL for a session
+-- with no config_key at all (which the client never writes, and which
+-- the board must therefore refuse rather than assume about).
+--
+-- The score is a number handed over by the client. Nothing recomputes
+-- it, here or in production; that is the whole point of the source and
+-- the reason it is worth a helper of its own.
+CREATE OR REPLACE FUNCTION pg_temp.lb_solo(
+  p_user     UUID,
+  p_duration INTEGER,
+  p_score    INTEGER,
+  p_at       TIMESTAMPTZ,
+  p_cfg      JSONB)
+RETURNS TEXT LANGUAGE plpgsql AS $$
+DECLARE v_ckey TEXT; v_skey TEXT; n INT;
+BEGIN
+  v_skey := 'lbs' || substr(md5(random()::TEXT || clock_timestamp()::TEXT), 1, 12);
+  IF p_cfg IS NOT NULL THEN
+    v_ckey := substr(md5(p_cfg::TEXT), 1, 12);
+    INSERT INTO public.game_configs (key, config)
+    VALUES (v_ckey, p_cfg)
+    ON CONFLICT (key) DO UPDATE SET config = EXCLUDED.config;
+  END IF;
+
+  INSERT INTO public.game_sessions
+    (session_key, user_id, config_key, score, duration_seconds, questions, created_at)
+  VALUES (v_skey, p_user, v_ckey, p_score, p_duration, '[]'::JSONB, p_at);
+  GET DIAGNOSTICS n = ROW_COUNT;
+  PERFORM pg_temp.ok(n = 1, 'fixture: a solo run of ' || p_score || ' at '
+    || p_duration || 's' || CASE WHEN p_cfg IS NULL THEN ', no config' ELSE '' END);
+  RETURN v_skey;
+END $$;
+
+-- The settings a solo run has to have been played on to qualify. Read
+-- from the function the boards read, not copied — a literal here would
+-- pass forever if daily_default_config() ever changed underneath it,
+-- while the product's real sessions stopped matching.
+CREATE OR REPLACE FUNCTION pg_temp.lb_std_cfg()
+RETURNS JSONB LANGUAGE sql STABLE AS $$ SELECT public.daily_default_config(); $$;
+
 -- ════════════════════════════════════════════════════════════════
 -- 0. Fixtures
 --
@@ -325,25 +376,68 @@ BEGIN
   uid := pg_temp.lb_user('lbonly300');
   PERFORM pg_temp.lb_duel_run(uid, 300, 6900, v_now - INTERVAL '6 minutes');
 
-  -- ── The forger ─────────────────────────────────────────────────
+  -- ── Solo runs, the unverified source ───────────────────────────
+  -- game_sessions is written directly by the client under
+  --   WITH CHECK (auth.uid() = user_id OR user_id IS NULL)
+  -- and the anon key is public, so every row below is one POST away for
+  -- anybody, at any score they choose. The boards rank them anyway —
+  -- see §1 and docs/leaderboards-design.md. These fixtures exist to pin
+  -- WHICH of them rank, because that is the part a change can break.
+
+  -- lbforge scores 9997 today on the default settings, with a real
+  -- server-scored duel run at 4900 underneath it. Both numbers are on
+  -- the board; the one that ranks is the higher, and it is the one
+  -- nothing checked.
   uid := pg_temp.lb_user('lbforge');
   PERFORM pg_temp.lb_duel_run(uid, 120, 4900, v_now - INTERVAL '4 minutes');
-  INSERT INTO public.game_sessions
-    (session_key, user_id, score, duration_seconds, questions, created_at)
-  VALUES ('lbforge_today', uid, 9997, 120, '[]'::JSONB, v_now),
-         ('lbforge_old',   uid, 9995, 120, '[]'::JSONB, v_now - INTERVAL '3 days');
+  PERFORM pg_temp.lb_solo(uid, 120, 9997, v_now,                       pg_temp.lb_std_cfg());
+  PERFORM pg_temp.lb_solo(uid, 120, 9995, v_now - INTERVAL '3 days',   pg_temp.lb_std_cfg());
 
-  -- The seeded account, forged the same way. game_sessions is written
-  -- directly by the client under
-  --   WITH CHECK (auth.uid() = user_id OR user_id IS NULL)
-  -- and the anon key is public, so this row is one POST away for anybody.
-  INSERT INTO public.game_sessions
-    (session_key, user_id, score, duration_seconds, questions, created_at)
-  VALUES ('lbforge_hex', pg_temp.lb_uid('hexadecimal'), 9999, 120, '[]'::JSONB, v_now);
+  -- An ordinary player whose only run is a solo game, at a score that
+  -- sits in the middle of the board rather than on top of it: the case
+  -- the change was actually asked for.
+  uid := pg_temp.lb_user('lbsolo');
+  PERFORM pg_temp.lb_solo(uid, 120, 5350, v_now - INTERVAL '9 minutes', pg_temp.lb_std_cfg());
+
+  -- The same, five days ago: absent from today, present all-time.
+  uid := pg_temp.lb_user('lbsoloold');
+  PERFORM pg_temp.lb_solo(uid, 120, 5150, v_now - INTERVAL '5 days',    pg_temp.lb_std_cfg());
+
+  -- Comparability, three ways it fails. None of these is cheating and
+  -- none of them ranks.
+  --
+  -- A custom config — 120 seconds of one-digit addition, which scores
+  -- several times the default. Attributed to a seeded account so the
+  -- rule is shown holding against a real player rather than a fixture.
+  PERFORM pg_temp.lb_solo(pg_temp.lb_uid('hexadecimal'), 120, 9999, v_now,
+    jsonb_build_object('operations', jsonb_build_array('addition'),
+                       'addMin1', 2, 'addMax1', 9,
+                       'addMin2', 2, 'addMax2', 9,
+                       'mulMin1', 2, 'mulMax1', 12,
+                       'mulMin2', 2, 'mulMax2', 100,
+                       'duration', 120));
+
+  -- No config_key at all. index.html always writes one, so this row can
+  -- only come from something that is not the product; it must fail
+  -- closed rather than be assumed to be a default game.
+  uid := pg_temp.lb_user('lbnocfg');
+  PERFORM pg_temp.lb_solo(uid, 120, 9700, v_now, NULL);
+
+  -- A 300-second solo game. Its config says duration 300, so it fails
+  -- the settings rule and the duration rule independently.
+  uid := pg_temp.lb_user('lbsolo300');
+  PERFORM pg_temp.lb_solo(uid, 300, 9600, v_now,
+    jsonb_set(pg_temp.lb_std_cfg(), '{duration}', '300'::JSONB));
+
   PERFORM pg_temp.ok(
     (SELECT COUNT(*) FROM public.game_sessions WHERE score = 9999
        AND user_id = pg_temp.lb_uid('hexadecimal')) = 1,
-    'fixture: a forged 9999 game_sessions row is attributed to hexadecimal');
+    'fixture: a custom-config 9999 game_sessions row is attributed to hexadecimal');
+  PERFORM pg_temp.ok(
+    (SELECT gc.config FROM public.game_sessions g
+       JOIN public.game_configs gc ON gc.key = g.config_key
+      WHERE g.user_id = uid AND g.score = 9600) IS DISTINCT FROM pg_temp.lb_std_cfg(),
+    'fixture: the 300-second solo game really is on a non-default config');
 
   -- ── Yesterday's man ────────────────────────────────────────────
   uid := pg_temp.lb_user('lbold');
@@ -385,18 +479,29 @@ BEGIN
 END $$;
 
 -- ════════════════════════════════════════════════════════════════
--- 1. A FORGED game_sessions ROW REACHES NO BOARD
+-- 1. WHICH SOURCES REACH WHICH BOARD
 --
--- The assertion the whole feature exists for, and therefore the first one
--- in the file. game_sessions is client-writable and the anon key is
--- public: if a global board reads that table, the top of it is whoever
--- first thought to type a large number.
+-- The assertion the whole feature turns on, and therefore the first one
+-- in the file. It runs in both directions, because both directions are
+-- load-bearing:
 --
--- 9999 belongs to hexadecimal, a seeded account. 9997 and 9995 belong to
--- lbforge, who ALSO has a real 120-second duel run at 4900 — so the test
--- can say something stronger than "the forger is missing": the forger is
--- present, at the score the server computed, and not at the one they
--- typed.
+--   * a solo game_sessions run RANKS on 'today' and 'all_time';
+--   * it does NOT rank on 'daily', which stays the daily alone;
+--   * a solo run on non-default settings ranks nowhere.
+--
+-- READ THIS BEFORE TAKING THE PASS AS REASSURANCE. game_sessions is
+-- written straight from the browser, the anon key is public, and the
+-- server never generated the questions — so the 9997 below is a number
+-- somebody typed, and the board is asserted to show it. That is the
+-- accepted cost recorded in docs/leaderboards-design.md, not an
+-- oversight, and this test passing is not evidence that any score on
+-- these two boards was checked. Nothing here can be: verification would
+-- mean the server issuing the questions, which is the TODO item that
+-- makes this section obsolete.
+--
+-- lbforge has BOTH a real server-scored duel run at 4900 and an
+-- unverified 9997, which is what lets the test say something precise:
+-- the higher of the two ranks, and it is the unverified one.
 -- ════════════════════════════════════════════════════════════════
 
 DO $$
@@ -407,29 +512,51 @@ BEGIN
   t := public.get_global_board('today',    100);
   a := public.get_global_board('all_time', 100);
 
-  PERFORM pg_temp.ok(NOT pg_temp.bhas_score(d, 9999), 'a forged 9999 is not on the daily board');
-  PERFORM pg_temp.ok(NOT pg_temp.bhas_score(t, 9999), 'a forged 9999 is not on today''s board');
-  PERFORM pg_temp.ok(NOT pg_temp.bhas_score(a, 9999), 'a forged 9999 is not on the all-time board');
+  -- The daily board is the one that cannot be forged, and that is the
+  -- property being pinned here: none of these numbers reaches it.
+  PERFORM pg_temp.ok(NOT pg_temp.bhas_score(d, 9997),
+    'a solo run does not reach the daily board — that board is daily_attempts alone');
+  PERFORM pg_temp.ok(NOT pg_temp.bhas_score(d, 9995), 'nor a backdated one');
+  PERFORM pg_temp.ok(NOT pg_temp.bhas_score(d, 5350), 'nor an ordinary player''s solo run');
+  PERFORM pg_temp.ok(pg_temp.bcount(d, 'lbsolo') = 0,
+    'a player whose only run is solo is absent from the daily board entirely');
 
-  PERFORM pg_temp.ok(NOT pg_temp.bhas_score(d, 9997), 'nor a second forged 9997, on the daily board');
-  PERFORM pg_temp.ok(NOT pg_temp.bhas_score(t, 9997), 'nor on today''s board');
-  PERFORM pg_temp.ok(NOT pg_temp.bhas_score(a, 9997), 'nor on the all-time board');
+  -- ...and on the other two, it ranks.
+  PERFORM pg_temp.ok(pg_temp.bcount(t, 'lbsolo') = 1, 'a solo run IS on today''s board');
+  PERFORM pg_temp.ok(pg_temp.bscore(t, 'lbsolo') = 5350, 'at the 5350 the client reported');
+  PERFORM pg_temp.ok(pg_temp.bcount(a, 'lbsolo') = 1, 'and on the all-time board');
+  PERFORM pg_temp.ok(pg_temp.bscore(a, 'lbsolo') = 5350, 'also at 5350');
 
-  -- Backdated, because an all-time board built without a date filter is
-  -- the one most likely to reach for game_sessions.
-  PERFORM pg_temp.ok(NOT pg_temp.bhas_score(a, 9995),
-    'a forged game_sessions row from three days ago is not on the all-time board');
-  PERFORM pg_temp.ok(NOT pg_temp.bhas_score(t, 9995), 'nor on today''s board');
+  -- A solo run from five days ago: gone from today, still all-time.
+  PERFORM pg_temp.ok(pg_temp.bcount(t, 'lbsoloold') = 0,
+    'a five-day-old solo run is not on today''s board');
+  PERFORM pg_temp.ok(pg_temp.bscore(a, 'lbsoloold') = 5150,
+    'and is still on the all-time board at 5150');
 
-  -- The stronger form: the forger is on the board at their server-scored
-  -- 4900, not at either number they wrote themselves.
-  PERFORM pg_temp.ok(pg_temp.bcount(t, 'lbforge') = 1, 'the forger is on today''s board exactly once');
-  PERFORM pg_temp.ok(pg_temp.bscore(t, 'lbforge') = 4900,
-    'at the 4900 the server computed, not the 9997 they inserted');
+  -- The unverified number beats the verified one, which is the cost.
+  PERFORM pg_temp.ok(pg_temp.bcount(t, 'lbforge') = 1, 'lbforge is on today''s board exactly once');
+  PERFORM pg_temp.ok(pg_temp.bscore(t, 'lbforge') = 9997,
+    'at the 9997 nothing checked, not the 4900 the server computed — the accepted cost, asserted');
   PERFORM pg_temp.ok(pg_temp.bcount(a, 'lbforge') = 1, 'and on the all-time board exactly once');
-  PERFORM pg_temp.ok(pg_temp.bscore(a, 'lbforge') = 4900, 'also at 4900');
+  PERFORM pg_temp.ok(pg_temp.bscore(a, 'lbforge') = 9997,
+    'at 9997 there too, their best of the two solo runs and the duel run');
 
-  RAISE NOTICE '--- forged sessions reach no board OK ---';
+  -- Comparability is NOT relaxed. These are the runs that rank nowhere.
+  PERFORM pg_temp.ok(NOT pg_temp.bhas_score(t, 9999),
+    'a custom-config solo run does not rank, however high it scored');
+  PERFORM pg_temp.ok(NOT pg_temp.bhas_score(a, 9999), 'nor on the all-time board');
+  PERFORM pg_temp.ok(NOT pg_temp.bhas_score(d, 9999), 'nor on the daily board');
+
+  PERFORM pg_temp.ok(NOT pg_temp.bhas_score(t, 9700),
+    'a solo run with no config_key does not rank — it fails closed');
+  PERFORM pg_temp.ok(NOT pg_temp.bhas_score(a, 9700), 'nor on the all-time board');
+  PERFORM pg_temp.ok(pg_temp.bcount(t, 'lbnocfg') = 0, 'and its player is absent');
+
+  PERFORM pg_temp.ok(NOT pg_temp.bhas_score(t, 9600), 'a 300-second solo run does not rank');
+  PERFORM pg_temp.ok(NOT pg_temp.bhas_score(a, 9600), 'nor on the all-time board');
+  PERFORM pg_temp.ok(pg_temp.bcount(a, 'lbsolo300') = 0, 'and its player is absent');
+
+  RAISE NOTICE '--- source eligibility OK (solo runs rank, and are unverified) ---';
 END $$;
 
 -- ════════════════════════════════════════════════════════════════
@@ -957,35 +1084,46 @@ BEGIN
   t := public.get_global_board('today',    100);
   a := public.get_global_board('all_time', 100);
 
-  PERFORM pg_temp.ok(pg_temp.bname_at(t, 0) = 'lbdaily1'  AND pg_temp.bscore_at(t, 0) = 5700,
-    'today, 1st: lbdaily1 at 5700 (a daily attempt counts as a run today)');
-  PERFORM pg_temp.ok(pg_temp.bname_at(t, 1) = 'lbmulti'   AND pg_temp.bscore_at(t, 1) = 5600,
-    'today, 2nd: lbmulti at 5600');
-  PERFORM pg_temp.ok(pg_temp.bname_at(t, 2) = 'lbtiea'    AND pg_temp.bscore_at(t, 2) = 5500,
-    'today, 3rd: lbtiea at 5500');
-  PERFORM pg_temp.ok(pg_temp.bname_at(t, 3) = 'lbtieb'    AND pg_temp.bscore_at(t, 3) = 5500,
-    'today, 4th: lbtieb at 5500');
-  PERFORM pg_temp.ok(pg_temp.bname_at(t, 4) = 'lbprivate' AND pg_temp.bscore_at(t, 4) = 5400,
-    'today, 5th: lbprivate at 5400');
-  PERFORM pg_temp.ok(pg_temp.bname_at(t, 5) = 'lbslow'    AND pg_temp.bscore_at(t, 5) = 5300,
-    'today, 6th: lbslow at their 120-second 5300');
-  PERFORM pg_temp.ok(pg_temp.bname_at(t, 6) = 'lbforge'   AND pg_temp.bscore_at(t, 6) = 4900,
-    'today, 7th: lbforge at their server-scored 4900');
-  PERFORM pg_temp.ok(pg_temp.bname_at(t, 7) = 'lbbulk130' AND pg_temp.bscore_at(t, 7) = 1130,
-    'today, 8th: the best of the ordinary players, at 1130');
+  PERFORM pg_temp.ok(pg_temp.bname_at(t, 0) = 'lbforge'   AND pg_temp.bscore_at(t, 0) = 9997,
+    'today, 1st: lbforge at an unverified 9997 — the top of this board is a client-reported number');
+  PERFORM pg_temp.ok(pg_temp.bname_at(t, 1) = 'lbdaily1'  AND pg_temp.bscore_at(t, 1) = 5700,
+    'today, 2nd: lbdaily1 at 5700 (a daily attempt counts as a run today)');
+  PERFORM pg_temp.ok(pg_temp.bname_at(t, 2) = 'lbmulti'   AND pg_temp.bscore_at(t, 2) = 5600,
+    'today, 3rd: lbmulti at 5600');
+  PERFORM pg_temp.ok(pg_temp.bname_at(t, 3) = 'lbtiea'    AND pg_temp.bscore_at(t, 3) = 5500,
+    'today, 4th: lbtiea at 5500');
+  PERFORM pg_temp.ok(pg_temp.bname_at(t, 4) = 'lbtieb'    AND pg_temp.bscore_at(t, 4) = 5500,
+    'today, 5th: lbtieb at 5500');
+  PERFORM pg_temp.ok(pg_temp.bname_at(t, 5) = 'lbprivate' AND pg_temp.bscore_at(t, 5) = 5400,
+    'today, 6th: lbprivate at 5400');
+  PERFORM pg_temp.ok(pg_temp.bname_at(t, 6) = 'lbsolo'    AND pg_temp.bscore_at(t, 6) = 5350,
+    'today, 7th: lbsolo at 5350 — a solo run placed on merit, mid-board');
+  PERFORM pg_temp.ok(pg_temp.bname_at(t, 7) = 'lbslow'    AND pg_temp.bscore_at(t, 7) = 5300,
+    'today, 8th: lbslow at their 120-second 5300');
+  PERFORM pg_temp.ok(pg_temp.bname_at(t, 8) = 'lbbulk130' AND pg_temp.bscore_at(t, 8) = 1130,
+    'today, 9th: the best of the ordinary players, at 1130 — lbforge''s 4900 duel run '
+    || 'is NOT a second row of theirs');
 
-  PERFORM pg_temp.ok(pg_temp.bname_at(a, 0) = 'lbmulti'   AND pg_temp.bscore_at(a, 0) = 6400,
-    'all-time, 1st: lbmulti at 6400');
-  PERFORM pg_temp.ok(pg_temp.bname_at(a, 1) = 'lbold'     AND pg_temp.bscore_at(a, 1) = 6100,
-    'all-time, 2nd: lbold at 6100, six days old and still counting');
-  PERFORM pg_temp.ok(pg_temp.bname_at(a, 2) = 'lbdaily1'  AND pg_temp.bscore_at(a, 2) = 5700,
-    'all-time, 3rd: lbdaily1 at 5700');
-  PERFORM pg_temp.ok(pg_temp.bname_at(a, 3) = 'lbtiea'    AND pg_temp.bscore_at(a, 3) = 5500,
-    'all-time, 4th: lbtiea at 5500');
-  PERFORM pg_temp.ok(pg_temp.bname_at(a, 4) = 'lbtieb'    AND pg_temp.bscore_at(a, 4) = 5500,
-    'all-time, 5th: lbtieb at 5500');
-  PERFORM pg_temp.ok(pg_temp.bname_at(a, 5) = 'lbprivate' AND pg_temp.bscore_at(a, 5) = 5400,
-    'all-time, 6th: lbprivate at 5400');
+  PERFORM pg_temp.ok(pg_temp.bname_at(a, 0) = 'lbforge'   AND pg_temp.bscore_at(a, 0) = 9997,
+    'all-time, 1st: lbforge at 9997');
+  PERFORM pg_temp.ok(pg_temp.bname_at(a, 1) = 'lbmulti'   AND pg_temp.bscore_at(a, 1) = 6400,
+    'all-time, 2nd: lbmulti at 6400');
+  PERFORM pg_temp.ok(pg_temp.bname_at(a, 2) = 'lbold'     AND pg_temp.bscore_at(a, 2) = 6100,
+    'all-time, 3rd: lbold at 6100, six days old and still counting');
+  PERFORM pg_temp.ok(pg_temp.bname_at(a, 3) = 'lbdaily1'  AND pg_temp.bscore_at(a, 3) = 5700,
+    'all-time, 4th: lbdaily1 at 5700');
+  PERFORM pg_temp.ok(pg_temp.bname_at(a, 4) = 'lbtiea'    AND pg_temp.bscore_at(a, 4) = 5500,
+    'all-time, 5th: lbtiea at 5500');
+  PERFORM pg_temp.ok(pg_temp.bname_at(a, 5) = 'lbtieb'    AND pg_temp.bscore_at(a, 5) = 5500,
+    'all-time, 6th: lbtieb at 5500');
+  PERFORM pg_temp.ok(pg_temp.bname_at(a, 6) = 'lbprivate' AND pg_temp.bscore_at(a, 6) = 5400,
+    'all-time, 7th: lbprivate at 5400');
+  PERFORM pg_temp.ok(pg_temp.bname_at(a, 7) = 'lbsolo'    AND pg_temp.bscore_at(a, 7) = 5350,
+    'all-time, 8th: lbsolo at 5350');
+  PERFORM pg_temp.ok(pg_temp.bname_at(a, 8) = 'lbslow'    AND pg_temp.bscore_at(a, 8) = 5300,
+    'all-time, 9th: lbslow at 5300');
+  PERFORM pg_temp.ok(pg_temp.bname_at(a, 9) = 'lbsoloold' AND pg_temp.bscore_at(a, 9) = 5150,
+    'all-time, 10th: lbsoloold at 5150, five days old and still counting');
 
   RAISE NOTICE '--- board order OK ---';
 END $$;

@@ -262,15 +262,16 @@ async function boardRow(page, name) {
         ['All-Time Best', 'all_time', false],
       ]), `three tabs, Today's Daily first and active (${JSON.stringify(tabs)})`);
 
-      // The heading has to carry BOTH facts: 120 seconds, and server-scored
-      // only. Somebody whose practice score is missing needs to know why
-      // without asking.
+      // The heading has to carry BOTH halves of the eligibility rule: the
+      // clock and the settings. Those are now the only two things that
+      // keep a run off the board, so somebody whose good run is missing
+      // needs to be able to work out which one it was without asking.
       const lede = flat(await page.textContent('#global-lede'));
       ok(lede.includes('120-second runs'), `the copy says 120-second runs (got "${lede}")`);
-      ok(/server scored itself/.test(lede), 'and that the server scored them');
-      ok(/daily and duels/.test(lede), 'and names the two eligible sources');
-      ok(/practice and solo runs stay on your own dashboard/.test(lede),
-         'and says where a practice score went instead');
+      ok(/default settings/.test(lede), 'and that the settings have to be the default ones');
+      ok(/daily, duels and your own games/.test(lede), 'and names all three eligible sources');
+      ok(/custom game or a different clock/.test(lede),
+         'and says which runs are the ones that stay off it');
 
       // 1. Today's Daily.
       let rows = await globalRows(page);
@@ -403,7 +404,7 @@ async function boardRow(page, name) {
       await page.click('#global-scopes .league-scope-btn[data-scope="all_time"]');
       await page.waitForTimeout(400);
       ok((await globalRows(page)).length === 0, 'the all-time board is empty too');
-      ok(/No server-scored runs yet at all/.test(flat(await page.textContent('#global-board'))),
+      ok(/No qualifying runs yet at all/.test(flat(await page.textContent('#global-board'))),
          'and says something true of THAT board, not the daily one');
       ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
       await page.screenshot({ path: `${SHOTS}/global-5-empty-${tag}.png`, fullPage: true });

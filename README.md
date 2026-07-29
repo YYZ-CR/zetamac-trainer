@@ -37,11 +37,20 @@ first would make it a contest of who has the better connection.
 
 Three global boards behind a tab control: **Today's Daily** (rank on today's puzzle),
 **Today's Best** and **All-Time Best** (the best run per player, today or ever). All
-three are fixed at **120-second runs**, and only runs the **server** scored are
-eligible — daily attempts and duel runs. Ordinary solo and practice runs are written
-straight to `game_sessions` by the client with the public anon key, so the moment they
-fed a public ranking the top of it would be whoever first typed a large number; they
-still drive your own dashboard. The boards need **no account** and render signed out.
+three rank **120-second runs on the default settings** — a custom game or a different
+clock is a different game and ranks nowhere. **Today's Best** and **All-Time Best**
+count your ordinary solo games alongside daily attempts and duel runs; **Today's
+Daily** is the daily alone.
+
+> ⚠ **The two "Best" boards are forgeable, deliberately.** Solo runs are scored in
+> the browser and posted to `game_sessions` with the public anon key, so anybody who
+> reads `js/config.js` can put any score on them. Including those runs was an
+> explicit product decision — a leaderboard your normal games don't appear on isn't
+> one — and the fix is server-scored solo runs (`docs/TODO.md`), not a filter.
+> **Today's Daily is not affected**: server-generated questions, server-counted
+> answers, one attempt.
+
+The boards need **no account** and render signed out.
 Nobody having played yet is a normal state and reads as an invitation, never as a
 failure, and no placeholder row is ever drawn.
 
