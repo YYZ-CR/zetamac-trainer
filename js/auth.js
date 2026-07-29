@@ -124,19 +124,45 @@ function createAuthModal() {
           return;
         }
 
-        const { data, error } = await supabaseClient.auth.signUp({ email, password });
+        // The username travels WITH the registration, as signUp's
+        // options.data — GoTrue stores it on auth.users.raw_user_meta_data and
+        // supabase/signup.sql's trigger writes the profile from there, inside
+        // the same transaction that creates the account.
+        //
+        // It used to be written here instead, by a separate insert after
+        // signUp returned. That insert is checked by RLS against auth.uid(),
+        // and with email confirmation enabled signUp returns a user but NO
+        // session — so it was refused, the typed username was dropped, and the
+        // account went on to play the daily with no profile row at all, where
+        // get_global_board correctly refuses to rank it.
+        const { data, error } = await supabaseClient.auth.signUp({
+          email,
+          password,
+          options: { data: { username } }
+        });
         if (error) throw error;
 
         if (data.user) {
-          // The UNIQUE constraint, not the check above, is the real guard, and
-          // with email confirmation enabled signUp returns a user but no
-          // session — so auth.uid() is null and the insert is rejected. Either
-          // way the account now exists, so say what happened rather than
-          // leaving a profile-less account behind silently.
-          const created = await createProfile(data.user.id, username);
-          if (!created) {
-            errorEl.textContent =
-              'Account created, but the username could not be saved. Try logging in and setting it again.';
+          // Only one of the two outcomes can be checked from here.
+          //
+          // With a session, the profile the trigger just wrote is readable, so
+          // verify it — and fall back to the old client-side insert if it is
+          // absent, because the client has to work on both sides of signup.sql
+          // being applied. A failure now is real and worth reporting: the
+          // likeliest cause is the name being taken between the availability
+          // check above and this call, and the UNIQUE index, not that check,
+          // is what decides.
+          //
+          // Without a session there is nothing to verify: profiles is
+          // owner-readable and this browser is nobody yet. The trigger is the
+          // entire mechanism in that case, which is the point of moving it
+          // server-side — the insert this replaced could never have run here.
+          if (data.session) {
+            const profile = await getProfile(data.user.id);
+            if (!profile && !(await createProfile(data.user.id, username))) {
+              errorEl.textContent =
+                'Account created, but that username could not be saved — it may have just been taken. You can set one in Settings.';
+            }
           }
           await claimSessions(data.user.id);
         }

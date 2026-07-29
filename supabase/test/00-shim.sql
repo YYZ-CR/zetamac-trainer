@@ -4,10 +4,18 @@
 
 CREATE SCHEMA IF NOT EXISTS auth;
 
+-- raw_user_meta_data is where GoTrue stores signUp's options.data, and it is
+-- the column signup.sql's trigger reads. Nullable and defaulting to nothing,
+-- as it is in a real project: an account registered without it is the case
+-- that trigger has to survive.
 CREATE TABLE IF NOT EXISTS auth.users (
-  id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  email TEXT
+  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email              TEXT,
+  raw_user_meta_data JSONB
 );
+
+-- For a database created by an older copy of this shim.
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS raw_user_meta_data JSONB;
 
 -- Supabase derives auth.uid() from the request JWT. Here it reads a GUC so a
 -- test can impersonate any user with:  SET LOCAL request.jwt.claim.sub = '<uuid>';

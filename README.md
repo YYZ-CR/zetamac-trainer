@@ -128,9 +128,22 @@ a username is ever written, and the client's permission to update the column is
 revoked outright, by a column-level grant rather than by a policy. `supabase/settings.sql`
 says why each rule is there.
 
-If an account ends up without a username — registration can leave it that way when
-email confirmation is enabled — both Settings and the dashboard offer a way to claim
-one.
+The username you type at registration is carried **with** the signup, as `signUp`'s
+`options.data`, and the profile is written by a trigger on `auth.users`
+(`supabase/signup.sql`) inside the same transaction that creates the account. It used
+to be a second insert from the browser afterwards, which RLS refused whenever
+`signUp` returned no session — which is what email confirmation does — so the typed
+name was silently dropped and the account went on to play with no profile row at all.
+Registration never fails because of the profile: a name that is taken or malformed
+costs the account its name, never its account, and it claims one afterwards through
+`set_username` like anyone else.
+
+If an account ends up without a username anyway — every account registered before
+that trigger existed, and any whose chosen name was taken in the same instant — both
+Settings and the dashboard offer a way to claim one. Until it has one it is absent
+from every global board: `get_global_board` drops runs it cannot attribute to a
+username, before ranking rather than after, so no rank is consumed and nobody who has
+a name loses a place.
 
 **Deleting an account** is at the bottom of the same page, fenced off in a Danger
 zone: collapsed until you ask for it, and it lists what goes before it shows you the
@@ -214,9 +227,10 @@ Apply these **by hand** in the Supabase SQL editor, in this order:
 | `supabase/leagues.sql` | clans — invite codes, membership, clan boards (schema name: leagues) |
 | `supabase/leaderboards.sql` | `get_global_board` — the three global boards; **after `steal.sql` and `leagues.sql`** |
 | `supabase/settings.sql` | `set_username`, rename cooldown, column-level grants |
+| `supabase/signup.sql` | the `auth.users` trigger that writes the profile at registration; **after `settings.sql`** |
 | `supabase/account.sql` | `delete_account` — the ordered cascade for deleting an account |
 
-Five ordering constraints, all real:
+Six ordering constraints, all real:
 
 - `duels.sql` calls functions defined in `daily.sql`, so daily comes first.
 - **`steal.sql` goes immediately after `duels.sql`, and `duels.sql` is never applied
@@ -233,6 +247,12 @@ Five ordering constraints, all real:
   client's column grants on `profiles` and replaces `username_available`. Re-running
   `hardening.sql` after it would hand those grants back and undo half of it. If you
   ever re-apply an earlier file, re-apply `settings.sql` afterwards.
+- **`signup.sql` goes after `settings.sql`.** Its trigger calls
+  `username_shape_error` and writes `profiles.username`, and `settings.sql` is what
+  defines that function and adds the shape constraint and the case-insensitive
+  unique index the trigger relies on. plpgsql resolves those names when the trigger
+  *fires*, so applying it early would look fine and fail on the first real
+  registration — the file refuses to apply at all instead.
 - **`account.sql` is last.** `delete_account` reads tables from every file above it,
   and plpgsql resolves those names when the function is *called*, not when it is
   created — so pasting this one early appears to work and then fails on the first
@@ -247,8 +267,9 @@ Supabase's SQL editor will warn *"this query includes destructive operations"* o
 most of these. It is a static scan: the files contain `REVOKE` (removing default
 grants from tables the same file just created), `ALTER TABLE … ENABLE ROW LEVEL
 SECURITY`, and `DELETE` statements that sit **inside function bodies** and only run
-when a user leaves a clan or deletes their own account. There is no `DROP TABLE`
-or `TRUNCATE` anywhere.
+when a user leaves a clan or deletes their own account. `signup.sql` also contains a
+`DROP TRIGGER IF EXISTS`, which is how it replaces its own trigger rather than adding
+a second one on a re-paste. There is no `DROP TABLE` or `TRUNCATE` anywhere.
 
 ## Testing
 
@@ -269,6 +290,14 @@ because the header used to overflow *leftward* on a phone, so every check of the
 right edge passed while the link back to the game sat outside the viewport. It ends
 with a negative control that neutralizes the media query and requires the overflow to
 come back.
+
+`test/browser/register.mjs` drives the register form against a stubbed Supabase and
+asserts what it *sends*: that the username is in `signUp`'s `options.data`, and that
+no second profile insert is attempted when `signUp` comes back without a session.
+That second insert is the bug it exists to prevent coming back — it is refused by RLS
+in exactly that case, and the account was left with no name and no way to notice. It
+covers both sides of `signup.sql` being applied, because the client has to work on
+both.
 
 `test/browser/dashboard.mjs` and `test/browser/profile.mjs` are a pair: they render the
 same stubbed payload through both pages and assert the same numbers out of each, so a
@@ -301,9 +330,17 @@ accepts a name the database then refuses.
 
 `supabase/test/` rebuilds a throwaway database from the migration files and asserts
 the contracts in `docs/` against it. `00-shim.sql` stands in for the parts of Supabase
-the migrations depend on — `auth.users`, an `auth.uid()` driven by a GUC so tests can
+the migrations depend on — `auth.users` (including the `raw_user_meta_data` column
+`signup.sql`'s trigger reads), an `auth.uid()` driven by a GUC so tests can
 impersonate any user, and the `anon`/`authenticated` roles. Nothing touches your real
 project.
+
+`supabase/test/10-signup-test.sql` registers accounts the way GoTrue does — one insert
+into `auth.users` carrying `options.data` — and pins the rule the trigger exists to
+keep: **signup never fails because of the profile.** Ten malformed or missing
+usernames each assert both halves, that no profile is written *and* that the account
+is still created, because an exception escaping that trigger would not skip the
+profile, it would roll the registration back.
 
 `supabase/test/race-*.sh` drive real concurrent sessions at the three places where a
 check-then-act bug would hide: claiming the single opponent slot in a duel, the last

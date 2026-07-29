@@ -22,8 +22,8 @@ Verification currently in the repo:
 
 ```bash
 npm test                                    # unit + the username-rule parity check
-npm run test:sql                            # 8 SQL contract suites
-npm run test:browser                        # 9 browser suites
+npm run test:sql                            # 9 SQL contract suites
+npm run test:browser                        # 10 browser suites
 supabase/test/race-duel-claim.sh            # concurrent duel-slot claim
 supabase/test/race-league-cap.sh            # concurrent clan-cap race (schema: league)
 supabase/test/race-steal-point.sh           # concurrent steal claims, with a control
@@ -132,10 +132,91 @@ reasoning is in `docs/duels-design.md` §"Steal mode draws the same curve".
 
 ---
 
-## 1. Deploy — all nine migrations are applied
+## 0d. Registration threw the username away — fixed, NEEDS DEPLOYING
 
-A checker run against the real project reports every file OK. One thing is
-outstanding and it is one statement:
+Found on 2026-07-29: four accounts had attempted that day's daily and the Today's
+Daily board showed **one** of them. The board was right and the accounts were
+broken — three had no `profiles` row at all, so `get_global_board` could not
+attribute their runs to a username and dropped them (`leaderboards.sql` §2, before
+ranking, deliberately).
+
+The cause was upstream. The register form collects a username and always has, but
+`js/auth.js` wrote it in a *second* call after `signUp`:
+
+```js
+await supabaseClient.auth.signUp({ email, password });
+await createProfile(data.user.id, username);   // a plain INSERT, checked by RLS
+```
+
+With email confirmation enabled `signUp` returns a user but **no session**, so
+`auth.uid()` is null, that insert is refused, and the account exists with the name
+its owner typed nowhere at all. Nothing ever retried: `js/dashboard.js` offers to
+claim one, but only to somebody who visits the dashboard, and these three went
+straight to the daily.
+
+**Fixed by `supabase/signup.sql`** — new file, applied **after `settings.sql`**. The
+username now travels with the registration as `signUp`'s `options.data`, and an
+`AFTER INSERT` trigger on `auth.users` writes the profile from
+`raw_user_meta_data`, `SECURITY DEFINER`, inside the same transaction. Contract
+tests in `supabase/test/10-signup-test.sql`.
+
+The rule the whole file is built around: **signup must never fail because of the
+profile.** That trigger runs inside GoTrue's transaction, so an exception escaping
+it does not skip the profile — it rolls the registration back. Every refusal path
+returns quietly and leaves the account nameless but created.
+
+- [x] **Applied `supabase/signup.sql` to the real project** (2026-07-29), after
+      `settings.sql`. Reported as applied by hand in the SQL editor; the trigger's
+      existence has not been queried back and no real registration has gone through
+      it yet — see the two checks below.
+- [ ] **Run the SQL suite.** `10-signup-test.sql` was written against the contract
+      and has **never been executed** — it was authored on a Windows machine with no
+      Postgres, and `run.sh` was wired up unrun. Treat a first green run as the
+      point the trigger is actually verified. The client half *is* verified:
+      `test/browser/register.mjs` passes 25 assertions and was checked against the
+      pre-fix `js/auth.js`, where the two that matter fail.
+- [ ] **Confirm whether email confirmation is even on** (Supabase → Auth →
+      Providers → Email → "Confirm email"). It is the assumed cause and it fits the
+      evidence, but it has not been checked. If it is *off*, the three nameless
+      accounts came from something else and this needs re-diagnosing rather than
+      just fixing.
+- [ ] **Register a throwaway account against the real project** and confirm the
+      profile row appears with no dashboard visit. This is the only check that
+      exercises the trigger under real GoTrue, which is the part `00-shim.sql`
+      stands in for and therefore the part local tests cannot prove.
+- [ ] **Confirm the trigger is actually there** — applying the file is not the same
+      as it having taken:
+
+      ```sql
+      SELECT tgname, tgenabled
+        FROM pg_trigger
+       WHERE tgrelid = 'auth.users'::regclass AND NOT tgisinternal;
+      ```
+
+      One row, `on_auth_user_created`, `tgenabled = 'O'`. No rows means the `DO`
+      block swallowed something; anything other than `'O'` means it exists but is
+      disabled and will never fire.
+
+Two follow-ups this does not do, both real:
+
+- [ ] **The accounts that are already nameless stay nameless.** There is nothing to
+      backfill from — the client never sent a username before this change, so their
+      `raw_user_meta_data` has none. They need prompting *wherever they are*, not
+      only on the dashboard: a signed-in user with no profile should be asked for a
+      name on the daily too, which is where these three actually were.
+- [ ] **The two boards disagree about them.** `get_global_board` drops nameless
+      players (`leaderboards.sql:491`); `get_daily_leaderboard` keeps them and
+      renders `—` (`daily.sql:1016`, `js/daily.js:908`). Same players, same day, two
+      answers. Pick one — probably after the prompt above lands, since it decides
+      how many such players there will be.
+
+---
+
+## 1. Deploy — nine of the ten migrations are applied
+
+A checker run against the real project reports every file OK — but it was run before
+`signup.sql` existed, and that tenth file is **not applied** (§0d). Beyond it, one
+thing is outstanding and it is one statement:
 
 - [ ] **`DROP FUNCTION IF EXISTS public.create_duel(INTEGER);`** — `duels.sql` was
       applied after `steal.sql` at some point, which put the old one-argument

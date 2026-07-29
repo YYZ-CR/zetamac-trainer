@@ -86,6 +86,11 @@ run_sql "$SQLDIR_MIG/social.sql"
 # username_available, so re-applying hardening.sql after it would undo half
 # of that. Deployment order is the README's table, and this mirrors it.
 [ -r "$SQLDIR_MIG/settings.sql" ] && run_sql "$SQLDIR_MIG/settings.sql"
+# After settings.sql, which defines the username_shape_error its trigger
+# calls and adds the constraint and unique index that trigger writes into.
+# The file refuses to apply before it rather than failing on the first real
+# registration.
+[ -r "$SQLDIR_MIG/signup.sql" ] && run_sql "$SQLDIR_MIG/signup.sql"
 # Last: delete_account's body reads tables from every file above it, and
 # plpgsql resolves those names at call time, so applying it early would look
 # fine and fail on the first real deletion.
@@ -101,6 +106,7 @@ run_sql "$SQLDIR_MIG/social.sql"
 [ -r "$SQLDIR_MIG/leagues.sql" ] && run_sql "$SQLDIR_MIG/leagues.sql"
 [ -r "$SQLDIR_MIG/leaderboards.sql" ] && run_sql "$SQLDIR_MIG/leaderboards.sql"
 [ -r "$SQLDIR_MIG/settings.sql" ] && run_sql "$SQLDIR_MIG/settings.sql"
+[ -r "$SQLDIR_MIG/signup.sql" ] && run_sql "$SQLDIR_MIG/signup.sql"
 [ -r "$SQLDIR_MIG/account.sql" ] && run_sql "$SQLDIR_MIG/account.sql"
 
 echo "=== seeding ==="
@@ -144,6 +150,16 @@ if [ -r "$SQLDIR_MIG/leaderboards.sql" ]; then
     TESTS="$TESTS -f '$SQLDIR_TEST/09-leaderboards-test.sql'"
   else
     echo "NOTE: supabase/leaderboards.sql is applied but 09-leaderboards-test.sql is missing — leaderboards contract NOT tested" >&2
+  fi
+fi
+# And the same for the signup trigger. It runs last because it registers
+# accounts of its own, and a suite that follows it should not have to know
+# about them.
+if [ -r "$SQLDIR_MIG/signup.sql" ]; then
+  if [ -r "$SQLDIR_TEST/10-signup-test.sql" ]; then
+    TESTS="$TESTS -f '$SQLDIR_TEST/10-signup-test.sql'"
+  else
+    echo "NOTE: supabase/signup.sql is applied but 10-signup-test.sql is missing — signup contract NOT tested" >&2
   fi
 fi
 psql_run "-d $DB $TESTS" 2>&1 | sed 's/^psql.*NOTICE:  //'
