@@ -2,8 +2,8 @@
 //
 // One page, two halves, in this order:
 //
-//   1. THE GLOBAL BOARDS. Three tabs — Today's Daily, Today's Best, All-Time
-//      Best — from get_global_board(). No account needed, because a
+//   1. THE GLOBAL BOARDS. Three tabs — All-Time Best, Today's Best, Today's
+//      Daily — from get_global_board(). No account needed, because a
 //      leaderboard nobody can read while signed out is not a leaderboard, and
 //      this is the one page worth landing a stranger on.
 //   2. YOUR CLANS. A named group, an invite code, and its own board over the
@@ -76,17 +76,24 @@ const LEAGUE_SCOPES = [
   { id: 'best',  label: 'Best'  },
 ];
 
-// The three global boards, in the order they are offered. 'daily' is first and
-// is the default: one puzzle, the same questions for everyone, one attempt —
-// the most defensible ranking on the site, and the only one where a rank means
-// "on this exact sequence".
+// The three global boards, in the order they are offered. 'all_time' is first
+// and is the default: it is the board a stranger landing here is asking about
+// — who is best at this — and it is the only one of the three that is never
+// empty once anybody has ever played.
+//
+// 'daily' was first in an earlier revision, on the argument that it is the
+// most defensible ranking on the site: one puzzle, the same questions for
+// everyone, one attempt. That is still true and is still what its own footer
+// says, but it is an argument about trustworthiness rather than about what
+// somebody opened the page to see, and it put the narrowest board in front of
+// the broadest. It is now last, where it reads as the specialist board it is.
 //
 // The ids are the p_scope values get_global_board takes. GLOBAL_BOARD_SCOPES
 // in js/db.js is the same list; this one carries the labels.
 const GLOBAL_BOARDS = [
-  { id: 'daily',    label: "Today's Daily" },
-  { id: 'today',    label: "Today's Best"  },
   { id: 'all_time', label: 'All-Time Best' },
+  { id: 'today',    label: "Today's Best"  },
+  { id: 'daily',    label: "Today's Daily" },
 ];
 
 // How many rows to ask for. The server clamps its own maximum; this is how
@@ -108,7 +115,10 @@ let leagueScope    = 'today';   // which board is on screen
 let leagueBoardSeq = 0;         // guards against two scope clicks racing
 let leagueLeaveArmed = false;   // the leave button's second click
 
-let globalScope    = 'daily';   // which global board is on screen
+// Kept in step with GLOBAL_BOARDS[0] rather than written out, so the default
+// board and the first tab cannot drift apart — a reorder that left this on the
+// old value would render three tabs with none of them active.
+let globalScope    = GLOBAL_BOARDS[0].id;
 let globalBoardSeq = 0;         // same race, same guard
 
 // Which user the current view was built for. `undefined` means never resolved,
@@ -192,17 +202,18 @@ function showGlobalBoards() {
 }
 
 // The one sentence the design doc requires: how long the runs are, which runs
-// count, and — the question somebody actually has — why their own practice
-// score is not here. Written from the payload's own duration where there is
-// one, so the page cannot claim 120 while ranking something else.
+// count, and — the question somebody actually has — why a run of theirs that
+// they remember scoring higher is not here. It is almost always the clock or
+// the settings. Written from the payload's own duration where there is one, so
+// the page cannot claim 120 while ranking something else.
 function renderGlobalLede(seconds) {
   const el = document.getElementById('global-lede');
   if (!el) return;
   const s = leagueNumber(seconds) ?? GLOBAL_BOARD_FALLBACK_SECONDS;
   el.textContent =
-    `Every board here ranks ${s}-second runs the server scored itself — today's `
-    + 'daily and duels — so your practice and solo runs stay on your own dashboard '
-    + 'rather than out here.';
+    `Every board here ranks ${s}-second runs on the default settings — daily, `
+    + 'duels and your own games all count. A custom game or a different clock is a '
+    + 'different game, so it stays on your dashboard rather than out here.';
 }
 
 function renderGlobalTabs() {
@@ -363,12 +374,12 @@ function globalBoardTime(ts) {
 // available. None of them reports a failure, and none of them is a dash.
 function globalBoardEmptyText(scope) {
   if (scope === 'today') {
-    return 'No server-scored runs today yet. Play the daily or finish a duel and '
-      + 'this board opens with your name on it.';
+    return 'No qualifying runs today yet. Play a default 120-second game, the daily '
+      + 'or a duel, and this board opens with your name on it.';
   }
   if (scope === 'all_time') {
-    return 'No server-scored runs yet at all. The first daily or duel to finish '
-      + 'starts this board off.';
+    return 'No qualifying runs yet at all. The first default 120-second game to '
+      + 'finish starts this board off.';
   }
   return "Nobody has played today's daily yet. Play it and you hold rank 1 until "
     + 'somebody beats you.';
@@ -378,12 +389,12 @@ function globalBoardEmptyText(scope) {
 // not say how it ranks is asking to be argued with.
 function globalBoardFoot(scope) {
   if (scope === 'today') {
-    return "The best server-scored run today, one row per player, across the daily "
+    return 'The best run today, one row per player, across your own games, the daily '
       + 'and duels. A tie goes to whoever got there first.';
   }
   if (scope === 'all_time') {
-    return "Everyone's best server-scored run, whenever they set it. One row per "
-      + 'player, so a second good run of your own never pushes somebody else down.';
+    return "Everyone's best run, whenever they set it. One row per player, so a "
+      + 'second good run of your own never pushes somebody else down.';
   }
   return "Today's puzzle: the same questions for everyone, one attempt each. This "
     + 'is the only ranking here where everybody answered the same sequence.';

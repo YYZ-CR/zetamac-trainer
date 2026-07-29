@@ -136,7 +136,8 @@ Contract: **`docs/leaderboards-design.md`**.
 
 **The client half is done.** Leagues are **Leaderboards** in the nav and **clans** as
 the noun everywhere a person reads. `leagues.html` now shows the three global boards
-first — Today's Daily, Today's Best, All-Time Best, behind a tab control — and your
+first — All-Time Best, Today's Best, Today's Daily, behind a tab control, All-Time
+Best landing — and your
 clans below them. `getGlobalBoard(scope, limit)` in `js/db.js` calls
 `get_global_board(p_scope, p_limit)`; the page renders signed out, treats an empty
 board as an invitation and a failed call as a visibly different error state, and
@@ -163,24 +164,37 @@ was re-pointed and `TOUR_VERSION` bumped to `'3'` (400 assertions).
 - Nothing here renames the schema. `league` in the database still means `clan` in
   the product, and that is written down rather than left to be found.
 
-**The decision the whole design turns on:** global boards are built only from
-`daily_attempts` and `duel_runs`, which the server scores itself. `game_sessions` is
-written straight from the browser —
+**The decision the whole design turns on, and the decision that reversed it.**
+
+The boards shipped reading only `daily_attempts` and `duel_runs`, which the server
+scores itself, because `game_sessions` is written straight from the browser —
 
 ```sql
 CREATE POLICY "sessions_insert" ON public.game_sessions
   FOR INSERT WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
 ```
 
-— and the anon key is public, so anyone can insert any score for themselves. That
-has never mattered while those rows only fed their owner's dashboard. On a public
-ranking, the top of the board is whoever first types a large number.
+— and the anon key is public, so anyone can insert any score for themselves. On a
+public ranking, the top of the board is whoever first types a large number.
 
-The first contract test to write is that a forged 9999 session reaches no board.
+**That was then reversed by an explicit owner decision:** the `today` and `all_time`
+boards now rank `game_sessions` too, because a leaderboard none of your normal games
+appear on is not the leaderboard that was wanted. The forgeability is a known,
+accepted, documented cost. `daily` still reads `daily_attempts` alone and is still
+unforgeable.
 
-Consequence, stated rather than hidden: **solo and practice runs will not appear on
-any global board.** Making them eligible means the server generating and storing
-questions for every run, the way the daily does — a real feature, not a patch.
+Comparability was **not** relaxed with it: a solo run qualifies only at 120 seconds
+**and** on a config equal to `daily_default_config()`. Without that second rule the
+board is meaningless even with nobody cheating, since `index.html` will happily
+produce 120 seconds of one-digit addition.
+
+→ **Open work item: server-scored solo runs.** A `start_run` / `submit_run` pair
+mirroring `start_daily` / `submit_daily` — the server generates and stores the
+questions, the client sends answers, the server counts them. That is what makes the
+two Best boards trustworthy, and it is a feature rather than a patch. Until it lands,
+`§1` of `supabase/test/09-leaderboards-test.sql` asserts the forgeable behaviour on
+purpose and says so at the top, so nobody reads a green suite as evidence the scores
+were checked.
 
 ---
 

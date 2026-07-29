@@ -33,54 +33,70 @@ when nothing else is moving.
 
 ---
 
-## The integrity rule the global boards turn on
+## What is eligible, and what that costs
 
-**Only server-scored runs are eligible for a global board.**
+**`today` and `all_time` rank ordinary solo runs. `daily` does not.**
 
-`game_sessions` — ordinary solo runs, including practice — is written directly by the
-client:
+The three sources:
+
+| Table | Scored by | Scopes | Forgeable |
+|---|---|---|---|
+| `daily_attempts` | `submit_daily`, from the stored questions | all three | no |
+| `duel_runs` | `submit_duel_run`, the same way | `today`, `all_time` | no |
+| `game_sessions` | **the browser** | `today`, `all_time` | **yes** |
+
+### The cost, stated rather than hidden
+
+`game_sessions` — every ordinary timed game — is written directly by the client:
 
 ```sql
 CREATE POLICY "sessions_insert" ON public.game_sessions
   FOR INSERT WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
 ```
 
-The anon key ships in `js/config.js` and is public by design, so anybody can insert a
-session with any score they like for themselves. That has never mattered, because
-those rows only fed the owner's own dashboard. **The moment they feed a public
-ranking, the top of that ranking is whoever first thought to type a large number.**
+The anon key ships in `js/config.js` and is public by design. **Anybody who reads that
+file can insert a session with any score they like for themselves, and it will rank.**
+`js/game.js` generates the questions in the browser and posts the finished number, so
+the server has nothing to recount the answers against. No threshold, outlier rule or
+plausibility filter fixes this — each one only tells a forger which number to pick.
 
-So the global boards are built from the two sources the server scores itself:
+An earlier revision of this document excluded `game_sessions` for exactly that reason.
+It is included now because a leaderboard that none of your normal games appear on is
+not the leaderboard that was asked for. **The forgeability is a known and accepted
+cost**, carried until solo runs are server-scored.
 
-- `daily_attempts` — scored by `submit_daily` from the stored questions.
-- `duel_runs` — scored by `submit_duel_run` the same way.
+The real fix is the server generating and storing the questions for every run, the way
+the daily already does — a `start_run` / `submit_run` pair mirroring `start_daily` /
+`submit_daily`. That is a feature, not a patch. It is in `docs/TODO.md`.
 
-In both, the client sends answers and the server counts them. A forged score is not
-possible without forging the answers to questions the server generated.
+`get_score_percentile` reads `game_sessions` too, and always has. It is now the lesser
+of the two exposures rather than the only one.
 
-### Two consequences, both stated rather than hidden
+**`daily` is untouched by all of this** and remains the one board on the site that
+cannot be forged: one puzzle, questions the server generated, one attempt. That is
+worth keeping distinct, and it is why the `daily` scope reads `daily_attempts` alone
+even though the other two scopes do not.
 
-- **Practice and solo runs do not appear on any global board.** They still drive your
-  own dashboard, your own analysis and your own bests. They are a personal record,
-  not a competitive claim.
-- **`get_score_percentile` still reads `game_sessions`**, and it is public-facing.
-  That predates this document and is the same weakness at lower stakes — a percentile
-  is a soft comparison, not a ranking with a name at the top. It is listed in
-  `docs/TODO.md` rather than quietly left.
+### Comparability — *not* relaxed
 
-Making solo runs eligible means the server generating and storing the questions for
-every run, the way the daily does. That is a real feature, not a patch, and it is not
-in this change.
+A leaderboard is only defensible if everyone answered comparable questions. Forgery is
+one way that breaks; a different game is another, and that one happens without anybody
+acting in bad faith.
 
-### Comparability
+- **Duration.** Duels run 15–600 seconds; a solo game runs whatever the form was set
+  to. **Every board is fixed at the standard 120 seconds**, and says so in the heading.
+  A 300-second run is not a better result, it is a longer one — the same trap as the
+  Best tile on the dashboard.
+- **Settings.** Daily puzzles and duels are both generated from
+  `daily_default_config()`, so their operations and ranges already match. A solo game
+  does not have to: `index.html` will happily produce 120 seconds of single-digit
+  addition, which scores several times the default. So **a `game_sessions` row
+  qualifies only when its stored `game_configs.config` equals `daily_default_config()`
+  exactly.** `readFormConfig()` in `js/index.js` emits precisely that key set, so a
+  default-settings game matches on the nose and a custom game ranks nowhere.
 
-A leaderboard is only defensible if everyone answered comparable questions. Daily
-puzzles and duels are both generated from `daily_default_config()`, so the operations
-and ranges already match. Duration does not: duels run 15–600 seconds.
-
-**The global boards are fixed at the standard 120 seconds**, and say so in the
-heading. A 300-second run is not a better result, it is a longer one — the same trap
-as the Best tile on the dashboard.
+Without the second rule the board would be meaningless even with nobody cheating,
+which is a worse failure than the one being accepted.
 
 ---
 
@@ -89,10 +105,30 @@ as the Best tile on the dashboard.
 One page, three tabs. Every row is `rank · username · score`, and nothing else — no
 user ids, no session keys, no dates that could identify a run.
 
+**They are offered in the order All-Time Best · Today's Best · Today's Daily, and
+All-Time Best is the landing board.** That is the board a stranger arriving here is
+asking about — who is best at this — and it is the only one of the three that is
+never empty once anybody has ever played. The tabs then narrow from left to right:
+ever, today, today's puzzle.
+
+Today's Daily led in an earlier revision, on the argument that it is the most
+defensible ranking on the site. That is still true, and it is still what its own
+footer says — but it is an argument about trustworthiness rather than about what
+somebody opened the page to see, and it put the narrowest board in front of the
+broadest.
+
+The order lives in `GLOBAL_BOARDS` in `js/leagues.js`, one array, and the default
+scope is read from its first entry rather than written out separately, so a reorder
+cannot leave the page rendering three tabs with none of them active.
+`GLOBAL_BOARD_SCOPES` in `js/db.js` is a validation **set** and carries no order.
+
+The boards are numbered below in the order they were designed, which is no longer the
+order they are shown in; the numbers are references, not positions.
+
 ### 1. Today's Daily
 
-Rank on today's puzzle. This is the most defensible board on the site: one puzzle,
-the same questions for everyone, one attempt.
+*Third tab.* Rank on today's puzzle. This is the most defensible board on the site:
+one puzzle, the same questions for everyone, one attempt.
 
 **It is not a projection of `get_daily_leaderboard`.** An earlier draft said it was,
 and that turned out to make the three tabs of one page behave differently:
@@ -108,16 +144,17 @@ and its suite still pins the shared ranks there. One page, one ranking rule.
 
 ### 2. Today's Best
 
-The best server-scored 120-second run today, one row per player, across daily
-attempts and duel runs. Distinct from board 1 because a duel you won at 91 belongs on
-a "today" board even though it was not the daily.
+*Second tab.* The best 120-second default-settings run today, one row per player,
+across daily attempts, duel runs and solo games. Distinct from board 1 because a duel
+you won at 91, or a practice-day best, belongs on a "today" board even though it was
+not the daily.
 
 Ties break on the earlier `submitted_at`: first to get there holds the higher rank.
 
 ### 3. All-Time Best
 
-The same, without the date filter. One row per player — a player's own second-best
-run never displaces somebody else.
+*First tab, and the one the page lands on.* The same, without the date filter. One row
+per player — a player's own second-best run never displaces somebody else.
 
 ---
 
@@ -168,10 +205,15 @@ leaderboard, and it is the one page worth landing a stranger on.
 Contract tests, written before reading the implementation, as everything else here
 was:
 
-1. **A forged `game_sessions` row with a score of 9999 does not appear on any board.**
-   This is the assertion the whole design exists for; write it first.
+1. **A `game_sessions` row ranks on `today` and `all_time`, and on `daily` it does
+   not.** This is the assertion the whole design now turns on, in both directions —
+   write it first. The suite states in the same place that such a row is unverified,
+   so nobody later reads a passing test as evidence the score was checked.
 2. One row per player on `today` and `all_time`, even with several qualifying runs.
-3. The 120-second restriction: a 300-second duel run scoring higher does not rank.
+3. The 120-second restriction: a 300-second run scoring higher does not rank, from any
+   of the three sources.
+3b. The settings restriction: a 120-second solo run on a **custom** config does not
+   rank, however high it scored, and a run whose `config_key` is NULL does not rank.
 4. `daily` matches `get_daily_leaderboard` for the same day.
 5. An unknown scope returns an error payload and no rows.
 6. The limit is clamped.

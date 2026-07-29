@@ -257,42 +257,48 @@ async function boardRow(page, name) {
       const tabs = await page.$$eval('#global-scopes .league-scope-btn',
         els => els.map(e => [e.textContent.trim(), e.dataset.scope, e.classList.contains('active')]));
       ok(JSON.stringify(tabs) === JSON.stringify([
-        ["Today's Daily", 'daily', true],
+        ['All-Time Best', 'all_time', true],
         ["Today's Best", 'today', false],
-        ['All-Time Best', 'all_time', false],
-      ]), `three tabs, Today's Daily first and active (${JSON.stringify(tabs)})`);
+        ["Today's Daily", 'daily', false],
+      ]), `three tabs, All-Time Best first and active (${JSON.stringify(tabs)})`);
 
-      // The heading has to carry BOTH facts: 120 seconds, and server-scored
-      // only. Somebody whose practice score is missing needs to know why
-      // without asking.
+      // The heading has to carry BOTH halves of the eligibility rule: the
+      // clock and the settings. Those are now the only two things that
+      // keep a run off the board, so somebody whose good run is missing
+      // needs to be able to work out which one it was without asking.
       const lede = flat(await page.textContent('#global-lede'));
       ok(lede.includes('120-second runs'), `the copy says 120-second runs (got "${lede}")`);
-      ok(/server scored itself/.test(lede), 'and that the server scored them');
-      ok(/daily and duels/.test(lede), 'and names the two eligible sources');
-      ok(/practice and solo runs stay on your own dashboard/.test(lede),
-         'and says where a practice score went instead');
+      ok(/default settings/.test(lede), 'and that the settings have to be the default ones');
+      ok(/daily, duels and your own games/.test(lede), 'and names all three eligible sources');
+      ok(/custom game or a different clock/.test(lede),
+         'and says which runs are the ones that stay off it');
 
-      // 1. Today's Daily.
+      // 1. All-Time Best — the landing board, so this is what the page shows
+      // before anything is clicked. Asserted as the FIRST call rather than
+      // only as the rendered rows: a page that defaults to one board and
+      // fetches another would still look right here.
       let rows = await globalRows(page);
       ok(JSON.stringify(rows.map(r => r.cells)) === JSON.stringify([
-        ['1', 'hexadecimal', '91'], ['2', 'quietstorm', '77'], ['3', 'marchhare', '64'],
-      ]), `the daily board is exactly its three rows in order (${JSON.stringify(rows.map(r => r.cells))})`);
+        ['1', 'marchhare', '142'], ['2', 'sleepydog', '118'],
+        ['3', 'quietstorm', '109'], ['4', 'hexadecimal', '91'],
+      ]), `four rows, all-time order (${JSON.stringify(rows.map(r => r.cells))})`);
       ok(rows.every(r => r.links === 0),
          'no row links anywhere — the payload carries no is_public, so nothing is linked');
       const head = await page.$$eval('#global-board .league-board-table th',
         els => els.map(e => e.textContent.trim()));
       ok(JSON.stringify(head) === JSON.stringify(['#', 'Player', 'Score']),
          `rank / player / score, the same columns a clan board has (${head})`);
-      ok(flat(await page.textContent('#global-note')).includes('3 players'),
+      ok(flat(await page.textContent('#global-note')).includes('4 players'),
          'the note counts the players on the board');
-      ok(/the same questions for everyone, one attempt each/.test(flat(await page.textContent('#global-board'))),
-         'and the foot says how the daily board ranks');
+      ok(/One row per player/.test(flat(await page.textContent('#global-board'))),
+         'and says one row per player, so a second good run does not displace anybody');
 
       const first = await lastGlobalCall(page);
-      ok(first && first[1].p_scope === 'daily', `the first call asked for daily (${first && first[1].p_scope})`);
+      ok(first && first[1].p_scope === 'all_time',
+         `the first call asked for all_time (${first && first[1].p_scope})`);
       ok(first && typeof first[1].p_limit === 'number' && first[1].p_limit > 0,
          `and passed a numeric limit (${first && first[1].p_limit})`);
-      await page.screenshot({ path: `${SHOTS}/global-1-daily-${tag}.png`, fullPage: true });
+      await page.screenshot({ path: `${SHOTS}/global-1-alltime-${tag}.png`, fullPage: true });
 
       // 2. Today's Best — the ARGUMENT is asserted, not just that something moved.
       await page.click('#global-scopes .league-scope-btn[data-scope="today"]');
@@ -307,24 +313,24 @@ async function boardRow(page, name) {
          'the tiebreak is stated');
       await page.screenshot({ path: `${SHOTS}/global-2-today-${tag}.png`, fullPage: true });
 
-      // 3. All-Time Best.
-      await page.click('#global-scopes .league-scope-btn[data-scope="all_time"]');
+      // 3. Today's Daily — last tab now, and still the only board whose foot
+      // can claim everybody answered the same sequence.
+      await page.click('#global-scopes .league-scope-btn[data-scope="daily"]');
       await page.waitForTimeout(400);
       const c3 = await lastGlobalCall(page);
-      ok(c3 && c3[1].p_scope === 'all_time', `and p_scope=all_time (got ${c3 && c3[1].p_scope})`);
+      ok(c3 && c3[1].p_scope === 'daily', `and p_scope=daily (got ${c3 && c3[1].p_scope})`);
       rows = await globalRows(page);
       ok(JSON.stringify(rows.map(r => r.cells)) === JSON.stringify([
-        ['1', 'marchhare', '142'], ['2', 'sleepydog', '118'],
-        ['3', 'quietstorm', '109'], ['4', 'hexadecimal', '91'],
-      ]), `four rows, all-time order (${JSON.stringify(rows.map(r => r.cells))})`);
-      ok(/One row per player/.test(flat(await page.textContent('#global-board'))),
-         'and says one row per player, so a second good run does not displace anybody');
+        ['1', 'hexadecimal', '91'], ['2', 'quietstorm', '77'], ['3', 'marchhare', '64'],
+      ]), `the daily board is exactly its three rows in order (${JSON.stringify(rows.map(r => r.cells))})`);
+      ok(/the same questions for everyone, one attempt each/.test(flat(await page.textContent('#global-board'))),
+         'and the foot says how the daily board ranks');
       const active = await page.$$eval('#global-scopes .league-scope-btn.active',
         els => els.map(e => e.dataset.scope));
-      ok(JSON.stringify(active) === JSON.stringify(['all_time']),
+      ok(JSON.stringify(active) === JSON.stringify(['daily']),
          `exactly one tab is active and it is the one showing (${active})`);
       ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
-      await page.screenshot({ path: `${SHOTS}/global-3-alltime-${tag}.png`, fullPage: true });
+      await page.screenshot({ path: `${SHOTS}/global-3-daily-${tag}.png`, fullPage: true });
       await ctx.close();
     }
 
@@ -340,18 +346,19 @@ async function boardRow(page, name) {
 
       const rows = await globalRows(page);
       ok(JSON.stringify(rows.map(r => r.cells)) === JSON.stringify([
-        ['1', 'hexadecimal', '91'], ['2', 'quietstorm', '77'], ['3', 'marchhare', '64'],
-      ]), `signed out, the daily board still renders in full (${JSON.stringify(rows.map(r => r.cells))})`);
+        ['1', 'marchhare', '142'], ['2', 'sleepydog', '118'],
+        ['3', 'quietstorm', '109'], ['4', 'hexadecimal', '91'],
+      ]), `signed out, the landing board still renders in full (${JSON.stringify(rows.map(r => r.cells))})`);
       ok(flat(await page.textContent('#global-lede')).includes('120-second runs'),
          'and still says what it is ranking');
 
       // Switching boards works signed out too — a read-only page that needs an
       // account to change tabs would be worse than no page.
-      await page.click('#global-scopes .league-scope-btn[data-scope="all_time"]');
+      await page.click('#global-scopes .league-scope-btn[data-scope="daily"]');
       await page.waitForTimeout(400);
       const call = await lastGlobalCall(page);
-      ok(call && call[1].p_scope === 'all_time', 'and the tabs work without an account');
-      ok((await globalRows(page)).length === 4, 'rendering the all-time board');
+      ok(call && call[1].p_scope === 'daily', 'and the tabs work without an account');
+      ok((await globalRows(page)).length === 3, 'rendering the daily board');
 
       const body = (await page.textContent('body')) || '';
       ok(body.includes('Clans need an account'), 'the clans half asks for an account');
@@ -385,9 +392,9 @@ async function boardRow(page, name) {
       ok(tables === 0, 'and no empty table shell either');
 
       const txt = flat(await page.textContent('#global-board'));
-      ok(/Nobody has played today's daily yet/.test(txt),
+      ok(/No qualifying runs yet at all/.test(txt),
          `the empty state says so plainly (got "${txt}")`);
-      ok(/you hold rank 1 until somebody beats you/.test(txt),
+      ok(/starts this board off/.test(txt),
          'and invites rather than reports');
       ok(!/unavailable|couldn't|error/i.test(txt),
          'and is NOT worded as a failure');
@@ -400,11 +407,11 @@ async function boardRow(page, name) {
       ok(!/undefined|NaN|\[object/i.test(txt), 'and invented nothing');
 
       // Switching to another empty board changes the sentence with the scope.
-      await page.click('#global-scopes .league-scope-btn[data-scope="all_time"]');
+      await page.click('#global-scopes .league-scope-btn[data-scope="daily"]');
       await page.waitForTimeout(400);
-      ok((await globalRows(page)).length === 0, 'the all-time board is empty too');
-      ok(/No server-scored runs yet at all/.test(flat(await page.textContent('#global-board'))),
-         'and says something true of THAT board, not the daily one');
+      ok((await globalRows(page)).length === 0, 'the daily board is empty too');
+      ok(/Nobody has played today's daily yet/.test(flat(await page.textContent('#global-board'))),
+         'and says something true of THAT board, not the all-time one');
       ok(errors.length === 0, `no uncaught page errors (${errors[0] ?? ''})`);
       await page.screenshot({ path: `${SHOTS}/global-5-empty-${tag}.png`, fullPage: true });
       await ctx.close();

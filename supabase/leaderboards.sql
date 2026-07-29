@@ -41,33 +41,61 @@
 --  against the *caller's* search_path.
 -- ────────────────────────────────────────────────────────────────
 
--- ── 1. The integrity rule, restated where it is enforced ────────
--- ONLY SERVER-SCORED RUNS ARE ELIGIBLE FOR A GLOBAL BOARD.
+-- ── 1. What is eligible, and the cost of it ─────────────────────
+-- THE 'today' AND 'all_time' BOARDS INCLUDE ORDINARY SOLO RUNS, AND
+-- ORDINARY SOLO RUNS ARE NOT SERVER-SCORED. That is a deliberate,
+-- owner-made decision, and it is written here rather than discovered.
 --
--- game_sessions is INSERTed straight from the browser under a policy
--- of `auth.uid() = user_id OR user_id IS NULL`, and the anon key is
--- published in js/config.js. Anybody can therefore write themselves
--- a session with any score at all. That has never mattered because
--- those rows only ever fed their own owner's dashboard; the moment
--- they feed a public ranking, the top of the ranking belongs to
--- whoever first thought to type a large number.
---
--- So the boards read exactly two tables, and both of them hold
--- scores the *server* computed from questions the server generated:
+-- The three sources:
 --
 --   daily_attempts — scored by submit_daily from daily_puzzles.questions
 --   duel_runs      — scored by submit_duel_run from duels.questions
+--   game_sessions  — scored IN THE BROWSER and posted as a number
 --
--- There is no reference to game_sessions anywhere in this file, and
--- a patch that adds one is a security regression, not a feature. The
--- cost of the rule is that practice and solo runs never rank, which
--- the design document states out loud rather than hiding.
+-- game_sessions is INSERTed straight from the browser under a policy
+-- of `auth.uid() = user_id OR user_id IS NULL`, and the anon key is
+-- published in js/config.js. Anybody who reads that file can write
+-- themselves a session with any score at all, and it will rank. There
+-- is no check available here that would stop it: the server never
+-- generated the questions, so it has nothing to recount the answers
+-- against. Filtering, thresholds and outlier rules do not fix this —
+-- they only tell a forger what number to pick.
 --
--- Comparability: dailies and duels are both generated from
--- daily_default_config(), so operations and ranges already match.
--- Duration does not — duels run 15..600 seconds — so every board
--- here is fixed at the standard 120 seconds, the daily included. A
--- 300-second run is not a better result, it is a longer one.
+-- An earlier revision of this file excluded game_sessions for exactly
+-- that reason. It was excluded again for exactly that reason in
+-- docs/leaderboards-design.md, which is now updated to match. The
+-- reason it is included anyway is that a leaderboard nobody's normal
+-- games appear on is not the leaderboard that was asked for, and a
+-- forgeable board is a known and accepted cost until solo runs are
+-- server-scored the way the daily is. That feature — the server
+-- generating and storing the questions for every run — is the real
+-- fix, is a feature rather than a patch, and is in docs/TODO.md.
+--
+-- The 'daily' board is untouched by all of this. It reads
+-- daily_attempts alone and remains the one board on the site that
+-- cannot be forged: one puzzle, the server's questions, one attempt.
+--
+-- Comparability, which is a separate question from forgery and is
+-- NOT relaxed here:
+--
+--   * Duration. Duels run 15..600 seconds and a solo game runs
+--     whatever the form was set to. Every board is fixed at the
+--     standard 120 seconds, the daily included. A 300-second run is
+--     not a better result, it is a longer one.
+--   * Settings. Dailies and duels are both generated from
+--     daily_default_config(), so their operations and ranges already
+--     match. A solo game does not have to: the form on index.html
+--     will happily produce 120 seconds of single-digit addition,
+--     which scores several times the default and is not cheating,
+--     merely a different game. So a game_sessions row qualifies only
+--     when its stored config is EQUAL to daily_default_config().
+--     readFormConfig() in js/index.js emits exactly that key set, so
+--     a default-settings game matches on the nose; anything else is
+--     a custom game and ranks nowhere.
+--
+-- Without that second rule the board would be meaningless even with
+-- nobody acting in bad faith, which is a worse failure than the one
+-- being accepted.
 
 -- ── 2. get_global_board(p_scope, p_limit) ───────────────────────
 -- Returns {scope, duration_seconds, generated_at, rows:[{rank,
@@ -149,9 +177,15 @@ DECLARE
   v_date_to   DATE;
   v_from      TIMESTAMPTZ;
   v_to        TIMESTAMPTZ;
-  -- The daily board is the daily alone. Expressed as a flag rather
-  -- than as a third copy of the query.
-  v_duels     BOOLEAN;
+  -- The daily board is the daily alone; the today board adds duel runs
+  -- and solo runs. Expressed as a flag rather than as a second copy of
+  -- the query.
+  v_wide      BOOLEAN;
+  -- The settings a solo run has to have been played on to be
+  -- comparable with a daily or a duel. Read once: it is IMMUTABLE, but
+  -- naming it keeps the rule visible at the top rather than buried in
+  -- two predicates.
+  v_std_cfg   JSONB       := public.daily_default_config();
   v_rows      JSONB;
 BEGIN
   -- An unknown scope is an error payload, never an exception and
@@ -270,6 +304,35 @@ BEGIN
                              AND u.duration_seconds = c_duration)
             ORDER BY r.score DESC, r.submitted_at ASC
             LIMIT 1)
+          UNION ALL
+          -- ...and their best qualifying solo run.
+          --
+          -- The forgeable source. See §1: this row's score was
+          -- computed in the browser and the server cannot check it.
+          --
+          -- game_sessions has no submitted_at — created_at is the
+          -- moment the row was written, which for a solo run is the
+          -- moment the clock ran out. It is nullable (DEFAULT NOW()
+          -- rather than NOT NULL), and a row with no timestamp cannot
+          -- be tie-broken, so it does not rank.
+          --
+          -- The config equality is the comparability rule from §1.
+          -- EXISTS rather than a scalar subquery, for the reason the
+          -- branches above give: this subquery is rescanned once per
+          -- player. A NULL config_key matches no row and so does not
+          -- qualify — it fails closed, which is the direction to fail
+          -- in, and index.html always writes one.
+          (SELECT g.score, g.created_at AS submitted_at
+             FROM public.game_sessions g
+            WHERE g.user_id          = pr.id
+              AND g.duration_seconds = c_duration
+              AND g.score            IS NOT NULL
+              AND g.created_at       IS NOT NULL
+              AND EXISTS (SELECT 1 FROM public.game_configs gc
+                           WHERE gc.key    = g.config_key
+                             AND gc.config = v_std_cfg)
+            ORDER BY g.score DESC, g.created_at ASC
+            LIMIT 1)
         ) x
         -- One row per player: their best across both sources. A
         -- player's own second-best run must never displace somebody
@@ -310,7 +373,7 @@ BEGIN
     -- than midnight UTC.
     --
     -- The only difference between them is board 1 being the daily
-    -- alone. That is one flag rather than a third copy of the query,
+    -- alone. That is one flag rather than a second copy of the query,
     -- because the three rules in the header have to be the same three
     -- rules on every tab, and the way to guarantee that is for there
     -- to be one place they are written.
@@ -319,7 +382,7 @@ BEGIN
     -- Half-open on a UTC day boundary, matching daily_today().
     v_from      := (v_today::TIMESTAMP AT TIME ZONE 'UTC');
     v_to        := v_from + INTERVAL '1 day';
-    v_duels     := (p_scope = 'today');
+    v_wide      := (p_scope = 'today');
 
     WITH per_source AS (
       -- The window is applied to puzzle_date, not submitted_at: an
@@ -364,7 +427,7 @@ BEGIN
         SELECT DISTINCT ON (r.user_id)
                r.user_id, r.score, r.submitted_at
         FROM public.duel_runs r
-        WHERE v_duels
+        WHERE v_wide
           AND r.status       = 'complete'
           AND r.user_id      IS NOT NULL
           AND r.score        IS NOT NULL
@@ -383,6 +446,38 @@ BEGIN
                 WHERE u.id = r.duel_id) = c_duration
         ORDER BY r.user_id, r.score DESC, r.submitted_at ASC
       ) k
+
+      UNION ALL
+
+      -- Board 2 only, and the forgeable source — see §1. A solo run
+      -- is windowed on created_at, which is the only timestamp the
+      -- table has and is written when the clock runs out.
+      --
+      -- Anonymous runs carry user_id NULL and are excluded here as
+      -- well as by the profiles join below; stated in the predicate
+      -- anyway so the index can be partial on it.
+      --
+      -- A scalar subquery for the config, not EXISTS, for the reason
+      -- the duel branch above gives: this query runs once rather than
+      -- once per player, so the SubPlan is a per-row primary-key probe
+      -- into game_configs instead of a hash of the whole table. A
+      -- missing or NULL config_key yields NULL, and NULL = the default
+      -- config is NULL, which is not true — so the run is excluded.
+      SELECT * FROM (
+        SELECT DISTINCT ON (g.user_id)
+               g.user_id, g.score, g.created_at AS submitted_at
+        FROM public.game_sessions g
+        WHERE v_wide
+          AND g.user_id          IS NOT NULL
+          AND g.score            IS NOT NULL
+          AND g.duration_seconds = c_duration
+          AND g.created_at      >= v_from
+          AND g.created_at      <  v_to
+          AND (SELECT gc.config
+                 FROM public.game_configs gc
+                WHERE gc.key = g.config_key) = v_std_cfg
+        ORDER BY g.user_id, g.score DESC, g.created_at ASC
+      ) s
     ),
     -- One row per player across both sources.
     best AS (
@@ -493,6 +588,33 @@ CREATE INDEX IF NOT EXISTS idx_duel_runs_submitted
   ON public.duel_runs (submitted_at DESC)
   INCLUDE (user_id, score, duel_id)
   WHERE status = 'complete' AND user_id IS NOT NULL;
+
+-- The solo side of both boards. game_sessions is the largest of the
+-- three tables — every timed game anybody has ever played, signed in
+-- or not — and before this file nothing indexed it by score at all:
+-- idx_sessions_user is (user_id, created_at DESC), which is the
+-- dashboard's "my recent games" and answers neither question here.
+--
+-- Both are partial on duration_seconds = 120, a constant predicate,
+-- so the index holds only rows that can ever rank. config_key is
+-- INCLUDEd rather than indexed — it is part of no ordering, but the
+-- comparability lookup needs it, and carrying it is what keeps the
+-- scan index-only.
+CREATE INDEX IF NOT EXISTS idx_sessions_global
+  ON public.game_sessions (user_id, score DESC, created_at ASC)
+  INCLUDE (config_key)
+  WHERE duration_seconds = 120;
+
+CREATE INDEX IF NOT EXISTS idx_sessions_global_recent
+  ON public.game_sessions (created_at DESC)
+  INCLUDE (user_id, score, config_key)
+  WHERE duration_seconds = 120;
+
+-- Deliberately NOT indexed: game_configs.config. The comparability
+-- rule compares a whole JSONB document for equality, which no btree
+-- can serve — but it is only ever evaluated against a config_key that
+-- has already been resolved by primary key, one row at a time, so
+-- there is nothing for an index to accelerate.
 
 -- The all-time board's driving scan is `profiles WHERE username IS
 -- NOT NULL`, which is every row of the table. Nothing to index — but
