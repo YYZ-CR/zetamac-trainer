@@ -302,6 +302,113 @@ $$;
 
 REVOKE ALL ON FUNCTION public.duel_steal_score(UUID, TEXT) FROM PUBLIC;
 
+-- ── 5a. Steal pace points ───────────────────────────────────────
+-- The same curve duel_pace_points draws for a classic duel, for a
+-- steal duel, from the one table that knows when anything happened.
+--
+-- WHY A SECOND FUNCTION AT ALL. duel_pace_points reads
+-- duel_runs.answers, and a steal run has nothing useful there: the
+-- answers array is still stored (submit_duel_run §8 keeps parsing it)
+-- but it is the client's account of what it typed, and in steal mode it
+-- is not what scored. A player can answer every question correctly and
+-- win none of them. Drawing the pace graph from that array would draw a
+-- line that disagrees with the number in the card above it — and in
+-- practice a steal client never sends one at all, so the array is empty
+-- and the graph silently fell back to two flat "final scores only"
+-- lines. The timeline exists; it is here.
+--
+-- THE SHAPE IS THE CONTRACT: a JSONB array of numbers, seconds with one
+-- decimal, ascending, times only. No question index, no winner, no
+-- value — identical to duel_pace_points, because js/duel.js reads both
+-- through one code path (duelPointsOf) and a second shape would be a
+-- second client.
+--
+-- ── The x-axis, which is the only hard part ──
+--
+-- duel_points.elapsed_ms is time since THAT QUESTION was rendered, not
+-- since the run began. It is therefore NOT a cumulative axis, and a
+-- running SUM() of it is the wrong answer twice over: it drops the gap
+-- between one question being decided and the next appearing (so the
+-- curve runs progressively ahead of the wall clock), and for a question
+-- this side lost it would be charging this side the WINNER's time.
+--
+-- What the axis actually wants is "seconds since this run started", and
+-- the server already knows that for every point without asking anybody:
+--
+--     t_i = awarded_at(i) - duel_runs.started_at(side)
+--
+-- awarded_at is the instant the first claim for question i landed, on
+-- the server's own clock — the same column §6 clamps against and the
+-- same one it deliberately refuses to move when a claim is replaced
+-- inside the grace window. Three properties make it the right source:
+--
+--   * It is the server's number, not the client's. elapsed_ms is a
+--     client-supplied value that has been clamped; awarded_at is
+--     observed. Scores in this project are never taken from the client
+--     and neither is the axis they are plotted against.
+--   * It ascends by construction. A claim for index i+1 is only
+--     accepted once index i has a row (§6 derives the current index as
+--     MAX(question_index) + 1), so awarded_at strictly increases with
+--     question_index and the array comes out sorted whichever side won
+--     what. The ORDER BY below is belt and braces, and it also absorbs
+--     the one case where the two could disagree: awarded_at is shared
+--     by both sides of a contested question, so a point replaced inside
+--     the grace window carries the FIRST claim's timestamp.
+--   * It is one instant per question, so both players' lines share a
+--     time base. That is what makes the tinted lead-change fill mean
+--     something.
+--
+-- Measured from each side's OWN started_at, not from a single duel-wide
+-- origin: the curve js/duel.js draws is banked × duration ÷ elapsed,
+-- where elapsed is that player's own time into their own run. Both
+-- sides of a steal duel start off one shared countdown so the two
+-- origins are normally the same instant anyway; where they are not,
+-- each line is still honest about the run it describes.
+--
+-- GREATEST(0, …) rather than a raw difference: a point can carry an
+-- awarded_at from the other side's first claim (see above), which in
+-- the pathological case of two very differently-timed starts could sit
+-- a fraction of a second before this side's started_at. A negative
+-- second is not a thing that happened, and the client's `x > 0` gate
+-- would drop it silently rather than visibly.
+--
+-- Same posture as duel_steal_score: SECURITY DEFINER over a table with
+-- RLS and no policies, search_path pinned, and no grant to anon or
+-- authenticated. It is called from duel_public_payload, which is where
+-- the reveal gate lives — this function has no gate of its own and must
+-- never be reachable without one.
+CREATE OR REPLACE FUNCTION public.duel_steal_pace_points(
+  p_duel_id UUID,
+  p_side    TEXT
+)
+RETURNS JSONB
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT COALESCE(jsonb_agg(z.t ORDER BY z.t), '[]'::JSONB)
+  FROM (
+    -- round() OUTERMOST, so every element comes out with a scale of
+    -- exactly 1 and serialises as "7.4" / "4.0". GREATEST last would
+    -- hand back the bare 0::NUMERIC on a clamped row and emit "0"
+    -- among a column of one-decimal numbers.
+    SELECT round(
+             GREATEST(0::NUMERIC,
+                      EXTRACT(EPOCH FROM (p.awarded_at - r.started_at))::NUMERIC),
+             1) AS t
+    FROM public.duel_points p
+    JOIN public.duel_runs  r
+      ON r.duel_id = p.duel_id
+     AND r.side    = p_side
+    WHERE p.duel_id     = p_duel_id
+      AND p.winner_side = p_side
+      AND r.started_at IS NOT NULL
+  ) z;
+$$;
+
+REVOKE ALL ON FUNCTION public.duel_steal_pace_points(UUID, TEXT) FROM PUBLIC;
+
 -- ── 6. claim_duel_point ─────────────────────────────────────────
 -- The whole of arbitration, in one function.
 --
@@ -588,17 +695,27 @@ GRANT EXECUTE ON FUNCTION public.claim_duel_point(TEXT, TEXT, INTEGER, INTEGER, 
   TO anon, authenticated;
 
 -- ── 7. The public face, with steal scores ───────────────────────
--- Verbatim duels.sql §4 with one change, marked below: for a steal
--- duel the two scores are counted from duel_points instead of read
--- from duel_runs.score.
+-- Verbatim duels.sql §4 with ONE change, marked below — but that one
+-- change covers both numbers a steal duel reports differently:
+--
+--   * the two scores are counted from duel_points instead of read from
+--     duel_runs.score, and
+--   * the two pace-point arrays are derived from duel_points'
+--     awarded_at instead of from duel_runs.answers.
+--
+-- They are the same change because they are the same fact: in a steal
+-- duel, duel_points is the record of what happened and duel_runs.answers
+-- is not. Both are decided in one IF on v_d.mode, so the score a side is
+-- shown and the curve drawn under it can never come from different
+-- sources.
 --
 -- Replacing the function rather than adding a second one keeps the
 -- "no scores until both are done" rule with exactly one
 -- implementation, which is the property duels.sql was built around.
--- The reveal gate, the walkover/unplayed outcome types, the pace
--- points and everything the payload refuses to emit are unchanged —
--- a finished steal duel reveals its scores under exactly the same
--- rule as a classic one.
+-- The reveal gate, the walkover/unplayed outcome types and everything
+-- the payload refuses to emit are unchanged — a finished steal duel
+-- reveals its scores, and its timeline, under exactly the same rule as
+-- a classic one, and reveals neither one second early.
 CREATE OR REPLACE FUNCTION public.duel_public_payload(
   p_duel_id UUID,
   p_uid     UUID,
@@ -621,6 +738,8 @@ DECLARE
   v_o_result BOOLEAN;
   v_c_score  INTEGER;
   v_o_score  INTEGER;
+  v_c_points JSONB;
+  v_o_points JSONB;
   v_reveal   BOOLEAN;
   v_role     TEXT;
   v_outcome  JSONB;
@@ -652,18 +771,32 @@ BEGIN
   v_o_result := v_o_found AND v_o.status IN ('complete', 'expired');
 
   -- ---- the one change from duels.sql §4 -----------------------------------
-  -- Where the score comes from. For a classic duel it is the number
-  -- submit_duel_run recomputed from the stored questions; for a steal
-  -- duel it is the number of points that side actually won, counted
-  -- on the server from duel_points. Neither is ever the client's
-  -- opinion, and everything downstream of here — the reveal gate, the
-  -- outcome, the walkover — is identical for both.
+  -- Where the score, and the curve under it, come from.
+  --
+  -- For a classic duel the score is the number submit_duel_run
+  -- recomputed from the stored questions, and the pace points are the
+  -- times in duel_runs.answers at which each question was first banked
+  -- correctly. For a steal duel both come from duel_points: the score
+  -- is the number of questions that side actually won, and the pace
+  -- points are the seconds at which it won them. A steal run never
+  -- writes a useful answers array — winning is not answering — so
+  -- duel_pace_points would return [] and the graph would fall back to
+  -- two flat lines it has no need to draw.
+  --
+  -- Neither number is ever the client's opinion, both are decided
+  -- together so they can never disagree about which game this was, and
+  -- everything downstream of here — the reveal gate, the outcome, the
+  -- walkover — is identical for both modes.
   IF v_d.mode = 'steal' THEN
-    v_c_score := public.duel_steal_score(v_d.id, 'creator');
-    v_o_score := public.duel_steal_score(v_d.id, 'opponent');
+    v_c_score  := public.duel_steal_score(v_d.id, 'creator');
+    v_o_score  := public.duel_steal_score(v_d.id, 'opponent');
+    v_c_points := public.duel_steal_pace_points(v_d.id, 'creator');
+    v_o_points := public.duel_steal_pace_points(v_d.id, 'opponent');
   ELSE
-    v_c_score := v_c.score;
-    v_o_score := v_o.score;
+    v_c_score  := v_c.score;
+    v_o_score  := v_o.score;
+    v_c_points := public.duel_pace_points(v_d.questions, v_c.answers);
+    v_o_points := public.duel_pace_points(v_d.questions, v_o.answers);
   END IF;
 
   v_reveal := (v_c_result AND v_o_result) OR v_now > v_d.expires_at;
@@ -722,8 +855,10 @@ BEGIN
                            THEN to_char(v_c.submitted_at AT TIME ZONE 'UTC',
                                         'YYYY-MM-DD"T"HH24:MI:SS"Z"') END,
       'score',        CASE WHEN v_reveal AND v_c_result THEN v_c_score END,
-      'points',       CASE WHEN v_reveal AND v_c_found
-                           THEN public.duel_pace_points(v_d.questions, v_c.answers) END,
+      -- The reveal gate, unchanged and deliberately not relaxed for
+      -- steal mode: a per-question timeline is still a chase target
+      -- while the other side is playing, whichever table it came from.
+      'points',       CASE WHEN v_reveal AND v_c_found THEN v_c_points END,
       'username',     v_c_name,
       'is_you',       v_role = 'creator'),
     'opponent',         jsonb_build_object(
@@ -733,8 +868,7 @@ BEGIN
                            THEN to_char(v_o.submitted_at AT TIME ZONE 'UTC',
                                         'YYYY-MM-DD"T"HH24:MI:SS"Z"') END,
       'score',        CASE WHEN v_reveal AND v_o_result THEN v_o_score END,
-      'points',       CASE WHEN v_reveal AND v_o_found
-                           THEN public.duel_pace_points(v_d.questions, v_o.answers) END,
+      'points',       CASE WHEN v_reveal AND v_o_found THEN v_o_points END,
       'username',     v_o_name,
       'is_you',       v_role = 'opponent')
   );
@@ -756,10 +890,14 @@ REVOKE ALL ON FUNCTION public.duel_public_payload(UUID, UUID, TEXT) FROM PUBLIC;
 -- supplied the raw material for, which is the one thing this project
 -- does not do.
 --
--- The answers array is still parsed, still filtered and still stored:
--- it is what duel_pace_points draws the curve from, and it is still
--- the client's claim rather than the server's finding. It just no
--- longer decides the score.
+-- The answers array is still parsed, still filtered and still stored,
+-- because it is the record of what this player typed and it costs
+-- nothing to keep. It decides nothing in a steal duel: not the score
+-- (counted here from duel_points) and not the pace graph either — §7
+-- draws that from duel_points.awarded_at, because a steal client
+-- answering a question it went on to lose has no banked time to plot
+-- and a steal client that never sends an answers array at all would
+-- otherwise get an empty curve.
 CREATE OR REPLACE FUNCTION public.submit_duel_run(
   p_key         TEXT,
   p_guest_token TEXT,

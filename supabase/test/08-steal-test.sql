@@ -1153,4 +1153,340 @@ BEGIN
   RAISE NOTICE '--- posture OK ---';
 END $$;
 
+-- ════════════════════════════════════════════════════════════════
+-- 12. The pace graph of a steal duel
+--
+-- The results page draws projected score over the run, one line per
+-- player. For a classic duel duel_public_payload fills each side's
+-- `points` from duel_pace_points(questions, duel_runs.answers). A steal
+-- run has nothing useful in that column — both players answer the same
+-- question and only one banks it, and a steal client has no reason to
+-- send an answers array at all — so that expression returns [] and a
+-- real steal duel came back as
+--
+--     {"creator":{"score":8,"points":[]},"opponent":{"score":21,"points":[]}}
+--
+-- which the client honestly labels "Final scores only" and draws as two
+-- flat dashed lines. The timeline exists; it is duel_points.
+--
+-- What this section pins:
+--
+--   * the exact array, to the decimal, for a fixture whose award times
+--     are driven to known instants — not that "some points came back";
+--   * that it is TIMES ONLY: JSON numbers, never objects, never an
+--     index or a winner;
+--   * ascending;
+--   * split by side, and [] — an empty array, not null — for a side
+--     that won nothing;
+--   * measured from each side's OWN duel_runs.started_at;
+--   * nothing at all before the reveal gate opens;
+--   * that classic duels still draw from the answers array.
+--
+-- Time is driven, never waited for, exactly as everywhere above:
+-- awarded_at is moved to a known offset from started_at and the
+-- expected seconds follow arithmetically.
+-- ════════════════════════════════════════════════════════════════
+
+-- Pin an awarded point to an exact number of seconds after the CREATOR's
+-- run began. pg_temp.steal_open starts both runs at one instant, so for
+-- every fixture but the skew block below that is also the opponent's
+-- origin.
+--
+-- settled_at moves with it, keeping the offset it was written with: the
+-- grace window is a property of the award, and a fixture that moved one
+-- column and not the other would describe a point that was settled
+-- before it was awarded.
+CREATE OR REPLACE FUNCTION pg_temp.pin_point(p_key TEXT, i INT, p_secs NUMERIC)
+RETURNS VOID LANGUAGE plpgsql AS $$
+DECLARE d UUID; base TIMESTAMPTZ; n INT;
+BEGIN
+  SELECT id INTO d FROM public.duels WHERE duel_key = p_key;
+  SELECT started_at INTO base FROM public.duel_runs
+   WHERE duel_id = d AND side = 'creator';
+  PERFORM pg_temp.ok(base IS NOT NULL, 'fixture: the creator''s run has a started_at to pin against');
+
+  UPDATE public.duel_points
+     SET settled_at = base + make_interval(secs => p_secs) + (settled_at - awarded_at),
+         awarded_at = base + make_interval(secs => p_secs)
+   WHERE duel_id = d AND question_index = i;
+  GET DIAGNOSTICS n = ROW_COUNT;
+  PERFORM pg_temp.ok(n = 1,
+    'fixture: question ' || i || ' was awarded ' || p_secs || ' s into the run');
+END $$;
+
+-- Everything that is true of a pace array whatever it contains. Kept in
+-- one place so every block below asserts the whole shape rather than
+-- the one property it happens to be about.
+CREATE OR REPLACE FUNCTION pg_temp.pace_shape_ok(p_pts JSONB, p_who TEXT)
+RETURNS VOID LANGUAGE plpgsql AS $$
+DECLARE n INT; sorted JSONB;
+BEGIN
+  -- COALESCE, not a bare comparison: `->` on a missing key returns SQL
+  -- NULL and jsonb_typeof(NULL) is NULL, so `<> 'array'` would never
+  -- fire and a payload that dropped the key entirely would pass.
+  PERFORM pg_temp.ok(COALESCE(jsonb_typeof(p_pts), 'absent') = 'array',
+    p_who || ': points is a JSON array');
+
+  SELECT COUNT(*) INTO n FROM jsonb_array_elements(p_pts) AS x(e)
+   WHERE jsonb_typeof(x.e) IS DISTINCT FROM 'number';
+  PERFORM pg_temp.ok(n = 0,
+    p_who || ': every element is a JSON number — times only, not {index, winner, value} objects');
+
+  SELECT COUNT(*) INTO n FROM jsonb_array_elements(p_pts) AS x(e)
+   WHERE (x.e #>> '{}') !~ '^[0-9]+\.[0-9]$';
+  PERFORM pg_temp.ok(n = 0,
+    p_who || ': every element is a non-negative number of seconds written to exactly one decimal');
+
+  SELECT COALESCE(jsonb_agg(x.e ORDER BY (x.e #>> '{}')::NUMERIC), '[]'::JSONB)
+    INTO sorted FROM jsonb_array_elements(p_pts) AS x(e);
+  PERFORM pg_temp.ok(sorted = p_pts, p_who || ': the times are already ascending');
+END $$;
+
+-- The exact array, both sides, from award times driven to known instants.
+DO $$
+DECLARE
+  k TEXT; d UUID; r JSONB; v JSONB; qs JSONB; ans JSONB; n INT;
+BEGIN
+  -- 60 s of run behind us: every pinned award below lands inside it, and
+  -- the clamp ceiling stays far above the times claimed.
+  k := pg_temp.steal_open('hexadecimal', 'player6', INTERVAL '60 seconds');
+  d := pg_temp.did(k);
+
+  SELECT COUNT(DISTINCT started_at) INTO n FROM public.duel_runs WHERE duel_id = d;
+  PERFORM pg_temp.ok(n = 1,
+    'fixture: both runs share one started_at, so both lines share one origin');
+
+  -- Creator takes 0, 1, 3. Opponent takes 2, 4. Each award is pinned to
+  -- its instant before the next question is claimed, which also puts it
+  -- well outside the grace window.
+  PERFORM pg_temp.as_user('hexadecimal');
+  r := pg_temp.claim(k, NULL, 0, pg_temp.qans(k, 0), 300);
+  PERFORM pg_temp.ok((r->>'ok')::BOOLEAN IS TRUE, 'fixture: the creator took question 0');
+  PERFORM pg_temp.pin_point(k, 0, 1.24);
+
+  r := pg_temp.claim(k, NULL, 1, pg_temp.qans(k, 1), 300);
+  PERFORM pg_temp.ok((r->>'ok')::BOOLEAN IS TRUE, 'fixture: the creator took question 1');
+  PERFORM pg_temp.pin_point(k, 1, 4.0);
+
+  PERFORM pg_temp.as_user('player6');
+  r := pg_temp.claim(k, NULL, 2, pg_temp.qans(k, 2), 300);
+  PERFORM pg_temp.ok((r->>'ok')::BOOLEAN IS TRUE, 'fixture: the opponent took question 2');
+  PERFORM pg_temp.pin_point(k, 2, 7.4);
+
+  PERFORM pg_temp.as_user('hexadecimal');
+  r := pg_temp.claim(k, NULL, 3, pg_temp.qans(k, 3), 300);
+  PERFORM pg_temp.ok((r->>'ok')::BOOLEAN IS TRUE, 'fixture: the creator took question 3');
+  PERFORM pg_temp.pin_point(k, 3, 10.06);
+
+  PERFORM pg_temp.as_user('player6');
+  r := pg_temp.claim(k, NULL, 4, pg_temp.qans(k, 4), 300);
+  PERFORM pg_temp.ok((r->>'ok')::BOOLEAN IS TRUE, 'fixture: the opponent took question 4');
+  PERFORM pg_temp.pin_point(k, 4, 12.9);
+
+  PERFORM pg_temp.ok(pg_temp.pt_count(k, 'creator')  = 3, 'fixture: three creator awards');
+  PERFORM pg_temp.ok(pg_temp.pt_count(k, 'opponent') = 2, 'fixture: two opponent awards');
+
+  -- ---- before the reveal gate opens ----------------------------------
+  -- One side has not even submitted. A per-question timeline is a chase
+  -- target exactly like a score, and this is the assertion that says the
+  -- new source did not come with a new hole.
+  PERFORM pg_temp.as_user('hexadecimal');
+  v := public.get_duel_by_key(k, NULL);
+  PERFORM pg_temp.ok((v->>'scores_revealed')::BOOLEAN IS FALSE,
+    'fixture: nothing is revealed while both sides are still running');
+  PERFORM pg_temp.ok(COALESCE(jsonb_typeof(v->'creator'->'points'), 'absent') IN ('null', 'absent'),
+    'no creator timeline before the reveal gate opens');
+  PERFORM pg_temp.ok(COALESCE(jsonb_typeof(v->'opponent'->'points'), 'absent') IN ('null', 'absent'),
+    'and no opponent timeline either');
+
+  -- Both sides finish, each claiming forty correct answers at 0.1 s
+  -- intervals. If the payload were still drawing from the answers array
+  -- the creator's line would come back as [0.1, 0.2, ... 4.0] — so this
+  -- payload is the discriminator, not just filler to open the gate.
+  SELECT questions INTO qs FROM public.duels WHERE id = d;
+  SELECT jsonb_agg(jsonb_build_object(
+           'i', j, 'value', (qs->j->>'answer')::INT, 'elapsed_ms', (j + 1) * 100
+         ) ORDER BY j)
+    INTO ans FROM generate_series(0, 39) j;
+
+  PERFORM pg_temp.as_user('hexadecimal');
+  PERFORM public.submit_duel_run(k, NULL, ans);
+  PERFORM pg_temp.as_user('player6');
+  PERFORM public.submit_duel_run(k, NULL, ans);
+
+  -- ---- the arrays ----------------------------------------------------
+  v := public.get_duel_by_key(k, NULL);
+  PERFORM pg_temp.ok((v->>'scores_revealed')::BOOLEAN IS TRUE, 'fixture: both runs are in');
+  PERFORM pg_temp.ok(v->>'mode' = 'steal', 'fixture: and it is still a steal duel');
+
+  PERFORM pg_temp.pace_shape_ok(v->'creator'->'points',  'creator');
+  PERFORM pg_temp.pace_shape_ok(v->'opponent'->'points', 'opponent');
+
+  PERFORM pg_temp.ok(v->'creator'->'points' = '[1.2, 4.0, 10.1]'::JSONB,
+    'the creator''s pace points are exactly the seconds they won their three questions at');
+  PERFORM pg_temp.ok(v->'opponent'->'points' = '[7.4, 12.9]'::JSONB,
+    'and the opponent''s are exactly the two they won');
+
+  -- Said again from the other direction: whatever those arrays are, they
+  -- are NOT the answers payload both sides submitted.
+  PERFORM pg_temp.ok(v->'creator'->'points' <> '[0.1, 0.2, 0.3]'::JSONB
+                 AND NOT (v->'creator'->'points' @> '[0.1]'::JSONB),
+    'the creator''s line is not drawn from the 40 answers they claimed at 0.1 s apart');
+  PERFORM pg_temp.ok(NOT (v->'opponent'->'points' @> '[0.1]'::JSONB),
+    'nor is the opponent''s');
+
+  -- The two numbers on the same card have to agree: in steal mode both
+  -- are COUNT(*) over the same rows, so a line with more points than the
+  -- score is a line drawn from somewhere else.
+  PERFORM pg_temp.ok(
+    jsonb_array_length(v->'creator'->'points') = (v->'creator'->>'score')::INT,
+    'the creator''s line has exactly as many points as the score printed above it');
+  PERFORM pg_temp.ok(
+    jsonb_array_length(v->'opponent'->'points') = (v->'opponent'->>'score')::INT,
+    'and so does the opponent''s');
+  PERFORM pg_temp.ok((v->'creator'->>'score')::INT = 3, 'creator 3');
+  PERFORM pg_temp.ok((v->'opponent'->>'score')::INT = 2, 'opponent 2');
+
+  -- Still no answer key, by any route.
+  PERFORM pg_temp.ok(NOT (v ? 'questions'), 'the payload still carries no questions');
+  PERFORM pg_temp.ok(NOT (v->'creator' ? 'answers'), 'and no answers array');
+
+  RAISE NOTICE '--- steal pace points: exact arrays OK ---';
+END $$;
+
+-- A side that won nothing gets an empty array, not null and not the
+-- other side's line.
+DO $$
+DECLARE k TEXT; r JSONB; v JSONB;
+BEGIN
+  k := pg_temp.steal_open('hexadecimal', 'player6', INTERVAL '60 seconds');
+
+  PERFORM pg_temp.as_user('hexadecimal');
+  r := pg_temp.claim(k, NULL, 0, pg_temp.qans(k, 0), 300);
+  PERFORM pg_temp.ok((r->>'ok')::BOOLEAN IS TRUE, 'fixture: the creator took question 0');
+  PERFORM pg_temp.pin_point(k, 0, 2.0);
+  r := pg_temp.claim(k, NULL, 1, pg_temp.qans(k, 1), 300);
+  PERFORM pg_temp.ok((r->>'ok')::BOOLEAN IS TRUE, 'fixture: and question 1');
+  PERFORM pg_temp.pin_point(k, 1, 5.0);
+  PERFORM pg_temp.ok(pg_temp.pt_count(k, 'opponent') = 0, 'fixture: the opponent won nothing');
+
+  PERFORM public.submit_duel_run(k, NULL, '[]'::JSONB);
+  PERFORM pg_temp.as_user('player6');
+  PERFORM public.submit_duel_run(k, NULL, '[]'::JSONB);
+
+  v := public.get_duel_by_key(k, NULL);
+  PERFORM pg_temp.ok((v->>'scores_revealed')::BOOLEAN IS TRUE, 'fixture: both runs are in');
+  PERFORM pg_temp.pace_shape_ok(v->'creator'->'points',  'creator');
+  PERFORM pg_temp.pace_shape_ok(v->'opponent'->'points', 'opponent');
+  PERFORM pg_temp.ok(v->'creator'->'points' = '[2.0, 5.0]'::JSONB,
+    'the creator''s two points are at 2.0 s and 5.0 s');
+  PERFORM pg_temp.ok(v->'opponent'->'points' = '[]'::JSONB,
+    'a side that won nothing gets an empty array — not null, and not the other side''s times');
+  PERFORM pg_temp.ok((v->'opponent'->>'score')::INT = 0, 'and a score of 0 to match');
+
+  RAISE NOTICE '--- steal pace points: a side that won nothing OK ---';
+END $$;
+
+-- Each line is measured from ITS OWN run's started_at.
+--
+-- The discriminating fixture: the opponent's run begins 5 s after the
+-- creator's, and the one point they win is awarded 20 s into the
+-- creator's run. Relative to their own start that is 15.0 s. An
+-- implementation that measures every point from the creator's clock, or
+-- from the duel's creation, reports 20.0 and passes every block above.
+DO $$
+DECLARE k TEXT; d UUID; r JSONB; v JSONB; n INT;
+BEGIN
+  k := pg_temp.steal_open('hexadecimal', 'player6', INTERVAL '60 seconds');
+  d := pg_temp.did(k);
+
+  UPDATE public.duel_runs SET started_at = started_at + INTERVAL '5 seconds'
+   WHERE duel_id = d AND side = 'opponent';
+  GET DIAGNOSTICS n = ROW_COUNT;
+  PERFORM pg_temp.ok(n = 1, 'fixture: the opponent''s run starts 5 s after the creator''s');
+
+  PERFORM pg_temp.as_user('hexadecimal');
+  r := pg_temp.claim(k, NULL, 0, pg_temp.qans(k, 0), 300);
+  PERFORM pg_temp.ok((r->>'ok')::BOOLEAN IS TRUE, 'fixture: the creator took question 0');
+  PERFORM pg_temp.pin_point(k, 0, 10.0);
+
+  PERFORM pg_temp.as_user('player6');
+  r := pg_temp.claim(k, NULL, 1, pg_temp.qans(k, 1), 300);
+  PERFORM pg_temp.ok((r->>'ok')::BOOLEAN IS TRUE, 'fixture: the opponent took question 1');
+  PERFORM pg_temp.pin_point(k, 1, 20.0);
+
+  -- Empty answers arrays: in a classic duel these would give two empty
+  -- lines, so anything that comes back came from duel_points.
+  PERFORM public.submit_duel_run(k, NULL, '[]'::JSONB);
+  PERFORM pg_temp.as_user('hexadecimal');
+  PERFORM public.submit_duel_run(k, NULL, '[]'::JSONB);
+
+  v := public.get_duel_by_key(k, NULL);
+  PERFORM pg_temp.ok((v->>'scores_revealed')::BOOLEAN IS TRUE, 'fixture: both runs are in');
+  PERFORM pg_temp.pace_shape_ok(v->'creator'->'points',  'creator');
+  PERFORM pg_temp.pace_shape_ok(v->'opponent'->'points', 'opponent');
+
+  PERFORM pg_temp.ok(v->'creator'->'points' = '[10.0]'::JSONB,
+    'the creator''s point is 10.0 s into the creator''s run');
+  PERFORM pg_temp.ok(v->'opponent'->'points' = '[15.0]'::JSONB,
+    'the opponent''s point is 15.0 s into the OPPONENT''s run, not 20.0 s into the creator''s');
+  PERFORM pg_temp.ok(v->'opponent'->'points' <> '[20.0]'::JSONB,
+    'stated the other way, because measuring both sides from one clock passes every other block here');
+
+  RAISE NOTICE '--- steal pace points: per-side origin OK ---';
+END $$;
+
+-- Classic duels still draw from the answers array. The steal branch is
+-- an addition, and the regression it could cause is silent: a classic
+-- duel whose points came from an empty duel_points table would return
+-- [] and quietly become "Final scores only".
+DO $$
+DECLARE k TEXT; r JSONB; v JSONB;
+BEGIN
+  PERFORM pg_temp.as_user('hexadecimal');
+  k := (public.create_duel(120))->>'duel_key';
+  PERFORM pg_temp.ok((SELECT mode FROM public.duels WHERE duel_key = k) = 'classic',
+    'fixture: a classic duel');
+
+  -- pg_temp.steal_classic_run answers question j at (j + 1) * 800 ms.
+  r := pg_temp.steal_classic_run(k, NULL, 3);
+  PERFORM pg_temp.ok((r->>'score')::INT = 3, 'fixture: the creator scored 3 of 3');
+  PERFORM pg_temp.as_user('player6');
+  r := pg_temp.steal_classic_run(k, NULL, 2);
+  PERFORM pg_temp.ok((r->>'score')::INT = 2, 'fixture: the opponent scored 2 of 2');
+
+  v := public.get_duel_by_key(k, NULL);
+  PERFORM pg_temp.ok((v->>'scores_revealed')::BOOLEAN IS TRUE, 'fixture: both runs are in');
+  PERFORM pg_temp.pace_shape_ok(v->'creator'->'points',  'classic creator');
+  PERFORM pg_temp.pace_shape_ok(v->'opponent'->'points', 'classic opponent');
+  PERFORM pg_temp.ok(v->'creator'->'points' = '[0.8, 1.6, 2.4]'::JSONB,
+    'a classic duel still draws its line from the answers array, at 0.8/1.6/2.4 s');
+  PERFORM pg_temp.ok(v->'opponent'->'points' = '[0.8, 1.6]'::JSONB,
+    'and so does its opponent');
+  PERFORM pg_temp.ok(pg_temp.pt_count(k, NULL) = 0,
+    'with no duel_points row anywhere near it');
+
+  RAISE NOTICE '--- classic pace points unchanged OK ---';
+END $$;
+
+-- Posture. Asserted by what the function touches rather than by its
+-- name, so it holds for any implementation of this contract.
+DO $$
+DECLARE n INT; bad TEXT;
+BEGIN
+  SELECT COUNT(*), string_agg(p.proname, ', ') INTO n, bad
+    FROM pg_proc p JOIN pg_namespace ns ON ns.oid = p.pronamespace
+   WHERE ns.nspname = 'public'
+     AND p.prosrc LIKE '%duel_points%'
+     AND p.proname <> 'claim_duel_point'
+     AND (has_function_privilege('anon', p.oid, 'EXECUTE')
+       OR has_function_privilege('authenticated', p.oid, 'EXECUTE'));
+  PERFORM pg_temp.ok(n = 0,
+    'claim_duel_point is the ONLY duel_points function the API roles may call — '
+    'everything else reaches the table through duel_public_payload and its reveal gate'
+    || COALESCE(' (offenders: ' || bad || ')', ''));
+
+  RAISE NOTICE '--- steal pace points: posture OK ---';
+END $$;
+
 SELECT 'ALL STEAL CONTRACT TESTS PASSED' AS result;

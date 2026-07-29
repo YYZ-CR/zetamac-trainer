@@ -31,7 +31,9 @@ without an account.
 point and *both* players jump to the next question, so every question is a race.
 Arbitration runs on time-since-the-question-appeared, clamped against what the
 server itself observed, because awarding the point to whoever's packet arrived
-first would make it a contest of who has the better connection.
+first would make it a contest of who has the better connection. It ends on the same
+pace graph a classic duel does, drawn from the instant each point was actually won —
+the answers you typed are not the record of a steal duel, the points you took are.
 
 **Leaderboards** at `/leagues.html` — the global boards first, then your clans.
 

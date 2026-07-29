@@ -75,6 +75,31 @@ The scoreline shows usernames rather than "You" and "Them".
 
 ---
 
+## 0b. A steal duel's pace graph was always empty — fixed, needs deploying
+
+`steal.sql`'s `duel_public_payload` swapped the SCORE source to `duel_points` and
+left both `points` keys calling `duel_pace_points(questions, duel_runs.answers)`. A
+steal run never writes a useful `answers` array — winning is not answering — so both
+sides came back `"points": []` and every finished steal duel drew as two flat dashed
+lines captioned "Final scores only". Confirmed against the live database on a real
+duel that returned `creator 8 / opponent 21` with no times at all.
+
+Fixed by `duel_steal_pace_points(duel_id, side)` in `supabase/steal.sql` §5a, which
+returns the identical shape (`[7.4, 12.9]` — seconds to one decimal, ascending, times
+only) derived from `duel_points.awarded_at − duel_runs.started_at`. `elapsed_ms` is
+per-question and is deliberately **not** summed: it would drop the gap between one
+question being decided and the next appearing. `js/duel.js` needed no change; the
+reasoning is in `docs/duels-design.md` §"Steal mode draws the same curve".
+
+- [ ] **Re-apply `supabase/steal.sql`** (and only it — see §1's pairing rule) to pick
+      this up. Until then a finished steal duel keeps drawing the two flat lines,
+      which is the honest fallback and not a broken page.
+- Covered by `supabase/test/08-steal-test.sql` §12, which pins the exact arrays
+  against driven award times. **Those tests have never been executed** — they were
+  written on a machine with no Postgres. First green run is still owed.
+
+---
+
 ## 1. Deploy — all nine migrations are applied
 
 A checker run against the real project reports every file OK. One thing is

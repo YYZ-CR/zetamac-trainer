@@ -168,6 +168,45 @@ the score, and by the time the flag flips, the duel can no longer be replayed �
 De-duplicated per question index, so a question fumbled and then answered correctly
 contributes one point at the time it was finally banked, matching the score.
 
+### Steal mode draws the same curve from a different table
+
+In a steal duel `duel_runs.answers` is not the record of what happened. Both players
+answer the same question and only one of them banks it, so the answers array — the
+client's account of what it typed — is not what scored, and a steal client has no
+reason to send one at all. `duel_pace_points()` fed from it returns `[]`, and for a
+while that is exactly what a finished steal duel returned: two flat "final scores
+only" lines, honestly labelled and wrong, because the timeline did exist.
+
+It lives in `duel_points`, one row per question, holding which side won it and the
+server-clock instant the first claim for it landed. So steal mode has its own
+derivation, `duel_steal_pace_points(duel_id, side)`, returning **exactly** the shape
+`duel_pace_points()` does — a JSONB array of seconds to one decimal, ascending, times
+only. `js/duel.js` reads both through one code path and cannot tell them apart.
+
+The x-axis is `awarded_at − duel_runs.started_at` for that side, and the choice
+matters:
+
+- `duel_points.elapsed_ms` is **per question** — time since that question was
+  rendered, not since the run began — so it is not a cumulative axis. Summing it
+  would drop the gap between one question being decided and the next appearing, and
+  the curve would run steadily ahead of the wall clock.
+- `awarded_at` is the server's own observation, not a number the client supplied and
+  the server clamped. The axis a score is plotted against deserves the same rule the
+  score has.
+- It ascends by construction: a claim for question *i+1* is only accepted once *i*
+  has a row, so `awarded_at` increases with `question_index` whoever won what.
+- It is one instant per question, shared by both sides, so the two lines sit on one
+  time base — which is what makes the tinted lead-change fill mean anything.
+
+Each side is measured from its own `started_at`, because the curve is
+`banked × duration ÷ elapsed` through that player's own run. Both sides of a steal
+duel start off one shared countdown, so the two origins are normally the same
+instant.
+
+The reveal gate is untouched and is the same one the score passes: no times leave the
+server until both runs are in. A steal duel reveals its timeline under exactly the
+rule a classic one does.
+
 The client still falls back to the flat line when a duel predates this, and says so
 in the caption and by drawing that line dashed. A fabricated curve would be a lie in
 the one chart people screenshot.
