@@ -268,19 +268,33 @@ Read the plan's evidence-quality section first. Research was web search only —
 `WebFetch` is blocked by this environment, so no primary source was opened — and
 every claim is labelled evidenced, convention or inference.
 
-Three things from it worth knowing before you spend a weekend on this:
+**The plan was redrafted once the site was finished**, with a second research pass and
+a sound design it did not have. Four things worth knowing before you spend a weekend
+on it:
 
-- **No product in this genre appears to have a brand-made launch video.**
-  Monkeytype started with a rough Reddit post and a streamer picking it up six days
-  later. The video is what you hand a creator; it is not the growth mechanism.
-- **69% of social video is watched muted** (Verizon Media / Publicis Media, 2019,
-  n=5,616). The burned-in text is the script. Skip the voiceover.
-- **Never speed-ramp a shot with the countdown timer in frame.** It is the fastest
-  way to make this specific product look staged.
+- **Ship the steal loop first.** Three seconds, silent, looping: two screens jumping
+  to the next question off one person's keystroke. It needs no captions, no sound and
+  no context, and it is the only thing in the product legible as a loop. If the 60s
+  master never gets finished, that file still has value. The research says the video
+  is not the growth mechanism in this genre — being picked up by somebody with an
+  audience is — so the artefact you can hand somebody matters more than the film.
+- **69% of social video is watched muted *in public places*; in private it is 25%**
+  (Verizon Media / Publicis Media, 2019, n=5,616). The first draft quoted a flat 69%,
+  which overstated it. Burned-in text is still the script; still skip the voiceover.
+- **Never speed-ramp a shot with the countdown timer in frame.** The fastest way to
+  make this specific product look staged.
+- **Cut to 120 BPM at 30fps** — exactly 15 frames per beat and 2 seconds per bar, so
+  the whole edit is describable in frames. 125 and 128 BPM do not divide evenly and
+  will drift.
 
-Two numbers in the plan are unverified and would break the edit if wrong: X's
-free-tier length limit, and the 60-second Shorts ceiling that sets the master's
-length.
+Two corrections the second pass produced: **YouTube Shorts has allowed 3 minutes since
+October 2024**, so the 60-second master is now a judgement about attention rather than
+a platform ceiling; and **X's free tier at 140s is confirmed**. Both were flagged as
+unverified in the first draft.
+
+Two shots in the first draft could not have been filmed as written — a hand-written
+tip `getTip()` does not produce, and a seeded practice run where the weighting is
+already on screen as dots. Both are fixed in the redraft.
 
 ### A product change the video research turned up
 

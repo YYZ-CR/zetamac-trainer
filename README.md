@@ -340,5 +340,8 @@ MIT. See `LICENSE`.
 
 ## Not built
 
-**A demo video.** `docs/demo-video-guide.md` has the structure and the capture
-pipeline worked out; nothing has been shot.
+**A launch video.** `docs/demo-video-plan.md` is the plan for one specific video —
+beat sheet on a 120 BPM frame grid, shot-by-shot script, storyboard, sound design and
+Remotion notes. `docs/demo-video-guide.md` is the general technical reference.
+**Nothing has been shot.** Remotion is deliberately not installed; the plan puts it in
+a separate `video/` project so the root stays build-step-free.
